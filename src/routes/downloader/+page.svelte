@@ -15,21 +15,21 @@
     status: "",
   });
   let selectedDownloads = $state<number[]>([]);
-  let sortBy = $state('name'); // Default sort by name
-  let sortDirection = $state('asc'); // Default ascending
+  let sortBy = $state('name');
+  let sortDirection = $state('asc');
 
   function downloadSelected() {
     selectedDownloads.forEach(id => {
       startDownload(id);
     });
-    selectedDownloads = []; // Clear selection after initiating downloads
+    selectedDownloads = [];
   }
 
   function cancelSelected() {
     selectedDownloads.forEach(id => {
       cancelDownload(id);
     });
-    selectedDownloads = []; // Clear selection after initiating downloads
+    selectedDownloads = [];
   }
 
   function sortDownloads(a: any, b: any) {
@@ -87,7 +87,7 @@
         ? download.category.toLowerCase().includes(filters.category.toLowerCase())
         : true;
 
-      const downloadSize = parseFloat(download.size); // Assuming size is a number or can be parsed
+      const downloadSize = parseFloat(download.size);
       const minSize = parseFloat(filters.minSize);
       const maxSize = parseFloat(filters.maxSize);
 
@@ -226,44 +226,6 @@
     width: 250px;
   }
 
-  
-
-  .filter-settings {
-    background-color: rgba(0, 0, 0, 0.3);
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-  }
-
-  .filter-settings h3 {
-    grid-column: 1 / -1;
-    margin-top: 0;
-    margin-bottom: 10px;
-    color: #eee;
-  }
-
-  .filter-group {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .filter-group label {
-    margin-bottom: 5px;
-    font-size: 0.9em;
-    color: #ccc;
-  }
-
-  .filter-group input {
-    padding: 8px;
-    border-radius: 5px;
-    border: 1px solid #444;
-    background-color: #333;
-    color: var(--white);
-  }
-
   .program-list {
     border: none;
     border-radius: 5px;
@@ -272,23 +234,13 @@
     flex: 1;
   }
 
-    .program-list-header,
-  .program-list-item {
+    .program-list-header {
     display: grid;
     grid-template-columns: 40px 1.5fr 1fr 1fr 1fr 1fr 1fr; /* Icon, Name, Size, File Type, Category, ETA, Status Text */
     padding: 10px;
     align-items: center;
     height: 46px;
     box-sizing: border-box;
-  }
-
-  .program-list-item.selected {
-    background-color: rgba(0, 123, 255, 0.3);
-  }
-
-  .program-list-item:hover {
-    background-color: rgba(0, 123, 255, 0.3);
-    cursor: pointer;
   }
 
   .program-list-header span:nth-child(1) {
@@ -303,53 +255,7 @@
   .program-list-header span:nth-child(4),
   .program-list-header span:nth-child(5),
   .program-list-header span:nth-child(6),
-  .program-list-header span:nth-child(7) { /* ETA and Status */
+  .program-list-header span:nth-child(7) {
     justify-self: end;
-  }
-
-  .program-list-item span:nth-child(1) {
-    justify-self: center;
-  }
-
-  .program-list-item span:nth-child(2),
-  .program-list-item span:nth-child(3) {
-    justify-self: start;
-  }
-
-  .program-list-item .download-actions { /* Actions */
-    justify-self: end;
-  }
-
-  .program-list-item span:nth-child(4) {
-    margin-left: 60px;
-  }
-
-  .download-actions {
-    display: flex;
-    gap: 5px;
-    justify-self: end;
-  }
-
-  
-
-  .action-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .sort-select,
-  .sort-direction-button {
-    padding: 8px 15px;
-    border-radius: 5px;
-    border: 1px solid #333;
-    background-color: #2a2a2a;
-    color: #ffffff;
-    cursor: pointer;
-    transition: background-color 0.2s ease-in-out;
-  }
-
-  .sort-select:hover,
-  .sort-direction-button:hover {
-    background-color: #3a3a3a;
   }
 </style>

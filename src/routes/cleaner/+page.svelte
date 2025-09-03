@@ -384,9 +384,6 @@
     color: var(--avelonia-text);
   }
 
-  .muted { color: var(--avelonia-text-muted); }
-
-  /* Buttons — match Dashboard vibe */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -434,11 +431,9 @@
   <h1 class="text-2xl font-bold mb-4">PC Cleaner & Cloner</h1>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <!-- Cleaner Section -->
     <div class="panel">
       <h2 class="text-xl font-semibold mb-4">Cleaner</h2>
 
-      <!-- Temporary Files -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Temporary Files</h3>
         <button
@@ -490,7 +485,6 @@
         {/if}
       </div>
 
-      <!-- Recycle Bin -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Recycle Bin</h3>
         <button
@@ -502,7 +496,6 @@
         </button>
       </div>
 
-      <!-- Disk Space Info -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Disk Space</h3>
         <p class="text-gray-300">Total: {formatBytes(totalDiskSpace)}</p>
@@ -516,7 +509,6 @@
         </button>
       </div>
 
-      <!-- Large Files -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Large Files (>{formatBytes(100 * 1024 * 1024)})</h3>
         <button
@@ -573,7 +565,6 @@
         {/if}
       </div>
 
-      <!-- Duplicate Files -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Duplicate Files</h3>
         <button
@@ -625,7 +616,6 @@
         {/if}
       </div>
 
-      <!-- Empty Folders -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Empty Folders</h3>
         <button
@@ -677,7 +667,6 @@
         {/if}
       </div>
 
-      <!-- Broken Shortcuts -->
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Broken Shortcuts</h3>
         <button
@@ -730,13 +719,11 @@
       </div>
     </div>
 
-    <!-- Cloner Section (Placeholder) -->
     <div class="panel">
       <h2 class="text-xl font-semibold mb-4">Cloner / Backup</h2>
       <p class="text-gray-400">
         Features for file synchronization and backup will be implemented here.
       </p>
-      <!-- Example: File Sync -->
       <div class="mt-4">
         <h3 class="text-lg font-medium mb-2">File Synchronization</h3>
         <button
@@ -749,7 +736,6 @@
     </div>
   </div>
 
-  <!-- Message Display -->
   {#if message || progressMessage}
     <p class="mt-4 text-center text-gray-300">
       {#if isLoading}
@@ -759,7 +745,6 @@
     </p>
   {/if}
 
-  <!-- Confirmation Modal -->
   {#if showConfirmationModal}
     <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div class="panel max-w-md w-full">
