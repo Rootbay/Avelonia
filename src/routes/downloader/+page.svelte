@@ -2,7 +2,7 @@
   import { downloads } from "$lib/downloads";
   import FilterPanel from '$lib/components/FilterPanel.svelte';
   import DownloadItem from '$lib/components/DownloadItem.svelte';
-  import { startDownload, pauseDownload, resumeDownload, cancelDownload, retryDownload } from '$lib/downloadManager';
+  import { startDownload, cancelDownload } from '$lib/downloadManager';
 
   let searchTerm = $state("");
   let showFilters = $state(false);
@@ -14,23 +14,8 @@
     eta: "",
     status: "",
   });
-  let selectedDownloads = $state<number[]>([]);
   let sortBy = $state('name');
   let sortDirection = $state('asc');
-
-  function downloadSelected() {
-    selectedDownloads.forEach(id => {
-      startDownload(id);
-    });
-    selectedDownloads = [];
-  }
-
-  function cancelSelected() {
-    selectedDownloads.forEach(id => {
-      cancelDownload(id);
-    });
-    selectedDownloads = [];
-  }
 
   function sortDownloads(a: any, b: any) {
     let valA: any;
@@ -116,8 +101,6 @@
   const totalDownloads = $derived($downloads.length);
   const availableDownloads = $derived(filteredDownloads.length);
 
-  
-
   function handleClearFilters() {
     searchTerm = "";
     filters.fileType = "";
@@ -133,8 +116,6 @@
   <div class="header-section">
     <p>Downloads available: {availableDownloads} / {totalDownloads}</p>
     <div class="search-filter-group">
-      <button class="px-2.5 py-1.5 rounded-md border-none text-white cursor-pointer transition-colors duration-200 text-sm bg-red-500 hover:bg-red-700" on:click={cancelSelected} disabled={selectedDownloads.length === 0}>Cancel</button>
-      <button class="px-2.5 py-1.5 rounded-md border-none text-white cursor-pointer transition-colors duration-200 text-sm bg-blue-500 hover:bg-blue-700" on:click={downloadSelected} disabled={selectedDownloads.length === 0}>Download</button>
       <input
         type="text"
         placeholder="Search downloads..."
@@ -148,10 +129,10 @@
         <option value="fileType">File Type</option>
         <option value="category">Category</option>
       </select>
-      <button class="px-4 py-2 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer transition-colors duration-200 hover:bg-gray-700" on:click={() => sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'} aria-label={`Sort direction: ${sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}>
+      <button class="px-4 py-2 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer transition-colors duration-200 hover:bg-gray-700" onclick={() => sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'} aria-label={`Sort direction: ${sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}>
         {sortDirection === 'asc' ? 'Asc' : 'Desc'}
       </button>
-      <button class="px-4 py-2 rounded-md border-none bg-blue-500 text-white cursor-pointer transition-colors duration-200 hover:bg-blue-700" on:click={() => (showFilters = !showFilters)}
+      <button class="px-4 py-2 rounded-md border-none bg-blue-500 text-white cursor-pointer transition-colors duration-200 hover:bg-blue-700" onclick={() => (showFilters = !showFilters)}
         >Filter</button
       >
     </div>
@@ -177,12 +158,8 @@
     {#each filteredDownloads as download (download.id)}
       <DownloadItem
         {download}
-        bind:selectedDownloads={selectedDownloads}
         {startDownload}
-        {pauseDownload}
-        {resumeDownload}
         {cancelDownload}
-        {retryDownload}
       />
     {/each}
     {#if filteredDownloads.length === 0}

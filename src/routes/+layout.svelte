@@ -56,12 +56,12 @@
   .app-container {
     display: flex;
     height: 100vh;
-    background-color: var(--color-primary);
+    background-color: var(--background);
   }
 
   .sidebar {
     width: 250px;
-    background-color: var(--color-secondary);
+    background-color: var(--secondary);
     color: white;
     padding: 0;
     box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
@@ -92,8 +92,6 @@
     color: var(--white);
     margin: 0;
   }
-
-  
 
   .nav-links {
     list-style: none;
@@ -148,22 +146,5 @@
     overflow-y: auto;
   }
 
-  :root {
-    --color-primary: #0f0f0f;
-    --color-secondary: #121212;
-    --color-accent: #C64143;
-    font-family: "Inter", Avenir, Helvetica, Arial, sans-serif;
-    font-size: 16px;
-    line-height: 24px;
-    font-weight: 400;
-
-    color: #0f0f0f;
-    background-color: #f6f6f6;
-
-    font-synthesis: none;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    -webkit-text-size-adjust: 100%;
-  }
+  
 </style>

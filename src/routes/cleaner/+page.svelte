@@ -28,13 +28,12 @@
   let showRecycleBinConfirmationModal: boolean = false;
   let filesToDelete: string[] = [];
 
-  let totalDiskSpace: number = 0;
-  let availableDiskSpace: number = 0;
+  let totalDiskSpace: number | null = null;
+  let availableDiskSpace: number | null = null;
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
 
-    // Attach listener; ignore the returned promise for onMount's return type
     listen('scan_progress', (event) => {
       progressMessage = event.payload as string;
     }).then((fn) => {
@@ -326,37 +325,7 @@
  </script>
 
 <style>
-  :global(:root) {
-    --background: hsl(220, 13%, 9%);
-    --foreground: hsl(220, 9%, 85%);
-    --card: hsl(220, 13%, 12%);
-    --card-foreground: hsl(220, 9%, 85%);
-    --primary: hsl(268, 100%, 70%);
-    --primary-foreground: hsl(220, 13%, 9%);
-    --secondary: hsl(220, 13%, 15%);
-    --secondary-foreground: hsl(220, 9%, 85%);
-    --muted: hsl(220, 13%, 15%);
-    --muted-foreground: hsl(220, 9%, 46%);
-    --success: hsl(142, 76%, 36%);
-    --success-foreground: hsl(220, 9%, 85%);
-    --border: hsl(220, 13%, 18%);
-    --avelonia-purple: hsl(268, 100%, 70%);
-    --avelonia-dark: hsl(220, 13%, 9%);
-    --avelonia-darker: hsl(220, 13%, 6%);
-    --avelonia-card: hsl(220, 13%, 12%);
-    --avelonia-border: hsl(220, 13%, 18%);
-    --avelonia-text: hsl(220, 9%, 85%);
-    --avelonia-text-muted: hsl(220, 9%, 46%);
-    --avelonia-success: hsl(142, 76%, 36%);
-    --avelonia-blue: hsl(212, 100%, 50%);
-    --avelonia-warning: hsl(45, 100%, 50%);
-    --avelonia-danger: hsl(0, 84%, 60%);
-    --gradient-purple: linear-gradient(135deg, hsl(268, 100%, 70%) 0%, hsl(268, 100%, 60%) 100%);
-    --gradient-card: linear-gradient(to bottom right, #121212 0%, #16171A 43%, #121316 100%);
-    --shadow-purple: 0 10px 30px -10px hsl(268, 100%, 70%, 0.3);
-    --shadow-card: 0 4px 6px -1px hsl(220, 13%, 6%, 0.4);
-    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
+  
 
   .panel {
     background-color: #121212;
@@ -498,8 +467,12 @@
 
       <div class="mb-6">
         <h3 class="text-lg font-medium mb-2">Disk Space</h3>
-        <p class="text-gray-300">Total: {formatBytes(totalDiskSpace)}</p>
-        <p class="text-gray-300">Available: {formatBytes(availableDiskSpace)}</p>
+        {#if totalDiskSpace !== null}
+          <p class="text-gray-300">Total: {formatBytes(totalDiskSpace)}</p>
+        {/if}
+        {#if availableDiskSpace !== null}
+          <p class="text-gray-300">Available: {formatBytes(availableDiskSpace)}</p>
+        {/if}
         <button
           on:click={getDiskInfo}
           class="btn btn-primary mt-2"

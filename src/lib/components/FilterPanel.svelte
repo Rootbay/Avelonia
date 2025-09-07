@@ -5,7 +5,7 @@
 
   export let searchTerm: string;
   export let showFilters: boolean;
-  export let filters: any;
+  export let filters: Filters;
 
   function clearFilters() {
     searchTerm = "";
@@ -17,7 +17,17 @@
     filters.status = "";
     dispatch('clearFilters');
   }
+
+  interface Filters {
+    fileType: string;
+    category: string;
+    minSize: number | string;
+    maxSize: number | string;
+    eta: string;
+    status: string;
+  }
 </script>
+
 
 {#if showFilters}
   <div class="filter-settings">
