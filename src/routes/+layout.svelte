@@ -1,13 +1,25 @@
 <script lang="ts">
   import { icons } from "$lib/icons";
   import { page } from '$app/stores';
+  import { onMount, onDestroy } from 'svelte';
+  import { initDownloadListener, disposeDownloadListener } from '$lib/downloadManager';
+  import { downloads } from '$lib/downloads';
   import '../app.css';
+
+  onMount(() => {
+    initDownloadListener();
+  });
+  onDestroy(() => {
+    disposeDownloadListener();
+  });
+
+  const activeCount = $derived($downloads.filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
 </script>
 
 <div class="app-container">
   <nav class="sidebar">
     <div class="profile-section">
-      <img src="/favicon.png" alt="Avelonia Logo" class="profile-pic" />
+      <img src="/favicon.png" alt="Avelonia Logo" class="profile-pic" width="50" height="50" decoding="async" loading="eager" fetchpriority="low" />
       <p class="app-name">Avelonia</p>
     </div>
 
@@ -30,6 +42,9 @@
         <a href="/downloader" class:active-link={$page.url.pathname === '/downloader'}>
           <div class="icon">{@html icons.Downloader}</div>
           <span>Downloader</span>
+          {#if activeCount > 0}
+            <span class="badge" aria-label={`Active downloads: ${activeCount}`}>{activeCount}</span>
+          {/if}
         </a>
       </li>
       <li>
@@ -38,12 +53,7 @@
           <span>Cleaner</span>
         </a>
       </li>
-      <li>
-        <a href="/eraser" class:active-link={$page.url.pathname === '/eraser'}>
-          <div class="icon">{@html icons.Eraser}</div>
-          <span>Eraser</span>
-        </a>
-      </li>
+      
     </ul>
   </nav>
 
@@ -61,6 +71,8 @@
 
   .sidebar {
     width: 250px;
+    flex: 0 0 250px; /* prevent flex shrink/expand */
+    min-width: 250px;
     background-color: var(--secondary);
     color: white;
     padding: 0;
@@ -140,10 +152,22 @@
     height: 26px;
   }
 
+  .badge {
+    margin-left: auto;
+    background: var(--avelonia-purple);
+    color: #000;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
   .content-area {
     flex-grow: 1;
     padding: 40px 30px;
     overflow-y: auto;
+    scrollbar-gutter: stable; /* avoid layout shift when scrollbar appears */
+    min-width: 0; /* prevent flex overflow pushing sidebar */
   }
 
   

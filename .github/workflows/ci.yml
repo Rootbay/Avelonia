@@ -1,0 +1,33 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+      - name: Install deps
+        run: bun install --frozen-lockfile || bun install
+      - name: Typecheck (svelte-check)
+        run: bun run check
+      - name: ESLint
+        run: bunx eslint . --ext .ts,.svelte --max-warnings 0
+      - name: Prettier check
+        run: bunx prettier . --check
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo check
+        run: cargo check --all-targets --verbose

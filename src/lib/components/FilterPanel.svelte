@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { slide } from 'svelte/transition';
 
   const dispatch = createEventDispatcher();
 
@@ -30,7 +31,7 @@
 
 
 {#if showFilters}
-  <div class="filter-settings">
+  <div class="filter-settings" transition:slide>
     <h3>Filter Settings</h3>
     <div class="filter-group">
       <label for="fileType">File Type:</label>
@@ -42,11 +43,11 @@
     </div>
     <div class="filter-group">
       <label for="minSize">Min Size:</label>
-      <input type="number" id="minSize" bind:value={filters.minSize} />
+      <input id="minSize" bind:value={filters.minSize} placeholder="e.g. 50MB" />
     </div>
     <div class="filter-group">
       <label for="maxSize">Max Size:</label>
-      <input type="number" id="maxSize" bind:value={filters.maxSize} />
+      <input id="maxSize" bind:value={filters.maxSize} placeholder="e.g. 2 GB" />
     </div>
     <div class="filter-group">
       <label for="eta">ETA:</label>
@@ -58,10 +59,11 @@
         <option value="">All</option>
         <option value="available">Available</option>
         <option value="pending">Pending</option>
+        <option value="queued">Queued</option>
         <option value="downloading">Downloading</option>
         <option value="paused">Paused</option>
         <option value="completed">Completed</option>
-        <option value="cancelled">Cancelled</option>
+        <option value="failed">Failed</option>
       </select>
     </div>
     <button class="action-button" on:click={clearFilters}>Clear Filters</button>

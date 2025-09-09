@@ -1,0 +1,24 @@
+* text=auto eol=lf
+
+# Preserve native endings for Windows scripts
+*.bat eol=crlf
+*.cmd eol=crlf
+*.ps1 eol=crlf
+
+# Unix scripts
+*.sh eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+
+# Docs classification
+docs/** linguist-documentation
+

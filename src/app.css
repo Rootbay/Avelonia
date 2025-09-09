@@ -42,3 +42,9 @@
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
 }
+
+/* Shared app layout styles */
+.main-content { display: flex; flex-direction: column; gap: 20px; color: var(--avelonia-text); }
+.header-card { background: var(--avelonia-card); border: 1px solid var(--avelonia-border); border-radius: 12px; padding: 16px; }
+.panel { background: var(--avelonia-card); border: 1px solid var(--avelonia-border); border-radius: 12px; padding: 16px; }
+.muted { color: var(--avelonia-text-muted); }

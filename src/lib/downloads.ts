@@ -5,7 +5,7 @@ import { programs } from './programs';
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
 
 function loadDownloads(): Download[] {
-  const initialDownloads = programs.map((program) => ({
+  const initialDownloads: Download[] = programs.map((program) => ({
     ...program,
     eta: 'N/A',
     status: 'available',
@@ -23,17 +23,16 @@ function loadDownloads(): Download[] {
           return initialDownloads.map(initialDl => {
             const storedDl = storedMap.get(initialDl.id);
             if (storedDl) {
-              let newStatus = storedDl.status;
-              if (storedDl.status === 'downloading' || storedDl.status === 'pending') {
-                newStatus = 'paused';
-              } else if (storedDl.status === 'completed') {
+              let newStatus = storedDl.status as Download['status'];
+              // Reset transient in-progress states to a sane default on reload
+              if (storedDl.status === 'downloading' || storedDl.status === 'pending' || storedDl.status === 'queued') {
                 newStatus = 'available';
               }
               return {
                 ...initialDl,
                 ...storedDl,
                 status: newStatus,
-              };
+              } as Download;
             }
             return initialDl;
           });

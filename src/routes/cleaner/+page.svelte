@@ -1,7 +1,11 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
+  import { slide } from 'svelte/transition';
+  import Toast from '$lib/components/Toast.svelte';
 
   interface FileEntry {
     path: string;
@@ -23,6 +27,14 @@
   let message: string = '';
   let progressMessage: string = '';
   let isLoading: boolean = false;
+  let toastMsg: string = '';
+  let showToast: boolean = false;
+  
+  // Secure Eraser state
+  let eraserSelectedFiles: string[] = [];
+  let eraserPasses: number = 1;
+  let isErasing: boolean = false;
+  let eraserMessage: string = '';
 
   let showConfirmationModal: boolean = false;
   let showRecycleBinConfirmationModal: boolean = false;
@@ -56,6 +68,32 @@
       availableDiskSpace = available;
     } catch (error) {
       console.error('Error getting disk info:', error);
+    }
+  }
+
+  // Secure Eraser logic
+  async function eraserPickFiles() {
+    const result = await open({ multiple: true });
+    if (Array.isArray(result)) {
+      eraserSelectedFiles = result as string[];
+    } else if (typeof result === 'string') {
+      eraserSelectedFiles = [result];
+    }
+  }
+
+  async function secureErase() {
+    if (eraserSelectedFiles.length === 0) return;
+    isErasing = true;
+    eraserMessage = '';
+    try {
+      const count: number = await invoke('secure_erase', { files: eraserSelectedFiles, passes: eraserPasses });
+      eraserMessage = `Securely erased ${count} item(s).`;
+      eraserSelectedFiles = [];
+    } catch (e) {
+      console.error(e);
+      eraserMessage = `Failed: ${e}`;
+    } finally {
+      isErasing = false;
     }
   }
 
@@ -293,9 +331,9 @@
     isLoading = true;
     message = '';
     try {
-      message = `Deleting ${filesToDelete.length} files...`;
-      const deletedCount: number = await invoke('delete_files', { files: filesToDelete });
-      message = `Successfully deleted ${deletedCount} files.`;
+      message = `Moving ${filesToDelete.length} item(s) to Trash...`;
+      const deletedCount: number = await invoke('move_to_trash', { files: filesToDelete });
+      message = `Moved ${deletedCount} item(s) to Trash.`;
 
       tempFiles = tempFiles.filter(f => !filesToDelete.includes(f.path));
       largeFiles = largeFiles.filter(f => !filesToDelete.includes(f.path));
@@ -322,37 +360,66 @@
     showConfirmationModal = false;
     filesToDelete = [];
   }
- </script>
+
+  // Quick Clean helpers
+  async function clearUserTemp() {
+    isLoading = true; message = '';
+    try {
+      const res: any = await invoke('quick_clear_user_temp');
+      message = `Cleared user temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
+      triggerToast(message);
+    } catch (e) {
+      console.error(e); message = `Failed: ${e}`;
+    } finally { isLoading = false; }
+  }
+
+  async function clearSystemTemp() {
+    isLoading = true; message = '';
+    try {
+      const res: any = await invoke('quick_clear_system_temp');
+      message = `Cleared system temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
+      triggerToast(message);
+    } catch (e) {
+      console.error(e); message = `Failed: ${e}`;
+    } finally { isLoading = false; }
+  }
+
+  async function clearPrefetch() {
+    isLoading = true; message = '';
+    try {
+      const res: any = await invoke('quick_clear_prefetch');
+      message = `Cleared Prefetch: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
+      triggerToast(message);
+    } catch (e) {
+      console.error(e); message = `Failed: ${e}`;
+    } finally { isLoading = false; }
+  }
+
+  async function clearRecent() {
+    isLoading = true; message = '';
+    try {
+      const res: any = await invoke('quick_clear_recent');
+      message = `Cleared Recent shortcuts: ${res.files_deleted} items (${formatBytes(res.bytes_deleted)}).`;
+      triggerToast(message);
+    } catch (e) {
+      console.error(e); message = `Failed: ${e}`;
+    } finally { isLoading = false; }
+  }
+
+  function triggerToast(msg: string) {
+    toastMsg = msg;
+    showToast = true;
+    const t = setTimeout(() => { showToast = false; }, 3000);
+  }
+</script>
+
+<div class="main-content">
+  <div class="header-card">
+    <h1>Cleaner</h1>
+    <p class="muted">Scan, select and remove clutter safely.</p>
+  </div>
 
 <style>
-  
-
-  .panel {
-    background-color: #121212;
-    background-image: var(--gradient-card);
-    border: 1px solid var(--avelonia-border);
-    border-radius: 0.75rem;
-    padding: 1.5rem;
-    box-shadow: var(--shadow-card);
-    transition: var(--transition-smooth);
-  }
-
-  .panel:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-card), var(--shadow-purple);
-  }
-
-  .panel h2 {
-    color: var(--avelonia-text);
-  }
-
-  .panel p,
-  .panel h3,
-  .panel span,
-  .panel li {
-    color: var(--avelonia-text);
-  }
-
   .btn {
     display: inline-flex;
     align-items: center;
@@ -394,6 +461,8 @@
     border-color: hsl(0 84% 60% / 0.35);
     box-shadow: 0 8px 24px -8px hsl(0 84% 60% / 0.35);
   }
+
+  /* Toast styles moved to $lib/components/Toast.svelte */
 </style>
 
 <div class="p-4">
@@ -401,10 +470,17 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Cleaner</h2>
-
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Temporary Files</h3>
+      <h2 class="text-xl font-semibold mb-4">Quick Clean</h2>
+      <p class="text-gray-400 mb-2">One-click cleanup for common clutter.</p>
+      <div class="flex flex-wrap gap-2">
+        <button on:click={clearUserTemp} class="btn btn-primary" disabled={isLoading}>Clear User Temp</button>
+        <button on:click={clearSystemTemp} class="btn btn-secondary" disabled={isLoading}>Clear System Temp</button>
+        <button on:click={clearPrefetch} class="btn btn-secondary" disabled={isLoading}>Clear Prefetch</button>
+        <button on:click={clearRecent} class="btn btn-secondary" disabled={isLoading}>Clear Recent</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Temporary Files</h2>
         <button
           on:click={getTempFiles}
           class="btn btn-primary mr-2"
@@ -427,7 +503,7 @@
           Clean Selected Temp Files ({selectedTempFiles.length})
         </button>
         {#if tempFiles.length > 0}
-          <div class="mt-4">
+          <div class="mt-4" transition:slide>
             <label class="inline-flex items-center">
               <input
                 type="checkbox"
@@ -452,10 +528,10 @@
             </ul>
           </div>
         {/if}
-      </div>
+    </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Recycle Bin</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Recycle Bin</h2>
         <button
           on:click={confirmEmptyRecycleBin}
           class="btn btn-danger"
@@ -463,10 +539,10 @@
         >
           Empty Recycle Bin
         </button>
-      </div>
+    </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Disk Space</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Disk Space</h2>
         {#if totalDiskSpace !== null}
           <p class="text-gray-300">Total: {formatBytes(totalDiskSpace)}</p>
         {/if}
@@ -480,10 +556,10 @@
         >
           Refresh Disk Info
         </button>
-      </div>
+    </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Large Files (>{formatBytes(100 * 1024 * 1024)})</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Large Files (>{formatBytes(100 * 1024 * 1024)})</h2>
         <button
           on:click={findLargeFiles}
           class="btn btn-primary mr-2"
@@ -506,7 +582,7 @@
           Delete Selected Large Files ({selectedLargeFiles.length})
         </button>
         {#if largeFiles.length > 0}
-          <div class="mt-4">
+          <div class="mt-4" transition:slide>
             <label class="inline-flex items-center">
               <input
                 type="checkbox"
@@ -538,8 +614,8 @@
         {/if}
       </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Duplicate Files</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Duplicate Files</h2>
         <button
           on:click={findDuplicateFiles}
           class="btn btn-primary mr-2"
@@ -562,7 +638,7 @@
           Delete Selected Duplicate Files ({selectedDuplicateFiles.length})
         </button>
         {#if duplicateFiles.length > 0}
-          <div class="mt-4">
+          <div class="mt-4" transition:slide>
             <label class="inline-flex items-center">
               <input
                 type="checkbox"
@@ -587,10 +663,10 @@
             </ul>
           </div>
         {/if}
-      </div>
+    </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Empty Folders</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Empty Folders</h2>
         <button
           on:click={findEmptyFolders}
           class="btn btn-primary mr-2"
@@ -613,7 +689,7 @@
           Delete Selected Empty Folders ({selectedEmptyFolders.length})
         </button>
         {#if emptyFolders.length > 0}
-          <div class="mt-4">
+          <div class="mt-4" transition:slide>
             <label class="inline-flex items-center">
               <input
                 type="checkbox"
@@ -638,10 +714,10 @@
             </ul>
           </div>
         {/if}
-      </div>
+    </div>
 
-      <div class="mb-6">
-        <h3 class="text-lg font-medium mb-2">Broken Shortcuts</h3>
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Broken Shortcuts</h2>
         <button
           on:click={findBrokenShortcuts}
           class="btn btn-primary mr-2"
@@ -664,7 +740,7 @@
           Delete Selected Broken Shortcuts ({selectedBrokenShortcuts.length})
         </button>
         {#if brokenShortcuts.length > 0}
-          <div class="mt-4">
+          <div class="mt-4" transition:slide>
             <label class="inline-flex items-center">
               <input
                 type="checkbox"
@@ -689,7 +765,6 @@
             </ul>
           </div>
         {/if}
-      </div>
     </div>
 
     <div class="panel">
@@ -705,7 +780,41 @@
         >
           Sync Folders (Coming Soon)
         </button>
+    </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="text-xl font-semibold mb-4">Secure Eraser</h2>
+      <p class="text-gray-400 mb-4">Overwrite files with random data, then delete.</p>
+
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <button class="btn btn-primary" on:click={eraserPickFiles} disabled={isErasing}>Choose Files</button>
+        <label class="text-gray-300 flex items-center gap-2">
+          Passes:
+          <input
+            type="number"
+            min="1"
+            max="7"
+            bind:value={eraserPasses}
+            class="w-20 px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-100"
+          />
+        </label>
+        <button class="btn btn-danger" on:click={secureErase} disabled={isErasing || eraserSelectedFiles.length === 0}>
+          {isErasing ? 'Erasing...' : 'Secure Erase'}
+        </button>
       </div>
+
+      {#if eraserSelectedFiles.length > 0}
+        <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded" transition:slide>
+          {#each eraserSelectedFiles as f (f)}
+            <li>{f}</li>
+          {/each}
+        </ul>
+      {/if}
+
+      {#if eraserMessage}
+        <p class="mt-3 text-gray-300">{eraserMessage}</p>
+      {/if}
     </div>
   </div>
 
@@ -767,4 +876,8 @@
       </div>
     </div>
   {/if}
+  <Toast bind:show={showToast} text={toastMsg} />
+  <LoadingOverlay show={isLoading || isErasing} text={(progressMessage || (isErasing ? 'Securely erasing...' : 'Working...'))} />
+</div>
+
 </div>

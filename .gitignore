@@ -1,11 +1,33 @@
+# OS
 .DS_Store
-node_modules
-/build
-/.svelte-kit
-/package
+Thumbs.db
+desktop.ini
+
+# Env and secrets
 .env
 .env.*
-!.env.example
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-.git.backup_*
+*.key
+*.pem
+
+# Logs and caches
+logs/
+*.log
+*.pid
+.cache/
+dist/
+build/
+
+# Frontend
+node_modules/
+bun.lockb
+
+# SvelteKit
+.svelte-kit/
+
+# Rust
+target/
+
+# Coverage
+.coverage*
+coverage/
+

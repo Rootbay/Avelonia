@@ -1,0 +1,133 @@
+*** Begin Patch
+*** Update File: src/routes/downloader/+page.svelte
+@@
+-  let sortBy = $state('name');
+-  let sortDirection = $state('asc');
+-
+-  function sortDownloads(a: any, b: any) {
+-    let valA: any;
+-    let valB: any;
+-
+-    const toBytes = (val: string) => {
+-      // Accept formats like "120 MB", "1.6 GB", "900KB", fallback to number
+-      if (!val) return 0;
+-      const m = String(val).trim().match(/^(\d+(?:\.\d+)?)\s*([kKmMgGtTpP]?[bB])?$/);
+-      if (!m) return parseFloat(val) || 0;
+-      const num = parseFloat(m[1]);
+-      const unit = (m[2] || 'B').toUpperCase();
+-      const map: Record<string, number> = {
+-        B: 1,
+-        KB: 1024,
+-        MB: 1024 ** 2,
+-        GB: 1024 ** 3,
+-        TB: 1024 ** 4,
+-        PB: 1024 ** 5
+-      };
+-      return num * (map[unit] ?? 1);
+-    };
+-
+-    switch (sortBy) {
++  let sortBy = $state('name');
++  let sortDirection = $state('asc');
++
++  // Normalize human-readable sizes like "120 MB", "900KB", or raw numbers into bytes
++  function toBytes(val: string | number | undefined | null): number {
++    if (val === undefined || val === null) return 0;
++    const s = String(val).trim();
++    if (!s) return 0;
++    const m = s.match(/^(\d+(?:\.\d+)?)\s*([kKmMgGtTpP]?[bB])?$/);
++    if (!m) return parseFloat(s) || 0;
++    const num = parseFloat(m[1]);
++    const unit = (m[2] || 'B').toUpperCase();
++    const map: Record<string, number> = {
++      B: 1,
++      KB: 1024,
++      MB: 1024 ** 2,
++      GB: 1024 ** 3,
++      TB: 1024 ** 4,
++      PB: 1024 ** 5
++    };
++    return num * (map[unit] ?? 1);
++  }
++
++  // Custom status weight for more intuitive ordering
++  const statusWeight: Record<string, number> = {
++    available: 1,
++    pending: 2,
++    queued: 3,
++    downloading: 4,
++    paused: 5,
++    completed: 6,
++    failed: 7
++  };
++
++  function sortDownloads(a: any, b: any) {
++    let valA: any;
++    let valB: any;
++
++    switch (sortBy) {
+       case 'name':
+         valA = a.name.toLowerCase();
+         valB = b.name.toLowerCase();
+         break;
+       case 'size':
+-        valA = toBytes(a.size);
+-        valB = toBytes(b.size);
++        valA = toBytes(a.size);
++        valB = toBytes(b.size);
+         break;
+       case 'status':
+-        valA = a.status.toLowerCase();
+-        valB = b.status.toLowerCase();
++        valA = statusWeight[a.status?.toLowerCase?.()] ?? 999;
++        valB = statusWeight[b.status?.toLowerCase?.()] ?? 999;
+         break;
+       case 'eta':
+         valA = a.eta.toLowerCase();
+         valB = b.eta.toLowerCase();
+         break;
+@@
+-  const filteredDownloads = $derived(
+-    $downloads.filter((download) => {
++  const filteredDownloads = $derived(
++    $downloads.filter((download) => {
+       const matchesSearchTerm = download.name
+         .toLowerCase()
+         .includes(searchTerm.toLowerCase());
+       const matchesFileType = filters.fileType
+         ? download.fileType.toLowerCase().includes(filters.fileType.toLowerCase())
+         : true;
+       const matchesCategory = filters.category
+         ? download.category.toLowerCase().includes(filters.category.toLowerCase())
+         : true;
+-
+-      const downloadSize = parseFloat(download.size);
+-      const minSize = parseFloat(filters.minSize);
+-      const maxSize = parseFloat(filters.maxSize);
+-
+-      const matchesMinSize = filters.minSize ? downloadSize >= minSize : true;
+-      const matchesMaxSize = filters.maxSize ? downloadSize <= maxSize : true;
++
++      // Support unit-aware numeric filtering like "50MB", "1.5 GB", "900KB"
++      const downloadSizeBytes = toBytes(download.size);
++      const minSizeBytes = filters.minSize !== '' ? toBytes(filters.minSize) : undefined;
++      const maxSizeBytes = filters.maxSize !== '' ? toBytes(filters.maxSize) : undefined;
++
++      const matchesMinSize = minSizeBytes !== undefined ? downloadSizeBytes >= minSizeBytes : true;
++      const matchesMaxSize = maxSizeBytes !== undefined ? downloadSizeBytes <= maxSizeBytes : true;
+ 
+       const matchesETA = filters.eta
+         ? download.eta.toLowerCase().includes(filters.eta.toLowerCase())
+         : true;
+-      const matchesStatus = filters.status
+-        ? download.status.toLowerCase().includes(filters.status.toLowerCase())
+-        : true;
++      const matchesStatus = filters.status
++        ? download.status.toLowerCase() === filters.status.toLowerCase()
++        : true;
+@@
+-      <button class="px-4 py-2 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer transition-colors duration-200 hover:bg-gray-700" onclick={() => sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'} aria-label={`Sort direction: ${sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}>
++      <button class="px-4 py-2 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer transition-colors duration-200 hover:bg-gray-700" onclick={() => sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'} aria-label={`Sort direction: ${sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}>
+         {sortDirection === 'asc' ? 'Asc' : 'Desc'}
+       </button>
+*** End Patch

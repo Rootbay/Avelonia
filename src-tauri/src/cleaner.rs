@@ -1,5 +1,4 @@
-use std::
-collections::HashMap;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -14,6 +13,40 @@ use lnk::encoding::WINDOWS_1252;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{SHEmptyRecycleBinA, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND};
+
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+pub struct CleanupStats {
+    pub files_deleted: u64,
+    pub bytes_deleted: u64,
+}
+
+fn clear_directory_contents(root: &Path) -> Result<CleanupStats, String> {
+    if !root.exists() || !root.is_dir() {
+        return Ok(CleanupStats::default());
+    }
+    let mut stats = CleanupStats::default();
+    for entry in WalkDir::new(root)
+        .min_depth(1)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if entry.file_type().is_file() {
+            if let Ok(meta) = fs::metadata(path) {
+                if fs::remove_file(path).is_ok() {
+                    stats.files_deleted += 1;
+                    stats.bytes_deleted += meta.len();
+                }
+            } else {
+                let _ = fs::remove_file(path);
+            }
+        } else if entry.file_type().is_dir() {
+            let _ = fs::remove_dir(path);
+        }
+    }
+    Ok(stats)
+}
 
 #[tauri::command]
 pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
@@ -101,6 +134,79 @@ pub fn empty_recycle_bin() -> Result<(), String> {
     Err("Emptying recycle bin is only supported on Windows.".to_string())
 }
 
+// Quick Clean commands (Windows only) ---------------------------------------------------------
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn quick_clear_user_temp() -> Result<CleanupStats, String> {
+    let user_temp = env::temp_dir();
+    clear_directory_contents(&user_temp)
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn quick_clear_system_temp() -> Result<CleanupStats, String> {
+    if let Some(windir) = env::var_os("WINDIR") {
+        let p = PathBuf::from(windir).join("Temp");
+        return clear_directory_contents(&p);
+    }
+    Err("WINDIR not set".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn quick_clear_prefetch() -> Result<CleanupStats, String> {
+    if let Some(windir) = env::var_os("WINDIR") {
+        let p = PathBuf::from(windir).join("Prefetch");
+        return clear_directory_contents(&p);
+    }
+    Err("WINDIR not set".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn quick_clear_recent() -> Result<CleanupStats, String> {
+    // Delete only .lnk shortcuts in Recent
+    if let Some(appdata) = env::var_os("APPDATA") {
+        let recent = PathBuf::from(appdata).join("Microsoft/Windows/Recent");
+        if !recent.exists() || !recent.is_dir() {
+            return Ok(CleanupStats::default());
+        }
+        let mut stats = CleanupStats::default();
+        for entry in WalkDir::new(&recent).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if entry.file_type().is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("lnk") {
+                        if let Ok(meta) = fs::metadata(path) {
+                            if fs::remove_file(path).is_ok() {
+                                stats.files_deleted += 1;
+                                stats.bytes_deleted += meta.len();
+                            }
+                        } else {
+                            let _ = fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(stats);
+    }
+    Err("APPDATA not set".into())
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn quick_clear_user_temp() -> Result<CleanupStats, String> { Err("Only on Windows".into()) }
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn quick_clear_system_temp() -> Result<CleanupStats, String> { Err("Only on Windows".into()) }
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn quick_clear_prefetch() -> Result<CleanupStats, String> { Err("Only on Windows".into()) }
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn quick_clear_recent() -> Result<CleanupStats, String> { Err("Only on Windows".into()) }
+
 #[allow(dead_code)]
 #[tauri::command]
 pub fn get_drive_info() -> Result<(u64, u64), String> {
@@ -158,8 +264,7 @@ pub fn find_large_files(app_handle: tauri::AppHandle) -> Result<Vec<(String, u64
 
 #[tauri::command]
 pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
-    let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
-    let mut duplicate_files = Vec::new();
+    let mut size_buckets: HashMap<u64, Vec<String>> = HashMap::new();
     let mut scanned_count = 0;
 
     // Common directories to scan for duplicate files
@@ -169,51 +274,66 @@ pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String,
 
     let paths_to_scan = vec![downloads_path, documents_path];
 
-    for scan_path in paths_to_scan {
+    // First pass: bucket by size
+    for scan_path in &paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
             for entry in WalkDir::new(&scan_path)
                 .into_iter()
                 .filter_map(|e| e.ok())
             {
                 if entry.file_type().is_file() {
-                    let path = entry.path();
-                    if let Ok(_metadata) = entry.metadata() {
-                        match calculate_file_hash(path) {
-                            Ok(hash) => {
-                                file_hashes
-                                    .entry(hash)
-                                    .or_insert_with(Vec::new)
-                                    .push(path.display().to_string());
-                            }
-                            Err(e) => eprintln!("Failed to hash file {}: {}", path.display(), e),
-                        }
+                    if let Ok(meta) = entry.metadata() {
+                        size_buckets
+                            .entry(meta.len())
+                            .or_insert_with(Vec::new)
+                            .push(entry.path().display().to_string());
                     }
                 }
                 scanned_count += 1;
-                if scanned_count % 100 == 0 { // Emit progress every 100 files
-                    app_handle.emit("scan_progress", format!("Scanned {} files for duplicates...", scanned_count))
+                if scanned_count % 200 == 0 {
+                    app_handle
+                        .emit("scan_progress", format!("Scanned {} files...", scanned_count))
                         .map_err(|e| e.to_string())?;
                 }
             }
         }
     }
 
-    for (_hash, paths) in file_hashes {
-        if paths.len() > 1 {
-            // For duplicate files, we need to get the size of each file.
-            // Assuming all files with the same hash have the same size.
-            if let Some(first_path_str) = paths.first() {
-                let first_path = PathBuf::from(first_path_str);
-                if let Ok(_metadata) = fs::metadata(&first_path) {
-                    for p in paths {
-                        duplicate_files.push((p, _metadata.len()));
-                    }
+    // Second pass: hash only buckets with >1 item
+    let mut duplicate_files = Vec::new();
+    let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
+    for (_size, paths) in size_buckets.into_iter().filter(|(_, v)| v.len() > 1) {
+        for p in paths {
+            let path = PathBuf::from(&p);
+            match calculate_file_hash(&path) {
+                Ok(hash) => file_hashes.entry(hash).or_insert_with(Vec::new).push(p),
+                Err(e) => eprintln!("Failed to hash file {}: {}", path.display(), e),
+            }
+        }
+    }
+    for (_hash, paths) in file_hashes.into_iter().filter(|(_, v)| v.len() > 1) {
+        if let Some(first) = paths.first() {
+            if let Ok(meta) = fs::metadata(first) {
+                for p in paths {
+                    duplicate_files.push((p, meta.len()));
                 }
             }
         }
     }
 
     Ok(duplicate_files)
+}
+
+#[tauri::command]
+pub fn move_to_trash(files: Vec<String>) -> Result<usize, String> {
+    let mut count = 0usize;
+    for file in files {
+        match trash::delete(&file) {
+            Ok(_) => count += 1,
+            Err(e) => eprintln!("Failed to move to trash {}: {}", file, e),
+        }
+    }
+    Ok(count)
 }
 
 fn calculate_file_hash(path: &Path) -> Result<String, io::Error> {
