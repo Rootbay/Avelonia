@@ -1,6 +1,6 @@
 use rand::rngs::OsRng;
 use rand::RngCore;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -32,8 +32,7 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
             Err(e) => { eprintln!("open for write failed {}: {}", path_str, e); continue; }
         };
 
-        // Overwrite with cryptographically secure random bytes for the specified passes
-        let mut buffer = vec![0u8; 1024 * 1024]; // 1 MB buffer
+        let mut buffer = vec![0u8; 1024 * 1024];
         for _ in 0..passes {
             let mut remaining = len;
             file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
@@ -43,12 +42,10 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
                 if let Err(e) = file.write_all(&buffer[..chunk]) { eprintln!("write failed {}: {}", path_str, e); break; }
                 remaining -= chunk as u64;
             }
-            // Flush per pass to ensure data hits disk
             if let Err(e) = file.flush() { eprintln!("flush failed {}: {}", path_str, e); }
         }
         drop(file);
 
-        // Finally remove the file
         match std::fs::remove_file(&path) {
             Ok(_) => erased += 1,
             Err(e) => eprintln!("remove_file failed {}: {}", path_str, e),
