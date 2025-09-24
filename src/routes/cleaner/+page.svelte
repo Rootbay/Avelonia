@@ -3,9 +3,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
-  import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
   import { slide } from 'svelte/transition';
-  import Toast from '$lib/components/Toast.svelte';
 
   import { Button } from '$lib/components/ui/button';
   import {
@@ -13,7 +11,7 @@
     CardHeader,
     CardTitle,
     CardDescription,
-    CardContent
+    CardContent,
   } from '$lib/components/ui/card';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { Label } from '$lib/components/ui/label';
@@ -24,47 +22,55 @@
     DialogHeader,
     DialogTitle,
     DialogDescription,
-    DialogFooter
+    DialogFooter,
   } from '$lib/components/ui/dialog';
   import { ScrollArea } from '$lib/components/ui/scroll-area';
   import { Separator } from '$lib/components/ui/separator';
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+  import { toast } from '$lib/components/ui/sonner';
 
-  import { Trash2, RefreshCw, Scan, HardDrive, FolderOpen, Files as FilesIcon, Eraser } from '@lucide/svelte';
+  import {
+    Trash2,
+    RefreshCw,
+    Scan,
+    HardDrive,
+    FolderOpen,
+    Files as FilesIcon,
+    Eraser,
+  } from '@lucide/svelte';
 
   interface FileEntry {
     path: string;
     size?: number;
   }
 
-  let tempFiles: FileEntry[] = [];
-  let largeFiles: FileEntry[] = [];
-  let duplicateFiles: FileEntry[] = [];
-  let emptyFolders: FileEntry[] = [];
-  let brokenShortcuts: FileEntry[] = [];
+  let tempFiles = $state<FileEntry[]>([]);
+  let largeFiles = $state<FileEntry[]>([]);
+  let duplicateFiles = $state<FileEntry[]>([]);
+  let emptyFolders = $state<FileEntry[]>([]);
+  let brokenShortcuts = $state<FileEntry[]>([]);
 
-  let selectedTempFiles: string[] = [];
-  let selectedLargeFiles: string[] = [];
-  let selectedDuplicateFiles: string[] = [];
-  let selectedEmptyFolders: string[] = [];
-  let selectedBrokenShortcuts: string[] = [];
+  let selectedTempFiles = $state<string[]>([]);
+  let selectedLargeFiles = $state<string[]>([]);
+  let selectedDuplicateFiles = $state<string[]>([]);
+  let selectedEmptyFolders = $state<string[]>([]);
+  let selectedBrokenShortcuts = $state<string[]>([]);
 
-  let message: string = '';
-  let progressMessage: string = '';
-  let isLoading: boolean = false;
-  let toastMsg: string = '';
-  let showToast: boolean = false;
+  let message = $state('');
+  let progressMessage = $state('');
+  let isLoading = $state(false);
 
-  let eraserSelectedFiles: string[] = [];
-  let eraserPasses: number = 1;
-  let isErasing: boolean = false;
-  let eraserMessage: string = '';
+  let eraserSelectedFiles = $state<string[]>([]);
+  let eraserPasses = $state(1);
+  let isErasing = $state(false);
+  let eraserMessage = $state('');
 
-  let showConfirmationModal: boolean = false;
-  let showRecycleBinConfirmationModal: boolean = false;
-  let filesToDelete: string[] = [];
+  let showConfirmationModal = $state(false);
+  let showRecycleBinConfirmationModal = $state(false);
+  let filesToDelete = $state<string[]>([]);
 
-  let totalDiskSpace: number | null = null;
-  let availableDiskSpace: number | null = null;
+  let totalDiskSpace = $state<number | null>(null);
+  let availableDiskSpace = $state<number | null>(null);
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
@@ -140,9 +146,11 @@
       const result: string[] = await invoke('get_temp_files');
       tempFiles = result.map((path) => ({ path }));
       message = `Found ${tempFiles.length} temporary files.`;
+      toast.success(message);
     } catch (error) {
       message = `Error scanning temporary files: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
       progressMessage = '';
@@ -166,9 +174,11 @@
       message = 'Emptying recycle bin...';
       await invoke('empty_recycle_bin');
       message = 'Recycle bin emptied successfully.';
+      toast.success(message);
     } catch (error) {
       message = `Error emptying recycle bin: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
     }
@@ -183,9 +193,11 @@
       const result: [string, number][] = await invoke('find_large_files');
       largeFiles = result.map(([path, size]) => ({ path, size }));
       message = `Found ${largeFiles.length} large files.`;
+      toast.success(message);
     } catch (error) {
       message = `Error finding large files: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
       progressMessage = '';
@@ -206,9 +218,11 @@
       const result: [string, number][] = await invoke('find_duplicate_files');
       duplicateFiles = result.map(([path, size]) => ({ path, size }));
       message = `Found ${duplicateFiles.length} sets of duplicate files.`;
+      toast.success(message);
     } catch (error) {
       message = `Error finding duplicate files: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
       progressMessage = '';
@@ -229,9 +243,11 @@
       const result: string[] = await invoke('find_empty_folders');
       emptyFolders = result.map((path) => ({ path }));
       message = `Found ${emptyFolders.length} empty folders.`;
+      toast.success(message);
     } catch (error) {
       message = `Error finding empty folders: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
       progressMessage = '';
@@ -252,9 +268,11 @@
       const result: string[] = await invoke('find_broken_shortcuts');
       brokenShortcuts = result.map((path) => ({ path }));
       message = `Found ${brokenShortcuts.length} broken shortcuts.`;
+      toast.success(message);
     } catch (error) {
       message = `Error finding broken shortcuts: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
       progressMessage = '';
@@ -343,6 +361,7 @@
       message = `Moving ${filesToDelete.length} item(s) to Trash...`;
       const deletedCount: number = await invoke('move_to_trash', { files: filesToDelete });
       message = `Moved ${deletedCount} item(s) to Trash.`;
+      toast.success(message);
 
       tempFiles = tempFiles.filter((f) => !filesToDelete.includes(f.path));
       largeFiles = largeFiles.filter((f) => !filesToDelete.includes(f.path));
@@ -359,6 +378,7 @@
     } catch (error) {
       message = `Error deleting files: ${error}`;
       console.error(error);
+      toast.error(message);
     } finally {
       isLoading = false;
     }
@@ -375,10 +395,11 @@
     try {
       const res: any = await invoke('quick_clear_user_temp');
       message = `Cleared user temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
-      triggerToast(message);
+      toast.success(message);
     } catch (e) {
       console.error(e);
       message = `Failed: ${e}`;
+      toast.error(message);
     } finally {
       isLoading = false;
     }
@@ -390,10 +411,11 @@
     try {
       const res: any = await invoke('quick_clear_system_temp');
       message = `Cleared system temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
-      triggerToast(message);
+      toast.success(message);
     } catch (e) {
       console.error(e);
       message = `Failed: ${e}`;
+      toast.error(message);
     } finally {
       isLoading = false;
     }
@@ -405,10 +427,11 @@
     try {
       const res: any = await invoke('quick_clear_prefetch');
       message = `Cleared Prefetch: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
-      triggerToast(message);
+      toast.success(message);
     } catch (e) {
       console.error(e);
       message = `Failed: ${e}`;
+      toast.error(message);
     } finally {
       isLoading = false;
     }
@@ -420,21 +443,14 @@
     try {
       const res: any = await invoke('quick_clear_recent');
       message = `Cleared Recent shortcuts: ${res.files_deleted} items (${formatBytes(res.bytes_deleted)}).`;
-      triggerToast(message);
+      toast.success(message);
     } catch (e) {
       console.error(e);
       message = `Failed: ${e}`;
+      toast.error(message);
     } finally {
       isLoading = false;
     }
-  }
-
-  function triggerToast(msg: string) {
-    toastMsg = msg;
-    showToast = true;
-    const t = setTimeout(() => {
-      showToast = false;
-    }, 3000);
   }
 </script>
 
@@ -528,7 +544,6 @@
         </CardContent>
       </Card>
 
-      <!-- Recycle Bin -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Recycle Bin</CardTitle>
@@ -541,7 +556,6 @@
         </CardContent>
       </Card>
 
-      <!-- Disk Space -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Disk Space</CardTitle>
@@ -566,7 +580,6 @@
         </CardContent>
       </Card>
 
-      <!-- Large Files -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Large Files (&gt;{formatBytes(100 * 1024 * 1024)})</CardTitle>
@@ -614,7 +627,9 @@
                         <span class="truncate">{file.path}</span>
                       </div>
                       {#if file.size}
-                        <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(file.size)}</span>
+                        <span class="text-xs opacity-70 whitespace-nowrap"
+                          >{formatBytes(file.size)}</span
+                        >
                       {/if}
                     </li>
                   {/each}
@@ -625,7 +640,6 @@
         </CardContent>
       </Card>
 
-      <!-- Duplicate Files -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Duplicate Files</CardTitle>
@@ -654,7 +668,8 @@
             <div transition:slide>
               <div class="flex items-center gap-2">
                 <Checkbox
-                  checked={selectedDuplicateFiles.length === duplicateFiles.length && duplicateFiles.length > 0}
+                  checked={selectedDuplicateFiles.length === duplicateFiles.length &&
+                    duplicateFiles.length > 0}
                   onCheckedChange={() => toggleSelectAll('duplicate')}
                   id="select-all-dup"
                 />
@@ -679,7 +694,6 @@
         </CardContent>
       </Card>
 
-      <!-- Empty Folders -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Empty Folders</CardTitle>
@@ -708,7 +722,8 @@
             <div transition:slide>
               <div class="flex items-center gap-2">
                 <Checkbox
-                  checked={selectedEmptyFolders.length === emptyFolders.length && emptyFolders.length > 0}
+                  checked={selectedEmptyFolders.length === emptyFolders.length &&
+                    emptyFolders.length > 0}
                   onCheckedChange={() => toggleSelectAll('empty')}
                   id="select-all-empty"
                 />
@@ -733,7 +748,6 @@
         </CardContent>
       </Card>
 
-      <!-- Broken Shortcuts -->
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Broken Shortcuts</CardTitle>
@@ -762,7 +776,8 @@
             <div transition:slide>
               <div class="flex items-center gap-2">
                 <Checkbox
-                  checked={selectedBrokenShortcuts.length === brokenShortcuts.length && brokenShortcuts.length > 0}
+                  checked={selectedBrokenShortcuts.length === brokenShortcuts.length &&
+                    brokenShortcuts.length > 0}
                   onCheckedChange={() => toggleSelectAll('broken_shortcut')}
                   id="select-all-shortcuts"
                 />
@@ -775,7 +790,8 @@
                     <li class="flex items-center gap-2 px-2 py-1">
                       <Checkbox
                         checked={selectedBrokenShortcuts.includes(shortcut.path)}
-                        onCheckedChange={() => handleFileSelection(shortcut.path, 'broken_shortcut')}
+                        onCheckedChange={() =>
+                          handleFileSelection(shortcut.path, 'broken_shortcut')}
                       />
                       <span class="truncate">{shortcut.path}</span>
                     </li>
@@ -790,7 +806,9 @@
       <Card>
         <CardHeader>
           <CardTitle class="text-xl">Cloner / Backup</CardTitle>
-          <CardDescription>Features for file synchronization and backup will be implemented here.</CardDescription>
+          <CardDescription
+            >Features for file synchronization and backup will be implemented here.</CardDescription
+          >
         </CardHeader>
         <CardContent class="space-y-2">
           <h3 class="text-lg font-medium">File Synchronization</h3>
@@ -815,10 +833,21 @@
 
             <div class="flex items-center gap-2">
               <Label for="passes">Passes:</Label>
-              <Input id="passes" type="number" min="1" max="7" bind:value={eraserPasses} class="w-24" />
+              <Input
+                id="passes"
+                type="number"
+                min="1"
+                max="7"
+                bind:value={eraserPasses}
+                class="w-24"
+              />
             </div>
 
-            <Button variant="destructive" onclick={secureErase} disabled={isErasing || eraserSelectedFiles.length === 0}>
+            <Button
+              variant="destructive"
+              onclick={secureErase}
+              disabled={isErasing || eraserSelectedFiles.length === 0}
+            >
               {#if isErasing}
                 Erasing...
               {:else}
@@ -856,12 +885,13 @@
     {/if}
   </div>
 
-  <Dialog open={showConfirmationModal} onOpenChange={(e) => (showConfirmationModal = e.detail)}>
+  <Dialog open={showConfirmationModal} onOpenChange={(value) => (showConfirmationModal = value)}>
     <DialogContent>
       <DialogHeader>
         <DialogTitle>Confirm Deletion</DialogTitle>
         <DialogDescription>
-          Are you sure you want to delete {filesToDelete.length} selected file(s)? This action cannot be undone.
+          Are you sure you want to delete {filesToDelete.length} selected file(s)? This action cannot
+          be undone.
         </DialogDescription>
       </DialogHeader>
       <DialogFooter class="gap-2">
@@ -874,7 +904,10 @@
     </DialogContent>
   </Dialog>
 
-  <Dialog open={showRecycleBinConfirmationModal} onOpenChange={(e) => (showRecycleBinConfirmationModal = e.detail)}>
+  <Dialog
+    open={showRecycleBinConfirmationModal}
+    onOpenChange={(value) => (showRecycleBinConfirmationModal = value)}
+  >
     <DialogContent>
       <DialogHeader>
         <DialogTitle>Confirm Empty Recycle Bin</DialogTitle>
@@ -883,7 +916,9 @@
         </DialogDescription>
       </DialogHeader>
       <DialogFooter class="gap-2">
-        <Button variant="secondary" onclick={() => (showRecycleBinConfirmationModal = false)}>Cancel</Button>
+        <Button variant="secondary" onclick={() => (showRecycleBinConfirmationModal = false)}
+          >Cancel</Button
+        >
         <Button variant="destructive" onclick={emptyRecycleBin}>
           <Trash2 class="h-4 w-4" />
           Empty
@@ -892,9 +927,30 @@
     </DialogContent>
   </Dialog>
 
-  <Toast bind:show={showToast} text={toastMsg} />
-  <LoadingOverlay
-    show={isLoading || isErasing}
-    text={progressMessage || (isErasing ? 'Securely erasing...' : 'Working...')}
-  />
+  {#if isLoading || isErasing}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="w-[min(32rem,calc(100%-2rem))] space-y-4 rounded-lg bg-card p-6 shadow-lg">
+        <div class="flex items-center gap-3">
+          <Skeleton class="size-12 rounded-full" aria-hidden="true" />
+          <div class="flex-1 space-y-2">
+            <Skeleton class="h-4 w-3/4" aria-hidden="true" />
+            <Skeleton class="h-3 w-1/2" aria-hidden="true" />
+          </div>
+        </div>
+        <div class="space-y-2">
+          <Skeleton class="h-3 w-full" aria-hidden="true" />
+          <Skeleton class="h-3 w-5/6" aria-hidden="true" />
+          <Skeleton class="h-3 w-4/6" aria-hidden="true" />
+        </div>
+        <p class="text-sm text-muted-foreground">
+          {progressMessage || (isErasing ? 'Securely erasing...' : 'Working...')}
+        </p>
+      </div>
+    </div>
+  {/if}
 </div>

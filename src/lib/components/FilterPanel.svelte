@@ -15,10 +15,10 @@
   }
 
   let {
-    searchTerm,
-    showFilters,
-    filters,
-    onClearFilters
+    searchTerm = $bindable(),
+    showFilters = $bindable(),
+    filters = $bindable(),
+    onClearFilters,
   }: {
     searchTerm: string;
     showFilters: boolean;
@@ -68,7 +68,7 @@
       <div class="space-y-2">
         <Label for="filter-status">Status</Label>
         <Select type="single" bind:value={filters.status}>
-          <SelectTrigger id="filter-status" class="w-full" placeholder="All statuses"/>
+          <SelectTrigger id="filter-status" class="w-full" placeholder="All statuses" />
           <SelectContent>
             <SelectItem value="">All statuses</SelectItem>
             <SelectItem value="available">Available</SelectItem>
@@ -81,7 +81,12 @@
           </SelectContent>
         </Select>
       </div>
-      <Button variant="secondary" size="sm" class="md:col-span-2 xl:col-span-3 w-fit" onclick={clearFilters}>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="md:col-span-2 xl:col-span-3 w-fit"
+        onclick={clearFilters}
+      >
         Reset filters
       </Button>
     </CardContent>

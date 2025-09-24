@@ -1,9 +1,26 @@
 <script lang="ts">
-  import { icons } from "$lib/icons";
+  import { icons } from '$lib/icons';
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import { initDownloadListener, disposeDownloadListener } from '$lib/downloadManager';
   import { downloads } from '$lib/downloads';
+  import type { Snippet } from 'svelte';
+
+  import {
+    Sidebar,
+    SidebarContent,
+    SidebarGroup,
+    SidebarGroupContent,
+    SidebarMenu,
+    SidebarMenuItem,
+    SidebarMenuButton,
+    SidebarProvider,
+  } from '$lib/components/ui/sidebar';
+  import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
+  import { Toaster } from '$lib/components/ui/sonner';
+
   import '../app.css';
 
   onMount(() => {
@@ -13,162 +30,187 @@
     disposeDownloadListener();
   });
 
-  const activeCount = $derived($downloads.filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
+  let { children }: { children?: Snippet } = $props();
+  let open = $state(true);
+  const collapsed = $derived(!open);
+
+  const activeCount = $derived(
+    $downloads.filter(
+      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+    ).length
+  );
+
+  function isActive(path: string) {
+    return $page.url.pathname === path;
+  }
 </script>
 
-<div class="app-container">
-  <nav class="sidebar">
-    <div class="profile-section">
-      <img src="/favicon.png" alt="Avelonia Logo" class="profile-pic" width="50" height="50" decoding="async" loading="eager" fetchpriority="low" />
-      <p class="app-name">Avelonia</p>
-    </div>
+<SidebarProvider bind:open class="h-screen w-full">
+  <Sidebar class={collapsed ? 'w-16' : 'w-64'} aria-expanded={open}>
+    <SidebarContent>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <div class="flex items-center justify-between px-3 py-3">
+            <div class="flex items-center gap-3">
+              <img
+                src="/favicon.png"
+                alt="Avelonia Logo"
+                class="h-10 w-10 rounded-full"
+                width="40"
+                height="40"
+              />
+              {#if !collapsed}
+                <p class="font-medium text-base">Avelonia</p>
+              {/if}
+            </div>
 
-    
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              onclick={() => (open = !open)}
+            >
+              <span aria-hidden="true">{@html icons.Dashboard}</span>
+            </Button>
+          </div>
+        </SidebarGroupContent>
+      </SidebarGroup>
 
-    <ul class="nav-links">
-      <li>
-        <a href="/dashboard" class:active-link={$page.url.pathname === '/dashboard'}>
-          <div class="icon">{@html icons.Dashboard}</div>
-          <span>Dashboard</span>
-        </a>
-      </li>
-      <li>
-        <a href="/optimize" class:active-link={$page.url.pathname === '/optimize'}>
-          <div class="icon">{@html icons.Optimize}</div>
-          <span>Optimize</span>
-        </a>
-      </li>
-      <li>
-        <a href="/downloader" class:active-link={$page.url.pathname === '/downloader'}>
-          <div class="icon">{@html icons.Downloader}</div>
-          <span>Downloader</span>
-          {#if activeCount > 0}
-            <span class="badge" aria-label={`Active downloads: ${activeCount}`}>{activeCount}</span>
-          {/if}
-        </a>
-      </li>
-      <li>
-        <a href="/cleaner" class:active-link={$page.url.pathname === '/cleaner'}>
-          <div class="icon">{@html icons.Cleaner}</div>
-          <span>Cleaner</span>
-        </a>
-      </li>
-      
-    </ul>
-  </nav>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                {#if collapsed}
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <a
+                        href="/dashboard"
+                        aria-current={isActive('/dashboard') ? 'page' : undefined}
+                        class="flex items-center gap-3"
+                      >
+                        <span class="size-6">{@html icons.Dashboard}</span>
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Dashboard</TooltipContent>
+                  </Tooltip>
+                {:else}
+                  <a
+                    href="/dashboard"
+                    aria-current={isActive('/dashboard') ? 'page' : undefined}
+                    class="flex items-center gap-3"
+                  >
+                    <span class="size-6">{@html icons.Dashboard}</span>
+                    <span>Dashboard</span>
+                  </a>
+                {/if}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
 
-  <main class="content-area">
-    <slot />
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                {#if collapsed}
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <a
+                        href="/optimize"
+                        aria-current={isActive('/optimize') ? 'page' : undefined}
+                        class="flex items-center gap-3"
+                      >
+                        <span class="size-6">{@html icons.Optimize}</span>
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Optimize</TooltipContent>
+                  </Tooltip>
+                {:else}
+                  <a
+                    href="/optimize"
+                    aria-current={isActive('/optimize') ? 'page' : undefined}
+                    class="flex items-center gap-3"
+                  >
+                    <span class="size-6">{@html icons.Optimize}</span>
+                    <span>Optimize</span>
+                  </a>
+                {/if}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                {#if collapsed}
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <a
+                        href="/downloader"
+                        aria-current={isActive('/downloader') ? 'page' : undefined}
+                        class="flex items-center gap-3"
+                      >
+                        <span class="size-6">{@html icons.Downloader}</span>
+                        {#if activeCount > 0}
+                          <Badge variant="secondary" aria-label={`Active downloads: ${activeCount}`}
+                            >{activeCount}</Badge
+                          >
+                        {/if}
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Downloader</TooltipContent>
+                  </Tooltip>
+                {:else}
+                  <a
+                    href="/downloader"
+                    aria-current={isActive('/downloader') ? 'page' : undefined}
+                    class="flex items-center gap-3"
+                  >
+                    <span class="size-6">{@html icons.Downloader}</span>
+                    <span>Downloader</span>
+                    {#if activeCount > 0}
+                      <Badge
+                        variant="secondary"
+                        class="ml-auto"
+                        aria-label={`Active downloads: ${activeCount}`}>{activeCount}</Badge
+                      >
+                    {/if}
+                  </a>
+                {/if}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                {#if collapsed}
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <a
+                        href="/cleaner"
+                        aria-current={isActive('/cleaner') ? 'page' : undefined}
+                        class="flex items-center gap-3"
+                      >
+                        <span class="size-6">{@html icons.Cleaner}</span>
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Cleaner</TooltipContent>
+                  </Tooltip>
+                {:else}
+                  <a
+                    href="/cleaner"
+                    aria-current={isActive('/cleaner') ? 'page' : undefined}
+                    class="flex items-center gap-3"
+                  >
+                    <span class="size-6">{@html icons.Cleaner}</span>
+                    <span>Cleaner</span>
+                  </a>
+                {/if}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </SidebarContent>
+  </Sidebar>
+
+  <main class="flex-1 overflow-y-auto p-8">
+    {@render children?.()}
   </main>
-</div>
+</SidebarProvider>
 
-<style>
-  .app-container {
-    display: flex;
-    height: 100vh;
-    background-color: var(--background);
-  }
-
-  .sidebar {
-    width: 250px;
-    flex: 0 0 250px; /* prevent flex shrink/expand */
-    min-width: 250px;
-    background-color: var(--secondary);
-    color: white;
-    padding: 0;
-    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
-    display: flex;
-    flex-direction: column;
-  }
-
-  .profile-section {
-    display: flex;
-    align-items: center;
-    height: 54px;
-    margin: 20px;
-    margin-bottom: 0;
-  }
-
-  .profile-pic {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    object-fit: cover;
-    margin-right: 15px;
-  }
-
-  .app-name {
-    font-family: "Inter", sans-serif;
-    font-weight: 500;
-    font-size: 18px;
-    color: var(--white);
-    margin: 0;
-  }
-
-  .nav-links {
-    list-style: none;
-    padding: 0;
-    margin: auto 0;
-    flex-grow: 1;
-  }
-
-  .nav-links li {
-    margin-bottom: 4px;
-  }
-
-  .nav-links a {
-    display: flex;
-    align-items: center;
-    color: white;
-    text-decoration: none;
-    padding: 10px 20px;
-    transition: background-color 0.3s ease, border-right-color 0.3s ease;
-    border-right: 2px solid transparent;
-  }
-
-  .nav-links a:hover {
-    background-color: var(--color-primary);
-    border-right-color: var(--color-accent);
-  }
-
-  .nav-links a.active-link {
-    background-color: var(--color-primary);
-    border-right-color: var(--color-accent);
-  }
-
-  .nav-links a span {
-    margin-left: 10px;
-    font-family: "Inter", sans-serif;
-    font-weight: 400;
-    font-size: 15px;
-    color: var(--white);
-  }
-
-  .icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-  }
-
-  .badge {
-    margin-left: auto;
-    background: var(--avelonia-purple);
-    color: #000;
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .content-area {
-    flex-grow: 1;
-    padding: 40px 30px;
-    overflow-y: auto;
-    scrollbar-gutter: stable; /* avoid layout shift when scrollbar appears */
-    min-width: 0; /* prevent flex overflow pushing sidebar */
-  }
-
-  
-</style>
+<Toaster richColors closeButton duration={4000} position="bottom-right" />

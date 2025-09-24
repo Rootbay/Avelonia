@@ -2,37 +2,29 @@
   import type { Download } from '$lib/downloadManager';
   import { getDownloadPath } from '$lib/downloadManager';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
-  import { createEventDispatcher } from 'svelte';
   import { Button } from '$lib/components/ui/button';
+  import { Checkbox } from '$lib/components/ui/checkbox';
+  import { Progress } from '$lib/components/ui/progress';
+  import { TableRow, TableCell } from '$lib/components/ui/table';
+  import { toast } from '$lib/components/ui/sonner';
 
-  export let download: Download;
-  export let startDownload: (id: number) => void;
-  export let cancelDownload: (id: number) => void;
-  export let selected = false;
+  const { download, selected, onToggleSelect, startDownload, cancelDownload } = $props<{
+    download: Download;
+    selected: boolean;
+    onToggleSelect?: (payload: { checked: boolean; shiftKey: boolean }) => void;
+    startDownload: (id: number) => void;
+    cancelDownload: (id: number) => void;
+  }>();
 
-  const dispatch = createEventDispatcher();
+  const downloading = $derived(
+    download.status === 'downloading' ||
+      download.status === 'pending' ||
+      download.status === 'queued'
+  );
 
-  function handleClick() {
-    const downloading = download.status === 'downloading' || download.status === 'pending' || download.status === 'queued';
-    if (downloading) {
-      cancelDownload(download.id);
-    } else {
-      startDownload(download.id);
-    }
-  }
+  const actionLabel = $derived(downloading ? 'Cancel download' : 'Start download');
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      handleClick();
-    }
-  }
-
-  $: actionLabel = (download.status === 'downloading' || download.status === 'pending' || download.status === 'queued')
-    ? 'Cancel download'
-    : 'Start download';
-
-  const statusTone = $derived(() => {
+  const statusTone = $derived.by(() => {
     switch (download.status) {
       case 'completed':
         return 'text-emerald-400';
@@ -47,6 +39,23 @@
     }
   });
 
+  function handleClick() {
+    if (downloading) {
+      cancelDownload(download.id);
+      toast.success(`Canceled ${download.name ?? 'download'}`);
+    } else {
+      startDownload(download.id);
+      toast.success(`Queued ${download.name ?? 'download'}`);
+    }
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleClick();
+    }
+  }
+
   async function ensurePath(): Promise<string | null> {
     return await getDownloadPath(download);
   }
@@ -54,85 +63,117 @@
   async function openFile(event: MouseEvent) {
     event.stopPropagation();
     const path = await ensurePath();
-    if (path) {
-      try {
-        await openPath(path);
-      } catch (error) {
-        console.warn('openPath failed', error);
-      }
+    if (!path) {
+      toast.error('File path is not available yet');
+      return;
+    }
+    try {
+      await openPath(path);
+      toast.success(`Opened ${download.name ?? 'file'}`);
+    } catch (error) {
+      console.warn('openPath failed', error);
+      toast.error('Unable to open file');
     }
   }
 
   async function showInFolder(event: MouseEvent) {
     event.stopPropagation();
     const path = await ensurePath();
-    if (path) {
-      try {
-        await revealItemInDir(path);
-      } catch (error) {
-        console.warn('revealItemInDir failed', error);
-      }
+    if (!path) {
+      toast.error('File path is not available yet');
+      return;
+    }
+    try {
+      await revealItemInDir(path);
+      toast.success(`Showing ${download.name ?? 'file'} in folder`);
+    } catch (error) {
+      console.warn('revealItemInDir failed', error);
+      toast.error('Unable to open containing folder');
     }
   }
 
   function retry(event: MouseEvent) {
     event.stopPropagation();
     startDownload(download.id);
+    toast.success(`Retrying ${download.name ?? 'download'}`);
   }
 
   async function copyLink(event: MouseEvent) {
     event.stopPropagation();
+    if (!download.downloadLink) {
+      toast.error('No download link available');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(download.downloadLink);
+      toast.success('Copied download link');
     } catch (error) {
       console.warn('clipboard failed', error);
+      toast.error('Unable to copy link');
     }
   }
 </script>
 
-<div
-  role="button"
-  tabindex="0"
-  class="relative grid gap-4 border-l-2 border-transparent px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[auto,minmax(220px,1fr),repeat(4,minmax(120px,0.6fr)),minmax(160px,0.8fr)] md:items-center data-[status=downloading]:border-primary data-[status=pending]:border-primary/70 data-[status=queued]:border-primary/70 data-[status=completed]:border-emerald-500 data-[status=failed]:border-destructive"
+<TableRow
   data-status={download.status}
-  on:click={handleClick}
-  on:keydown={handleKeydown}
+  onclick={handleClick}
+  onkeydown={handleKeydown}
   aria-label={actionLabel}
   title={actionLabel}
+  class="data-[status=downloading]:border-l-2 data-[status=downloading]:border-primary
+         data-[status=pending]:border-l-2 data-[status=pending]:border-primary/70
+         data-[status=queued]:border-l-2 data-[status=queued]:border-primary/70
+         data-[status=completed]:border-l-2 data-[status=completed]:border-emerald-500
+         data-[status=failed]:border-l-2 data-[status=failed]:border-destructive"
 >
-  <div class="flex items-center gap-3">
-    <input
-      type="checkbox"
-      checked={selected}
-      class="h-4 w-4 rounded border-border bg-background text-primary focus:ring-ring"
-      on:change={(event) => {
-        event.stopPropagation();
-        const target = event.target as HTMLInputElement;
-        dispatch('toggleSelect', { checked: target.checked, shiftKey: event.shiftKey });
-      }}
-      title="Select download"
-    />
-    <span class="flex size-8 items-center justify-center rounded-md border border-border bg-muted text-sm font-semibold uppercase text-muted-foreground">
-      {(download.name?.[0] ?? '?')}
-    </span>
-  </div>
-
-  <div class="flex flex-col gap-1 md:col-start-2">
-    <span class="line-clamp-1 font-medium text-foreground">{download.name}</span>
-    <div class="flex flex-wrap gap-3 text-xs text-muted-foreground md:hidden">
-      <span>{download.size}</span>
-      {#if download.fileType}<span>- {download.fileType}</span>{/if}
-      {#if download.category}<span>- {download.category}</span>{/if}
-      {#if download.eta}<span>- {download.eta}</span>{/if}
+  <TableCell class="w-[60px]">
+    <div class="flex items-center gap-2">
+      <Checkbox
+        checked={selected}
+        onchange={(event: Event) => {
+          event.stopPropagation();
+          const target = event.target as HTMLInputElement;
+          onToggleSelect?.({ checked: target.checked, shiftKey: (event as MouseEvent).shiftKey });
+        }}
+        title="Select download"
+      />
+      <span
+        class="flex size-8 items-center justify-center rounded-md border bg-muted text-sm font-semibold uppercase text-muted-foreground"
+      >
+        {download.name?.[0] ?? '?'}
+      </span>
     </div>
-  </div>
+  </TableCell>
 
-  <span class="hidden text-sm text-muted-foreground md:block">{download.size}</span>
-  <span class="hidden text-sm text-muted-foreground md:block">{download.fileType}</span>
-  <span class="hidden text-sm text-muted-foreground md:block">{download.category}</span>
-  <span class="hidden text-sm text-muted-foreground md:block">{download.eta}</span>
+  <TableCell>
+    <div class="flex flex-col gap-1">
+      <span class="line-clamp-1 font-medium">{download.name}</span>
+      <div class="flex flex-wrap gap-2 text-xs text-muted-foreground md:hidden">
+        <span>{download.size}</span>
+        {#if download.fileType}<span>- {download.fileType}</span>{/if}
+        {#if download.category}<span>- {download.category}</span>{/if}
+        {#if download.eta}<span>- {download.eta}</span>{/if}
+      </div>
+    </div>
+  </TableCell>
 
-  <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+  <TableCell class="hidden md:table-cell text-muted-foreground">
+    {download.size}
+  </TableCell>
+
+  <TableCell class="hidden md:table-cell text-muted-foreground">
+    {download.fileType}
+  </TableCell>
+
+  <TableCell class="hidden md:table-cell text-muted-foreground">
+    {download.category}
+  </TableCell>
+
+  <TableCell class="hidden md:table-cell text-muted-foreground">
+    {download.eta}
+  </TableCell>
+
+  <TableCell class="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
     <span class={`text-xs font-semibold uppercase tracking-wide ${statusTone}`}>
       {download.status}
       {#if download.progress < 0}
@@ -143,30 +184,19 @@
       {/if}
     </span>
     <div class="flex flex-wrap items-center gap-2">
-      <Button type="button" variant="ghost" size="sm" on:click={copyLink}>Copy</Button>
+      <Button type="button" variant="ghost" size="sm" onclick={copyLink}>Copy</Button>
       {#if download.status === 'completed'}
-        <Button type="button" variant="ghost" size="sm" on:click={openFile}>Open</Button>
-        <Button type="button" variant="ghost" size="sm" on:click={showInFolder}>Show</Button>
+        <Button type="button" variant="ghost" size="sm" onclick={openFile}>Open</Button>
+        <Button type="button" variant="ghost" size="sm" onclick={showInFolder}>Show</Button>
       {:else if download.status === 'failed'}
-        <Button type="button" variant="ghost" size="sm" on:click={retry}>Retry</Button>
+        <Button type="button" variant="ghost" size="sm" onclick={retry}>Retry</Button>
       {/if}
     </div>
-  </div>
+  </TableCell>
 
   {#if download.progress >= 0 && (download.status === 'downloading' || download.status === 'pending')}
-    <div
-      class="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-full bg-muted"
-      role="progressbar"
-      aria-valuemin="0"
-      aria-valuemax="100"
-      aria-valuenow={Math.floor(download.progress)}
-      aria-label="Download progress"
-    >
-      <div
-        class="h-full bg-primary transition-[width]"
-        style={`width: ${Math.min(100, Math.max(0, download.progress)).toFixed(2)}%`}
-      />
-    </div>
+    <TableCell colspan={7}>
+      <Progress value={Math.floor(download.progress)} max={100} aria-label="Download progress" />
+    </TableCell>
   {/if}
-</div>
-
+</TableRow>

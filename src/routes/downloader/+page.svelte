@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { downloads } from "$lib/downloads";
+  import { downloads } from '$lib/downloads';
   import FilterPanel from '$lib/components/FilterPanel.svelte';
   import DownloadItem from '$lib/components/DownloadItem.svelte';
   import { startDownload, cancelDownload, getDownloadPath } from '$lib/downloadManager';
@@ -9,28 +9,51 @@
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
-  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+  } from '$lib/components/ui/card';
   import { Separator } from '$lib/components/ui/separator';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-  import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet';
-  import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+  import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+    SheetTrigger,
+  } from '$lib/components/ui/sheet';
+  import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+  } from '$lib/components/ui/dialog';
+  import { toast } from '$lib/components/ui/sonner';
   import { ArrowUpDown, ListChecks, SlidersHorizontal, Keyboard } from '@lucide/svelte';
 
-  let searchTerm = $state("");
-  let debouncedSearchTerm = $state("");
+  let searchTerm = $state('');
+  let debouncedSearchTerm = $state('');
   $effect(() => {
-    const t = setTimeout(() => { debouncedSearchTerm = searchTerm; }, 150);
+    const t = setTimeout(() => {
+      debouncedSearchTerm = searchTerm;
+    }, 150);
     return () => clearTimeout(t);
   });
   let showFilters = $state(false);
   let actionsOpen = $state(false);
   let filters = $state({
-    fileType: "",
-    category: "",
-    minSize: "",
-    maxSize: "",
-    eta: "",
-    status: "",
+    fileType: '',
+    category: '',
+    minSize: '',
+    maxSize: '',
+    eta: '',
+    status: '',
   });
   type StatusGroup = 'all' | 'available' | 'active' | 'completed' | 'failed';
   type SortKey = 'name' | 'size' | 'status' | 'eta' | 'fileType' | 'category';
@@ -40,7 +63,7 @@
     { value: 'available', label: 'Available' },
     { value: 'active', label: 'Active' },
     { value: 'completed', label: 'Completed' },
-    { value: 'failed', label: 'Failed' }
+    { value: 'failed', label: 'Failed' },
   ];
 
   const sortOptions: Array<{ value: SortKey; label: string }> = [
@@ -49,7 +72,7 @@
     { value: 'fileType', label: 'File Type' },
     { value: 'category', label: 'Category' },
     { value: 'eta', label: 'ETA' },
-    { value: 'status', label: 'Status' }
+    { value: 'status', label: 'Status' },
   ];
 
   let statusGroup = $state<StatusGroup>('all');
@@ -64,13 +87,17 @@
 
   function toggleSelect(id: number, value?: boolean) {
     if (value === undefined) {
-      if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
     } else {
-      if (value) selectedIds.add(id); else selectedIds.delete(id);
+      if (value) selectedIds.add(id);
+      else selectedIds.delete(id);
     }
     selectedIds = new Set(selectedIds);
   }
-  function clearSelection() { selectedIds = new Set(); }
+  function clearSelection() {
+    selectedIds = new Set();
+  }
 
   const STORAGE_KEY = 'avelonia_downloader_ui_v1';
   onMount(() => {
@@ -88,7 +115,8 @@
           filters.status = s.filters.status ?? '';
         }
         if (typeof s?.sortBy === 'string') sortBy = s.sortBy;
-        if (s?.sortDirection === 'asc' || s?.sortDirection === 'desc') sortDirection = s.sortDirection;
+        if (s?.sortDirection === 'asc' || s?.sortDirection === 'desc')
+          sortDirection = s.sortDirection;
         if (s?.statusGroup) statusGroup = s.statusGroup;
       }
     } catch {}
@@ -101,12 +129,23 @@
         selectedIds = new Set(selectedIds);
         return;
       }
-      if (e.key === 'Escape') { clearSelection(); return; }
-      if (e.key === 'Delete' || e.key === 'Backspace') { cancelSelected(); return; }
-      if (e.key === 'Enter') { startSelected(); return; }
+      if (e.key === 'Escape') {
+        clearSelection();
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        cancelSelected();
+        return;
+      }
+      if (e.key === 'Enter') {
+        startSelected();
+        return;
+      }
     };
     window.addEventListener('keydown', keyHandler);
-    return () => { window.removeEventListener('keydown', keyHandler); };
+    return () => {
+      window.removeEventListener('keydown', keyHandler);
+    };
   });
   $effect(() => {
     try {
@@ -116,7 +155,6 @@
       );
     } catch {}
   });
-
 
   function toBytes(val: string | number | undefined | null): number {
     if (val === undefined || val === null) return 0;
@@ -132,7 +170,7 @@
       MB: 1024 ** 2,
       GB: 1024 ** 3,
       TB: 1024 ** 4,
-      PB: 1024 ** 5
+      PB: 1024 ** 5,
     };
     return num * (map[unit] ?? 1);
   }
@@ -144,7 +182,7 @@
     downloading: 4,
     paused: 5,
     completed: 6,
-    failed: 7
+    failed: 7,
   };
 
   function sortDownloads(a: Download, b: Download) {
@@ -199,63 +237,82 @@
   }
 
   const filteredDownloads = $derived(
-    $downloads.filter((download) => {
-      const matchesSearchTerm = download.name
-        .toLowerCase()
-        .includes(debouncedSearchTerm.toLowerCase());
-      const matchesFileType = filters.fileType
-        ? download.fileType.toLowerCase().includes(filters.fileType.toLowerCase())
-        : true;
-      const matchesCategory = filters.category
-        ? download.category.toLowerCase().includes(filters.category.toLowerCase())
-        : true;
+    $downloads
+      .filter((download) => {
+        const matchesSearchTerm = download.name
+          .toLowerCase()
+          .includes(debouncedSearchTerm.toLowerCase());
+        const matchesFileType = filters.fileType
+          ? download.fileType.toLowerCase().includes(filters.fileType.toLowerCase())
+          : true;
+        const matchesCategory = filters.category
+          ? download.category.toLowerCase().includes(filters.category.toLowerCase())
+          : true;
 
-      const downloadSizeBytes = toBytes(download.size);
-      const minSizeBytes = filters.minSize !== '' ? toBytes(filters.minSize) : undefined;
-      const maxSizeBytes = filters.maxSize !== '' ? toBytes(filters.maxSize) : undefined;
+        const downloadSizeBytes = toBytes(download.size);
+        const minSizeBytes = filters.minSize !== '' ? toBytes(filters.minSize) : undefined;
+        const maxSizeBytes = filters.maxSize !== '' ? toBytes(filters.maxSize) : undefined;
 
-      const matchesMinSize = minSizeBytes !== undefined ? downloadSizeBytes >= minSizeBytes : true;
-      const matchesMaxSize = maxSizeBytes !== undefined ? downloadSizeBytes <= maxSizeBytes : true;
+        const matchesMinSize =
+          minSizeBytes !== undefined ? downloadSizeBytes >= minSizeBytes : true;
+        const matchesMaxSize =
+          maxSizeBytes !== undefined ? downloadSizeBytes <= maxSizeBytes : true;
 
-      const matchesETA = filters.eta
-        ? download.eta.toLowerCase().includes(filters.eta.toLowerCase())
-        : true;
-      const matchesStatus = filters.status
-        ? download.status.toLowerCase() === filters.status.toLowerCase()
-        : true;
+        const matchesETA = filters.eta
+          ? download.eta.toLowerCase().includes(filters.eta.toLowerCase())
+          : true;
+        const matchesStatus = filters.status
+          ? download.status.toLowerCase() === filters.status.toLowerCase()
+          : true;
 
-      const matchesGroup = (() => {
-        switch (statusGroup) {
-          case 'available': return download.status === 'available';
-          case 'completed': return download.status === 'completed';
-          case 'failed': return download.status === 'failed';
-          case 'active': return download.status === 'downloading' || download.status === 'pending' || download.status === 'queued';
-          default: return true;
-        }
-      })();
+        const matchesGroup = (() => {
+          switch (statusGroup) {
+            case 'available':
+              return download.status === 'available';
+            case 'completed':
+              return download.status === 'completed';
+            case 'failed':
+              return download.status === 'failed';
+            case 'active':
+              return (
+                download.status === 'downloading' ||
+                download.status === 'pending' ||
+                download.status === 'queued'
+              );
+            default:
+              return true;
+          }
+        })();
 
-      return (
-        matchesSearchTerm &&
-        matchesFileType &&
-        matchesCategory &&
-        matchesMinSize &&
-        matchesMaxSize &&
-        matchesETA &&
-        matchesStatus &&
-        matchesGroup
-      );
-    }).sort(sortDownloads)
+        return (
+          matchesSearchTerm &&
+          matchesFileType &&
+          matchesCategory &&
+          matchesMinSize &&
+          matchesMaxSize &&
+          matchesETA &&
+          matchesStatus &&
+          matchesGroup
+        );
+      })
+      .sort(sortDownloads)
   );
 
   const totalDownloads = $derived($downloads.length);
   const availableDownloads = $derived(filteredDownloads.length);
-  const activeCount = $derived($downloads.filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
-  const completedCount = $derived($downloads.filter(d => d.status === 'completed').length);
-  const failedCount = $derived($downloads.filter(d => d.status === 'failed').length);
-  const selectedCompletedCount = $derived(filteredDownloads.filter(d => selectedIds.has(d.id) && d.status === 'completed').length);
+  const activeCount = $derived(
+    $downloads.filter(
+      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+    ).length
+  );
+  const completedCount = $derived($downloads.filter((d) => d.status === 'completed').length);
+  const failedCount = $derived($downloads.filter((d) => d.status === 'failed').length);
+  const selectedCompletedCount = $derived(
+    filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'completed').length
+  );
 
   $effect(() => {
-    const filteredIds = new Set(filteredDownloads.map(d => d.id));
+    const filteredIds = new Set(filteredDownloads.map((d) => d.id));
     let selectedInFilter = 0;
     for (const id of filteredIds) if (selectedIds.has(id)) selectedInFilter++;
     if (selectAllCheckbox) {
@@ -269,21 +326,26 @@
 
   function formatBytes(bytes: number): string {
     if (!isFinite(bytes) || bytes <= 0) return '0 B';
-    const units = ['B','KB','MB','GB','TB','PB'];
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
     let i = 0;
-    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    while (bytes >= 1024 && i < units.length - 1) {
+      bytes /= 1024;
+      i++;
+    }
     return `${bytes.toFixed(bytes >= 100 ? 0 : 1)} ${units[i]}`;
   }
-  const filteredTotalBytes = $derived(filteredDownloads.reduce((sum, d) => sum + toBytes(d.size), 0));
+  const filteredTotalBytes = $derived(
+    filteredDownloads.reduce((sum, d) => sum + toBytes(d.size), 0)
+  );
 
   function handleClearFilters() {
-    searchTerm = "";
-    filters.fileType = "";
-    filters.category = "";
-    filters.minSize = "";
-    filters.maxSize = "";
-    filters.eta = "";
-    filters.status = "";
+    searchTerm = '';
+    filters.fileType = '';
+    filters.category = '';
+    filters.minSize = '';
+    filters.maxSize = '';
+    filters.eta = '';
+    filters.status = '';
   }
 
   function startAll() {
@@ -303,55 +365,158 @@
   }
 
   function startAllFiltered() {
+    let queued = 0;
     for (const d of filteredDownloads) {
-      if (d.status === 'available' && d.downloadLink) startDownload(d.id);
+      if (d.status === 'available' && d.downloadLink) {
+        startDownload(d.id);
+        queued += 1;
+      }
+    }
+    if (queued > 0) {
+      toast.success(`Queued ${queued} download${queued === 1 ? '' : 's'}`);
+    } else {
+      toast.info('No available downloads to start');
     }
   }
   function cancelAllFiltered() {
+    let canceled = 0;
     for (const d of filteredDownloads) {
-      if (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued') cancelDownload(d.id);
+      if (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued') {
+        cancelDownload(d.id);
+        canceled += 1;
+      }
+    }
+    if (canceled > 0) {
+      toast.success(`Canceled ${canceled} download${canceled === 1 ? '' : 's'}`);
+    } else {
+      toast.info('No active downloads to cancel');
     }
   }
   function startSelected() {
+    let queued = 0;
     for (const d of filteredDownloads) {
-      if (selectedIds.has(d.id) && d.status === 'available' && d.downloadLink) startDownload(d.id);
+      if (selectedIds.has(d.id) && d.status === 'available' && d.downloadLink) {
+        startDownload(d.id);
+        queued += 1;
+      }
+    }
+    if (queued > 0) {
+      toast.success(`Queued ${queued} selected download${queued === 1 ? '' : 's'}`);
+    } else {
+      toast.info('Select an available download first');
     }
   }
   function cancelSelected() {
+    let canceled = 0;
     for (const d of filteredDownloads) {
-      if (selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')) cancelDownload(d.id);
+      if (
+        selectedIds.has(d.id) &&
+        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+      ) {
+        cancelDownload(d.id);
+        canceled += 1;
+      }
+    }
+    if (canceled > 0) {
+      toast.success(`Canceled ${canceled} selected download${canceled === 1 ? '' : 's'}`);
+    } else {
+      toast.info('No active selected downloads to cancel');
     }
   }
 
   async function openSelectedCompleted() {
-    const items = filteredDownloads.filter(d => selectedIds.has(d.id) && d.status === 'completed');
+    const items = filteredDownloads.filter(
+      (d) => selectedIds.has(d.id) && d.status === 'completed'
+    );
+    if (items.length === 0) {
+      toast.info('Select a completed download first');
+      return;
+    }
+    let opened = 0;
+    let failures = 0;
     for (const d of items) {
       try {
         const p = await getDownloadPath(d);
-        if (p) await openPath(p);
-      } catch {}
+        if (p) {
+          await openPath(p);
+          opened += 1;
+        } else {
+          failures += 1;
+        }
+      } catch (error) {
+        console.error('openSelectedCompleted failed', error);
+        failures += 1;
+      }
+    }
+    if (opened > 0) {
+      toast.success(`Opened ${opened} completed download${opened === 1 ? '' : 's'}`);
+    }
+    if (failures > 0) {
+      toast.error('Some items could not be opened');
     }
   }
 
   async function showSelectedCompleted() {
-    const items = filteredDownloads.filter(d => selectedIds.has(d.id) && d.status === 'completed');
+    const items = filteredDownloads.filter(
+      (d) => selectedIds.has(d.id) && d.status === 'completed'
+    );
+    if (items.length === 0) {
+      toast.info('Select a completed download first');
+      return;
+    }
+    let revealed = 0;
+    let failures = 0;
     for (const d of items) {
       try {
         const p = await getDownloadPath(d);
-        if (p) await revealItemInDir(p);
-      } catch {}
+        if (p) {
+          await revealItemInDir(p);
+          revealed += 1;
+        } else {
+          failures += 1;
+        }
+      } catch (error) {
+        console.error('showSelectedCompleted failed', error);
+        failures += 1;
+      }
+    }
+    if (revealed > 0) {
+      toast.success(
+        `Revealed ${revealed} download${revealed === 1 ? '' : 's'} in the file explorer`
+      );
+    }
+    if (failures > 0) {
+      toast.error('Some items could not be shown');
     }
   }
 
   function retryFailedFiltered() {
+    let retried = 0;
     for (const d of filteredDownloads) {
-      if (d.status === 'failed' && d.downloadLink) startDownload(d.id);
+      if (d.status === 'failed' && d.downloadLink) {
+        startDownload(d.id);
+        retried += 1;
+      }
+    }
+    if (retried > 0) {
+      toast.success(`Retrying ${retried} failed download${retried === 1 ? '' : 's'}`);
+    } else {
+      toast.info('No failed downloads in view to retry');
     }
   }
   function retryAllFailed() {
     const list = get(downloads);
+    let retried = 0;
     for (const d of list) {
-      if (d.status === 'failed' && d.downloadLink) startDownload(d.id);
+      if (d.status === 'failed' && d.downloadLink) {
+        startDownload(d.id);
+        retried += 1;
+      }
+    }
+    if (retried > 0) {
+      toast.success(`Retrying ${retried} failed download${retried === 1 ? '' : 's'}`);
+    } else {
+      toast.info('No failed downloads to retry');
     }
   }
 
@@ -360,7 +525,8 @@
     if (lastSelectedIndex === null) {
       const id = filteredDownloads[currentIndex]?.id;
       if (id !== undefined) {
-        if (value) selectedIds.add(id); else selectedIds.delete(id);
+        if (value) selectedIds.add(id);
+        else selectedIds.delete(id);
       }
     } else {
       const start = Math.min(lastSelectedIndex, currentIndex);
@@ -368,7 +534,8 @@
       for (let i = start; i <= end; i++) {
         const id = filteredDownloads[i]?.id;
         if (id !== undefined) {
-          if (value) selectedIds.add(id); else selectedIds.delete(id);
+          if (value) selectedIds.add(id);
+          else selectedIds.delete(id);
         }
       }
     }
@@ -383,14 +550,15 @@
       setTimeout(() => (announce = ''), 1200);
       return;
     }
-    if (value) selectedIds.add(id); else selectedIds.delete(id);
+    if (value) selectedIds.add(id);
+    else selectedIds.delete(id);
     selectedIds = new Set(selectedIds);
     lastSelectedIndex = index;
   }
 
   function invertSelection() {
     const next = new Set<number>();
-    const visible = new Set(filteredDownloads.map(d => d.id));
+    const visible = new Set(filteredDownloads.map((d) => d.id));
     for (const id of visible) {
       if (!selectedIds.has(id)) next.add(id);
     }
@@ -405,22 +573,30 @@
   }
 
   async function copySelectedLinks() {
-    const links = filteredDownloads.filter(d => selectedIds.has(d.id) && d.downloadLink).map(d => d.downloadLink);
-    if (links.length === 0) return;
+    const links = filteredDownloads
+      .filter((d) => selectedIds.has(d.id) && d.downloadLink)
+      .map((d) => d.downloadLink);
+    if (links.length === 0) {
+      toast.info('Select at least one download first');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(links.join('\n'));
       announce = `Copied ${links.length} link${links.length === 1 ? '' : 's'} to clipboard`;
+      toast.success(announce);
       setTimeout(() => (announce = ''), 2000);
-    } catch {
+    } catch (error) {
+      console.error('copySelectedLinks failed', error);
       announce = 'Copy failed';
+      toast.error('Failed to copy download links');
       setTimeout(() => (announce = ''), 2000);
     }
   }
 
   function exportFilteredCSV() {
     const rows = [
-      ['ID','Name','Size','File Type','Category','ETA','Status','Link'],
-      ...filteredDownloads.map(d => [
+      ['ID', 'Name', 'Size', 'File Type', 'Category', 'ETA', 'Status', 'Link'],
+      ...filteredDownloads.map((d) => [
         String(d.id),
         d.name ?? '',
         String(d.size ?? ''),
@@ -428,13 +604,19 @@
         d.category ?? '',
         d.eta ?? '',
         d.status ?? '',
-        d.downloadLink ?? ''
-      ])
+        d.downloadLink ?? '',
+      ]),
     ];
-    const csv = rows.map(r => r.map((v) => {
-      const s = String(v ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    }).join(',')).join('\n');
+    const csv = rows
+      .map((r) =>
+        r
+          .map((v) => {
+            const s = String(v ?? '');
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+          })
+          .join(',')
+      )
+      .join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -445,6 +627,7 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     announce = 'Exported filtered list as CSV';
+    toast.success(announce);
     setTimeout(() => (announce = ''), 2000);
   }
 </script>
@@ -493,29 +676,68 @@
               <SheetContent side="right" class="w-[320px] sm:w-[360px]">
                 <SheetHeader>
                   <SheetTitle>Bulk actions</SheetTitle>
-                  <SheetDescription>Apply actions to the current selection or filtered list.</SheetDescription>
+                  <SheetDescription
+                    >Apply actions to the current selection or filtered list.</SheetDescription
+                  >
                 </SheetHeader>
                 <div class="mt-4 grid gap-3">
-                  <Button type="button" onclick={() => { startAll(); actionsOpen = false; }}>Start all</Button>
-                  <Button type="button" variant="destructive" onclick={() => { cancelAllActive(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    onclick={() => {
+                      startAll();
+                      actionsOpen = false;
+                    }}>Start all</Button
+                  >
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onclick={() => {
+                      cancelAllActive();
+                      actionsOpen = false;
+                    }}
+                  >
                     Cancel active
                   </Button>
                   <Separator class="my-1" />
-                  <Button type="button" variant="outline" onclick={() => { startAllFiltered(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onclick={() => {
+                      startAllFiltered();
+                      actionsOpen = false;
+                    }}
+                  >
                     Start filtered
                   </Button>
-                  <Button type="button" variant="outline" onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onclick={() => {
+                      cancelAllFiltered();
+                      actionsOpen = false;
+                    }}
+                  >
                     Cancel filtered
                   </Button>
                   <Separator class="my-1" />
-                  <Button type="button" disabled={selectedIds.size === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    disabled={selectedIds.size === 0}
+                    onclick={() => {
+                      startSelected();
+                      actionsOpen = false;
+                    }}
+                  >
                     Start selected
                   </Button>
                   <Button
                     type="button"
                     variant="destructive"
                     disabled={selectedIds.size === 0}
-                    onclick={() => { cancelSelected(); actionsOpen = false; }}
+                    onclick={() => {
+                      cancelSelected();
+                      actionsOpen = false;
+                    }}
                   >
                     Cancel selected
                   </Button>
@@ -524,18 +746,42 @@
                     type="button"
                     variant="outline"
                     disabled={selectedIds.size === 0}
-                    onclick={() => { copySelectedLinks(); actionsOpen = false; }}
+                    onclick={() => {
+                      copySelectedLinks();
+                      actionsOpen = false;
+                    }}
                   >
                     Copy selected links
                   </Button>
-                  <Button type="button" variant="outline" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onclick={() => {
+                      exportFilteredCSV();
+                      actionsOpen = false;
+                    }}
+                  >
                     Export CSV
                   </Button>
                   <Separator class="my-1" />
-                  <Button type="button" variant="outline" onclick={() => { retryFailedFiltered(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onclick={() => {
+                      retryFailedFiltered();
+                      actionsOpen = false;
+                    }}
+                  >
                     Retry failed (filtered)
                   </Button>
-                  <Button type="button" variant="outline" onclick={() => { retryAllFailed(); actionsOpen = false; }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onclick={() => {
+                      retryAllFailed();
+                      actionsOpen = false;
+                    }}
+                  >
                     Retry all failed
                   </Button>
                 </div>
@@ -545,7 +791,7 @@
 
           <div class="flex items-center gap-2">
             <Select type="single" bind:value={sortBy}>
-              <SelectTrigger class="w-36" placeholder="Sort by"/>
+              <SelectTrigger class="w-36" placeholder="Sort by" />
               <SelectContent>
                 {#each sortOptions as option}
                   <SelectItem value={option.value}>{option.label}</SelectItem>
@@ -568,7 +814,11 @@
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Quick status filters">
+        <div
+          class="flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Quick status filters"
+        >
           {#each statusFilters as filter}
             <Button
               type="button"
@@ -584,22 +834,25 @@
     </CardHeader>
   </Card>
 
-  <FilterPanel
-    bind:searchTerm={searchTerm}
-    bind:showFilters={showFilters}
-    bind:filters={filters}
-    on:clearFilters={handleClearFilters}
-  />
+  <FilterPanel bind:searchTerm bind:showFilters bind:filters onClearFilters={handleClearFilters} />
 
   <Card class="overflow-hidden border border-border/60">
     {#if selectedIds.size > 0}
-      <div class="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/40 px-4 py-3 text-sm">
+      <div
+        class="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/40 px-4 py-3 text-sm"
+      >
         <span><strong>{selectedIds.size}</strong> selected</span>
         <div class="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" onclick={startSelected}>Start</Button>
-          <Button type="button" size="sm" variant="destructive" onclick={cancelSelected}>Cancel</Button>
-          <Button type="button" size="sm" variant="outline" onclick={copySelectedLinks}>Copy links</Button>
-          <Button type="button" size="sm" variant="outline" onclick={exportFilteredCSV}>Export CSV</Button>
+          <Button type="button" size="sm" variant="destructive" onclick={cancelSelected}
+            >Cancel</Button
+          >
+          <Button type="button" size="sm" variant="outline" onclick={copySelectedLinks}
+            >Copy links</Button
+          >
+          <Button type="button" size="sm" variant="outline" onclick={exportFilteredCSV}
+            >Export CSV</Button
+          >
           <Button
             type="button"
             size="sm"
@@ -625,7 +878,9 @@
     {/if}
 
     <CardContent class="p-0">
-      <div class="hidden border-b border-border/60 bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[auto,minmax(220px,1fr),repeat(4,minmax(120px,0.6fr)),minmax(160px,0.8fr)] md:items-center md:gap-3">
+      <div
+        class="hidden border-b border-border/60 bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[auto,minmax(220px,1fr),repeat(4,minmax(120px,0.6fr)),minmax(160px,0.8fr)] md:items-center md:gap-3"
+      >
         <span class="flex justify-center">
           <input
             bind:this={selectAllCheckbox}
@@ -640,9 +895,12 @@
         </span>
         {#each sortOptions as option (option.value)}
           <button
-            type="button"
             class="flex items-center gap-1 text-left transition hover:text-foreground"
-            aria-sort={sortBy === option.value ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+            aria-sort={sortBy === option.value
+              ? sortDirection === 'asc'
+                ? 'ascending'
+                : 'descending'
+              : 'none'}
             onclick={() => setSort(option.value)}
             onkeydown={(event) => handleHeaderKey(event, option.value)}
           >
@@ -661,7 +919,8 @@
             {startDownload}
             {cancelDownload}
             selected={isSelected(download.id)}
-            on:toggleSelect={(event) => toggleSelectWithIndex(download.id, event.detail?.checked ?? false, i, !!event.detail?.shiftKey)}
+            onToggleSelect={(payload) =>
+              toggleSelectWithIndex(download.id, payload?.checked ?? false, i, !!payload?.shiftKey)}
           />
         {/each}
         {#if filteredDownloads.length === 0}
@@ -671,7 +930,10 @@
               type="button"
               variant="outline"
               size="sm"
-              onclick={() => { handleClearFilters(); statusGroup = 'all'; }}
+              onclick={() => {
+                handleClearFilters();
+                statusGroup = 'all';
+              }}
             >
               Reset filters
             </Button>

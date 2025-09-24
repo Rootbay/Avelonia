@@ -2,7 +2,6 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
-  import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
   import { openPath } from '@tauri-apps/plugin-opener';
 
   import { Button } from '$lib/components/ui/button';
@@ -11,6 +10,7 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { ScrollArea } from '$lib/components/ui/scroll-area';
   import { Separator } from '$lib/components/ui/separator';
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js';
   import { Alert, AlertDescription } from '$lib/components/ui/alert';
   import {
     AlertDialog,
@@ -498,7 +498,30 @@
   </div>
 </div>
 
-<LoadingOverlay show={isBusy} text={'Working...'} />
+{#if isBusy}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+    role="status"
+    aria-live="polite"
+    aria-busy="true"
+  >
+    <div class="w-[min(28rem,calc(100%-2rem))] space-y-4 rounded-lg bg-card p-6 shadow-lg">
+      <div class="flex items-center gap-3">
+        <Skeleton class="size-10 rounded-full" aria-hidden="true" />
+        <div class="flex-1 space-y-2">
+          <Skeleton class="h-4 w-3/4" aria-hidden="true" />
+          <Skeleton class="h-3 w-1/2" aria-hidden="true" />
+        </div>
+      </div>
+      <div class="space-y-2">
+        <Skeleton class="h-3 w-full" aria-hidden="true" />
+        <Skeleton class="h-3 w-5/6" aria-hidden="true" />
+        <Skeleton class="h-3 w-4/6" aria-hidden="true" />
+      </div>
+      <p class="text-sm text-muted-foreground">Working...</p>
+    </div>
+  </div>
+{/if}
 
 <AlertDialog bind:open={showWinsockConfirm}>
   <AlertDialogContent>

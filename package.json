@@ -20,7 +20,8 @@
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.5.0",
-    "shadcn-svelte": "^1.0.7"
+    "shadcn-svelte": "^1.0.7",
+    "svelte-sonner": "^0.3.23"
   },
   "devDependencies": {
     "@internationalized/date": "^3.9.0",
@@ -51,6 +52,7 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.7",
     "vite-plugin-compression": "^0.5.1",
-    "vite-plugin-pwa": "^1.0.3"
+    "vite-plugin-pwa": "^1.0.3",
+    "globals": "^15.12.0"
   }
 }
