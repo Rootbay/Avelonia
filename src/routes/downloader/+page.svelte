@@ -58,6 +58,8 @@
   type StatusGroup = 'all' | 'available' | 'active' | 'completed' | 'failed';
   type SortKey = 'name' | 'size' | 'status' | 'eta' | 'fileType' | 'category';
 
+  type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
+
   const statusFilters: Array<{ value: StatusGroup; label: string }> = [
     { value: 'all', label: 'All' },
     { value: 'available', label: 'Available' },
@@ -666,13 +668,22 @@
               <SlidersHorizontal class="size-4" />
               <span class="ml-2 hidden sm:inline">Filters</span>
             </Button>
-            <Sheet bind:open={actionsOpen}>
-              <SheetTrigger>
-                <Button type="button" variant="secondary">
+              {#snippet ActionsTrigger({ props }: ButtonSnippetContext)}
+                {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
+                {@const { class: propsClass, ...restWithoutClass } = rawProps}
+                {@const restProps = restWithoutClass as Record<string, unknown>}
+                <Button
+                  {...restProps}
+                  type="button"
+                  variant="secondary"
+                  class={propsClass}
+                >
                   <ListChecks class="size-4" />
                   <span class="ml-2 hidden sm:inline">Actions</span>
                 </Button>
-              </SheetTrigger>
+              {/snippet}
+            <Sheet bind:open={actionsOpen}>
+              <SheetTrigger child={ActionsTrigger} />
               <SheetContent side="right" class="w-[320px] sm:w-[360px]">
                 <SheetHeader>
                   <SheetTitle>Bulk actions</SheetTitle>
@@ -894,21 +905,27 @@
           />
         </span>
         {#each sortOptions as option (option.value)}
-          <button
-            class="flex items-center gap-1 text-left transition hover:text-foreground"
+          <div
+            role="columnheader"
             aria-sort={sortBy === option.value
               ? sortDirection === 'asc'
                 ? 'ascending'
                 : 'descending'
               : 'none'}
-            onclick={() => setSort(option.value)}
-            onkeydown={(event) => handleHeaderKey(event, option.value)}
+            class="flex items-center"
           >
-            <span>{option.label}</span>
-            {#if sortBy === option.value}
-              <ArrowUpDown class="size-3 transition rotate-180={sortDirection === 'asc'}" />
-            {/if}
-          </button>
+            <button
+              type="button"
+              class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+              onclick={() => setSort(option.value)}
+              onkeydown={(event) => handleHeaderKey(event, option.value)}
+            >
+              <span>{option.label}</span>
+              {#if sortBy === option.value}
+                <ArrowUpDown class="size-3 transition rotate-180={sortDirection === 'asc'}" />
+              {/if}
+            </button>
+          </div>
         {/each}
       </div>
 

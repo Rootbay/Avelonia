@@ -1,0 +1,43 @@
+*** Begin Patch
+*** Update File: src/routes/+layout.svelte
+@@
+-                  {#snippet SettingsButtonContent({ props })}
+-                    {@const { class: propsClass, ...restProps } = props ?? {}}
+-                    <Button
+-                      {...restProps}
+-                      variant="outline"
+-                      size="icon"
+-                      class={cn('relative', propsClass)}
+-                      aria-label="Open settings"
+-                    >
++                  {#snippet SettingsButtonContent({ props }: ButtonSnippetContext)}
++                    {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
++                    {@const { class: propsClass, ...restWithoutClass } = rawProps}
++                    {@const restProps = restWithoutClass as Record<string, unknown>}
++                    <Button
++                      {...restProps}
++                      variant="outline"
++                      size="icon"
++                      class={cn('relative', propsClass)}
++                      aria-label="Open settings"
++                    >
+@@
+-                  {#snippet SettingsButtonExpanded({ props })}
+-                    {@const { class: propsClass, ...restProps } = props ?? {}}
+-                    <Button
+-                      {...restProps}
+-                      variant="outline"
+-                      class={cn('flex items-center gap-2', propsClass)}
+-                      aria-label="Open settings"
+-                    >
++                  {#snippet SettingsButtonExpanded({ props }: ButtonSnippetContext)}
++                    {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
++                    {@const { class: propsClass, ...restWithoutClass } = rawProps}
++                    {@const restProps = restWithoutClass as Record<string, unknown>}
++                    <Button
++                      {...restProps}
++                      variant="outline"
++                      class={cn('flex items-center gap-2', propsClass)}
++                      aria-label="Open settings"
++                    >
+*** End Patch

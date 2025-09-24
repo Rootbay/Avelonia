@@ -1,14 +1,28 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { downloads } from '$lib/downloads';
   import type { Download } from '$lib/downloadManager';
 
-  import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '$lib/components/ui/card';
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+  } from '$lib/components/ui/card';
   import { Separator } from '$lib/components/ui/separator';
   import { ScrollArea } from '$lib/components/ui/scroll-area';
   import { Badge } from '$lib/components/ui/badge';
   import { Progress } from '$lib/components/ui/progress';
-  import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '$lib/components/ui/table';
+  import {
+    Table,
+    TableHeader,
+    TableRow,
+    TableHead,
+    TableBody,
+    TableCell,
+  } from '$lib/components/ui/table';
   import { Cpu, MemoryStick, HardDrive, DownloadIcon } from '@lucide/svelte';
 
   let cpuUsage = $state(0);
@@ -23,6 +37,18 @@
     message: string;
   }
   let systemLogs = $state<LogEntry[]>([]);
+
+  const MAX_LOG_ENTRIES = 200;
+
+  const downloadStatusLabels: Record<Download['status'], string> = {
+    available: 'Available',
+    pending: 'Preparing',
+    downloading: 'Downloading',
+    paused: 'Paused',
+    completed: 'Completed',
+    queued: 'Queued',
+    failed: 'Failed',
+  };
 
   function formatBytes(bytes: number, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
@@ -39,24 +65,11 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  function generateMockLog() {
-    const levels: LogEntry['level'][] = ['INFO', 'WARN', 'ERROR'];
-    const messages = [
-      'Scheduled task ran successfully',
-      'Cache warmed: 24 entries',
-      'Connection pool at capacity (8/8)',
-      'Background sync completed',
-      'Auth token refreshed',
-      'High memory usage detected',
-      'Disk IO throttled temporarily',
-      'API rate limit nearing threshold',
-      'Configuration reloaded',
-      'Retrying message delivery to queue'
+  function pushLog(level: LogEntry['level'], message: string) {
+    systemLogs = [
+      ...systemLogs.slice(-MAX_LOG_ENTRIES + 1),
+      { timestamp: getTimestamp(), level, message },
     ];
-    const level = levels[Math.floor(Math.random() * levels.length)];
-    const msg = messages[Math.floor(Math.random() * messages.length)];
-    systemLogs = [...systemLogs, { timestamp: getTimestamp(), level, message: msg }];
-    if (systemLogs.length > 100) systemLogs = systemLogs.slice(systemLogs.length - 100);
   }
 
   function levelBadgeClass(level: LogEntry['level']) {
@@ -64,6 +77,51 @@
     if (level === 'WARN') return 'border-yellow-500/20 text-yellow-700 bg-yellow-500/10';
     return 'border-red-500/20 text-red-700 bg-red-500/10';
   }
+
+  function readableDownloadStatus(status: Download['status']) {
+    return downloadStatusLabels[status] ?? status;
+  }
+
+  function getProgressValue(progress: number) {
+    if (!Number.isFinite(progress) || progress < 0) return null;
+    return Math.max(0, Math.min(100, Math.floor(progress)));
+  }
+
+  function describeDownloadTransition(
+    dl: Download,
+    previousStatus: Download['status'] | undefined
+  ): { level: LogEntry['level']; message: string } | null {
+    switch (dl.status) {
+      case 'queued':
+        return { level: 'INFO', message: `Download ${dl.name} queued.` };
+      case 'pending':
+        return { level: 'INFO', message: `Download ${dl.name} preparing...` };
+      case 'downloading':
+        if (previousStatus === 'downloading') return null;
+        return { level: 'INFO', message: `Download ${dl.name} started.` };
+      case 'completed': {
+        const targetDetail = dl.targetPath ? ` -> Saved to ${dl.targetPath}` : '';
+        return { level: 'INFO', message: `Download ${dl.name} completed${targetDetail}.` };
+      }
+      case 'failed':
+        return { level: 'ERROR', message: `Download ${dl.name} failed.` };
+      case 'paused':
+        return { level: 'WARN', message: `Download ${dl.name} paused.` };
+      case 'available':
+        if (!previousStatus || previousStatus === 'available') return null;
+        if (previousStatus === 'completed') {
+          return { level: 'INFO', message: `Download ${dl.name} ready to download again.` };
+        }
+        if (previousStatus === 'failed') {
+          return { level: 'WARN', message: `Download ${dl.name} reset after failure.` };
+        }
+        return { level: 'WARN', message: `Download ${dl.name} cancelled.` };
+      default:
+        return null;
+    }
+  }
+
+  let systemInfoErrorLogged = false;
 
   $effect(() => {
     let fetchAbort = false;
@@ -74,7 +132,7 @@
           invoke<number>('get_cpu_usage'),
           invoke<number>('get_memory_usage'),
           invoke<number>('get_total_memory'),
-          invoke<[number, number]>('get_drive_info')
+          invoke<[number, number]>('get_drive_info'),
         ]);
         if (fetchAbort) return;
         cpuUsage = cpu;
@@ -82,26 +140,93 @@
         totalMemory = totalMem;
         totalDiskSpace = totalDisk;
         availableDiskSpace = availDisk;
+        systemInfoErrorLogged = false;
       } catch (error) {
         console.error('Failed to fetch system info:', error);
+        if (!systemInfoErrorLogged) {
+          const reason = error instanceof Error ? error.message : String(error);
+          pushLog('ERROR', `Failed to fetch system info: ${reason}`);
+          systemInfoErrorLogged = true;
+        }
       }
     };
 
     fetchData();
     const intervalId = setInterval(fetchData, 5000);
-    const logIntervalId = setInterval(generateMockLog, 3000);
 
     return () => {
       fetchAbort = true;
       clearInterval(intervalId);
-      clearInterval(logIntervalId);
+    };
+  });
+
+  const trackedDownloads = new Map<number, Download['status']>();
+  let downloadsSnapshotReady = false;
+
+  $effect(() => {
+    const current = $downloads;
+    if (!downloadsSnapshotReady) {
+      trackedDownloads.clear();
+      for (const dl of current) {
+        trackedDownloads.set(dl.id, dl.status);
+      }
+      downloadsSnapshotReady = true;
+      return;
+    }
+
+    const seen = new Set<number>();
+    for (const dl of current) {
+      seen.add(dl.id);
+      const previousStatus = trackedDownloads.get(dl.id);
+      if (previousStatus !== dl.status) {
+        const log = describeDownloadTransition(dl, previousStatus);
+        if (log) {
+          pushLog(log.level, log.message);
+        }
+      }
+      trackedDownloads.set(dl.id, dl.status);
+    }
+
+    for (const id of [...trackedDownloads.keys()]) {
+      if (!seen.has(id)) {
+        trackedDownloads.delete(id);
+      }
+    }
+  });
+
+  $effect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    void listen('scan_progress', (event) => {
+      const payload =
+        typeof event.payload === 'string' ? event.payload : JSON.stringify(event.payload);
+      pushLog('INFO', `Cleaner: ${payload}`);
+    })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch((error) => {
+        console.error('Failed to listen for scan progress events:', error);
+        pushLog('WARN', 'Unable to subscribe to cleaner progress updates.');
+      });
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
     };
   });
 
   const activeDownloads = $derived(
-    $downloads.filter(
-      (dl: Download) => dl.status === 'downloading' || dl.status === 'pending' || dl.status === 'queued'
-    )
+    $downloads
+      .filter(
+        (dl: Download) =>
+          dl.status === 'downloading' || dl.status === 'pending' || dl.status === 'queued'
+      )
+      .map((dl) => ({
+        data: dl,
+        progressValue: getProgressValue(dl.progress),
+      }))
   );
 </script>
 
@@ -166,23 +291,46 @@
       </CardHeader>
       <CardContent class="space-y-4">
         {#if activeDownloads.length > 0}
-          {#each activeDownloads as dl (dl.id)}
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-medium leading-none">{dl.name}</p>
-                  <p class="text-xs text-muted-foreground capitalize">{dl.status}</p>
+          <div class="space-y-4">
+            {#each activeDownloads as entry, index (entry.data.id)}
+              <div class="space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium leading-none">{entry.data.name}</p>
+                    <div
+                      class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+                    >
+                      <span>{readableDownloadStatus(entry.data.status)}</span>
+                      {#if entry.data.speed}
+                        <span>Speed {entry.data.speed}</span>
+                      {/if}
+                      {#if entry.data.eta && entry.data.eta !== 'N/A'}
+                        <span>ETA {entry.data.eta}</span>
+                      {/if}
+                    </div>
+                  </div>
+                  <span class="text-xs text-muted-foreground">
+                    {#if entry.progressValue !== null}
+                      {entry.progressValue}%
+                    {:else}
+                      --
+                    {/if}
+                  </span>
                 </div>
-                {#if dl.progress > 0}
-                  <span class="text-xs text-muted-foreground">{Math.floor(dl.progress)}%</span>
+                {#if entry.progressValue !== null}
+                  <Progress
+                    value={entry.progressValue}
+                    aria-label={`Download progress for ${entry.data.name}`}
+                  />
+                {:else}
+                  <div class="h-2 w-full rounded-full bg-muted" aria-hidden="true"></div>
                 {/if}
               </div>
-              {#if dl.progress > 0}
-                <Progress value={Math.floor(dl.progress)} />
+              {#if index < activeDownloads.length - 1}
+                <Separator />
               {/if}
-              <Separator />
-            </div>
-          {/each}
+            {/each}
+          </div>
         {:else}
           <p class="text-sm text-muted-foreground">No active downloads.</p>
         {/if}
@@ -205,15 +353,27 @@
               </TableRow>
             </TableHeader>
             <TableBody>
-              {#each systemLogs as log, i (i)}
+              {#if systemLogs.length === 0}
                 <TableRow>
-                  <TableCell class="font-mono text-xs text-muted-foreground">{log.timestamp}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" class={'text-xs ' + levelBadgeClass(log.level)}>{log.level}</Badge>
+                  <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
+                    No activity recorded yet.
                   </TableCell>
-                  <TableCell class="text-sm">{log.message}</TableCell>
                 </TableRow>
-              {/each}
+              {:else}
+                {#each systemLogs as log, i (i)}
+                  <TableRow>
+                    <TableCell class="font-mono text-xs text-muted-foreground"
+                      >{log.timestamp}</TableCell
+                    >
+                    <TableCell>
+                      <Badge variant="outline" class={'text-xs ' + levelBadgeClass(log.level)}
+                        >{log.level}</Badge
+                      >
+                    </TableCell>
+                    <TableCell class="text-sm">{log.message}</TableCell>
+                  </TableRow>
+                {/each}
+              {/if}
             </TableBody>
           </Table>
         </ScrollArea>

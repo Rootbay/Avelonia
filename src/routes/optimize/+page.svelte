@@ -5,7 +5,13 @@
   import { openPath } from '@tauri-apps/plugin-opener';
 
   import { Button } from '$lib/components/ui/button';
-  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+  } from '$lib/components/ui/card';
   import { Input } from '$lib/components/ui/input';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { ScrollArea } from '$lib/components/ui/scroll-area';
@@ -20,7 +26,7 @@
     AlertDialogDescription,
     AlertDialogFooter,
     AlertDialogHeader,
-    AlertDialogTitle
+    AlertDialogTitle,
   } from '$lib/components/ui/alert-dialog';
 
   import {
@@ -33,7 +39,7 @@
     Network as NetworkIcon,
     RefreshCcw,
     RotateCcw,
-    Settings
+    Settings,
   } from '@lucide/svelte';
 
   let startupItems = $state<string[]>([]);
@@ -334,7 +340,12 @@
           <Button size="sm" onclick={openStartupFolders} disabled={isBusy} variant="outline">
             <FolderOpen class="mr-2 size-4" /> Open Startup Folder(s)
           </Button>
-          <Button size="sm" onclick={disableSelected} disabled={isBusy || selected.size === 0} variant="destructive">
+          <Button
+            size="sm"
+            onclick={disableSelected}
+            disabled={isBusy || selected.size === 0}
+            variant="destructive"
+          >
             <Trash2 class="mr-2 size-4" /> Disable Selected
           </Button>
           <Button
@@ -349,13 +360,30 @@
 
         <div class="flex items-center gap-2">
           <div class="relative flex-1">
-            <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <SearchIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
             <Input class="pl-9" placeholder="Filter by name or path..." bind:value={startupQuery} />
           </div>
           <div class="flex gap-2">
-            <Button size="sm" variant="outline" onclick={selectAllStartup} disabled={isBusy || filteredStartupItems.length === 0}>Select All</Button>
-            <Button size="sm" variant="outline" onclick={clearStartupSelection} disabled={isBusy || selected.size === 0}>Clear</Button>
-            <Button size="sm" variant="outline" onclick={invertStartupSelection} disabled={isBusy || filteredStartupItems.length === 0}>Invert</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={selectAllStartup}
+              disabled={isBusy || filteredStartupItems.length === 0}>Select All</Button
+            >
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={clearStartupSelection}
+              disabled={isBusy || selected.size === 0}>Clear</Button
+            >
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={invertStartupSelection}
+              disabled={isBusy || filteredStartupItems.length === 0}>Invert</Button
+            >
           </div>
         </div>
 
@@ -370,10 +398,20 @@
                       <span class="font-mono truncate max-w-[52ch]">{item}</span>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                      <Button variant="link" size="sm" title="Reveal in Explorer" onclick={() => revealPath(item)}>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        title="Reveal in Explorer"
+                        onclick={() => revealPath(item)}
+                      >
                         <Eye class="mr-1 size-4" /> Reveal
                       </Button>
-                      <Button variant="link" size="sm" title="Copy path" onclick={() => copyText(item)}>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        title="Copy path"
+                        onclick={() => copyText(item)}
+                      >
                         <CopyIcon class="mr-1 size-4" /> Copy
                       </Button>
                     </div>
@@ -401,7 +439,12 @@
           <Button size="sm" onclick={loadRegistryItems} disabled={isBusy} variant="secondary">
             <RefreshCw class="mr-2 size-4" /> Refresh
           </Button>
-          <Button size="sm" onclick={disableSelectedRegistry} disabled={isBusy || selectedReg.size === 0} variant="destructive">
+          <Button
+            size="sm"
+            onclick={disableSelectedRegistry}
+            disabled={isBusy || selectedReg.size === 0}
+            variant="destructive"
+          >
             <Trash2 class="mr-2 size-4" /> Disable Selected
           </Button>
           <Button
@@ -416,13 +459,34 @@
 
         <div class="flex items-center gap-2">
           <div class="relative flex-1">
-            <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input class="pl-9" placeholder="Filter by name, command, or key..." bind:value={registryQuery} />
+            <SearchIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
+            <Input
+              class="pl-9"
+              placeholder="Filter by name, command, or key..."
+              bind:value={registryQuery}
+            />
           </div>
           <div class="flex gap-2">
-            <Button size="sm" variant="outline" onclick={selectAllRegistry} disabled={isBusy || filteredRegistryItems.length === 0}>Select All</Button>
-            <Button size="sm" variant="outline" onclick={clearRegistrySelection} disabled={isBusy || selectedReg.size === 0}>Clear</Button>
-            <Button size="sm" variant="outline" onclick={invertRegistrySelection} disabled={isBusy || filteredRegistryItems.length === 0}>Invert</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={selectAllRegistry}
+              disabled={isBusy || filteredRegistryItems.length === 0}>Select All</Button
+            >
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={clearRegistrySelection}
+              disabled={isBusy || selectedReg.size === 0}>Clear</Button
+            >
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={invertRegistrySelection}
+              disabled={isBusy || filteredRegistryItems.length === 0}>Invert</Button
+            >
           </div>
         </div>
 
@@ -436,10 +500,17 @@
                     <span class="font-semibold">{it.name}</span>
                   </label>
                   <div class="text-xs text-muted-foreground">{it.hive}\{it.key}</div>
-                  <div class="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <div
+                    class="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                  >
                     <span class="font-mono truncate max-w-[52ch]">{it.command}</span>
                     <div class="flex items-center gap-2 shrink-0">
-                      <Button variant="link" size="sm" title="Copy command" onclick={() => copyText(it.command)}>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        title="Copy command"
+                        onclick={() => copyText(it.command)}
+                      >
                         <CopyIcon class="mr-1 size-4" /> Copy
                       </Button>
                       <Button
@@ -481,7 +552,12 @@
           <Button size="sm" onclick={confirmRenewIp} disabled={isBusy} variant="outline">
             <RefreshCw class="mr-2 size-4" /> Renew IP
           </Button>
-          <Button size="sm" onclick={() => (showNetAllConfirm = true)} disabled={isBusy} variant="destructive">
+          <Button
+            size="sm"
+            onclick={() => (showNetAllConfirm = true)}
+            disabled={isBusy}
+            variant="destructive"
+          >
             <NetworkIcon class="mr-2 size-4" /> Optimize Network (All)
           </Button>
         </div>
@@ -537,8 +613,8 @@
         onclick={() => {
           showWinsockConfirm = false;
           resetWinsock();
-        }}
-      >Reset</AlertDialogAction>
+        }}>Reset</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
@@ -557,8 +633,8 @@
         onclick={() => {
           showRenewConfirm = false;
           renewIp();
-        }}
-      >Renew</AlertDialogAction>
+        }}>Renew</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
@@ -577,8 +653,8 @@
         onclick={() => {
           showFlushConfirm = false;
           flushDns();
-        }}
-      >Flush</AlertDialogAction>
+        }}>Flush</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
@@ -588,7 +664,8 @@
     <AlertDialogHeader>
       <AlertDialogTitle>Optimize Network</AlertDialogTitle>
       <AlertDialogDescription>
-        Run Flush DNS, Reset Winsock, and Renew IP in sequence. This will briefly interrupt connectivity and may require a reboot.
+        Run Flush DNS, Reset Winsock, and Renew IP in sequence. This will briefly interrupt
+        connectivity and may require a reboot.
       </AlertDialogDescription>
     </AlertDialogHeader>
     <AlertDialogFooter>
@@ -597,8 +674,8 @@
         onclick={() => {
           showNetAllConfirm = false;
           optimizeNetworkAll();
-        }}
-      >Run All</AlertDialogAction>
+        }}>Run All</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
@@ -612,13 +689,15 @@
       </AlertDialogDescription>
     </AlertDialogHeader>
     <AlertDialogFooter>
-      <AlertDialogCancel onclick={() => (showDisableAllStartupConfirm = false)}>Cancel</AlertDialogCancel>
+      <AlertDialogCancel onclick={() => (showDisableAllStartupConfirm = false)}
+        >Cancel</AlertDialogCancel
+      >
       <AlertDialogAction
         onclick={() => {
           showDisableAllStartupConfirm = false;
           disableAllStartup();
-        }}
-      >Disable All</AlertDialogAction>
+        }}>Disable All</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
@@ -632,13 +711,15 @@
       </AlertDialogDescription>
     </AlertDialogHeader>
     <AlertDialogFooter>
-      <AlertDialogCancel onclick={() => (showDisableAllRegistryConfirm = false)}>Cancel</AlertDialogCancel>
+      <AlertDialogCancel onclick={() => (showDisableAllRegistryConfirm = false)}
+        >Cancel</AlertDialogCancel
+      >
       <AlertDialogAction
         onclick={() => {
           showDisableAllRegistryConfirm = false;
           disableAllRegistry();
-        }}
-      >Disable All</AlertDialogAction>
+        }}>Disable All</AlertDialogAction
+      >
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
