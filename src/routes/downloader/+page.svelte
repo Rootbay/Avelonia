@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { downloads } from "$lib/downloads";
   import FilterPanel from '$lib/components/FilterPanel.svelte';
   import DownloadItem from '$lib/components/DownloadItem.svelte';
@@ -7,6 +7,14 @@
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import { Separator } from '$lib/components/ui/separator';
+  import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+  import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '$lib/components/ui/sheet';
+  import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '$lib/components/ui/dialog';
+  import { ArrowUpDown, ListChecks, SlidersHorizontal, Keyboard } from '@lucide/svelte';
 
   let searchTerm = $state("");
   let debouncedSearchTerm = $state("");
@@ -24,20 +32,36 @@
     eta: "",
     status: "",
   });
-  // Quick status filter chips
-  let statusGroup = $state<'all'|'available'|'active'|'completed'|'failed'>('all');
-  let sortBy = $state('name');
-  let sortDirection = $state('asc');
-  // Selection model for bulk actions
+  type StatusGroup = 'all' | 'available' | 'active' | 'completed' | 'failed';
+  type SortKey = 'name' | 'size' | 'status' | 'eta' | 'fileType' | 'category';
+
+  const statusFilters: Array<{ value: StatusGroup; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'available', label: 'Available' },
+    { value: 'active', label: 'Active' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'failed', label: 'Failed' }
+  ];
+
+  const sortOptions: Array<{ value: SortKey; label: string }> = [
+    { value: 'name', label: 'Name' },
+    { value: 'size', label: 'Size' },
+    { value: 'fileType', label: 'File Type' },
+    { value: 'category', label: 'Category' },
+    { value: 'eta', label: 'ETA' },
+    { value: 'status', label: 'Status' }
+  ];
+
+  let statusGroup = $state<StatusGroup>('all');
+  let sortBy = $state<SortKey>('name');
+  let sortDirection = $state<'asc' | 'desc'>('asc');
   let selectedIds = $state(new Set<number>());
   const isSelected = (id: number) => selectedIds.has(id);
-  // reference for tri-state select-all checkbox
   let selectAllCheckbox: HTMLInputElement | null = null;
-  // simple aria-live announcements for actions
   let announce = $state('');
   let showHelp = $state(false);
-  // last anchor index for shift-select
   let lastSelectedIndex: number | null = null;
+
   function toggleSelect(id: number, value?: boolean) {
     if (value === undefined) {
       if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
@@ -68,7 +92,7 @@
         if (s?.statusGroup) statusGroup = s.statusGroup;
       }
     } catch {}
-    // Keyboard shortcuts
+
     const keyHandler = (e: KeyboardEvent) => {
       const meta = e.ctrlKey || e.metaKey;
       if (meta && (e.key === 'a' || e.key === 'A')) {
@@ -93,20 +117,7 @@
     } catch {}
   });
 
-  // Close actions dropdown when clicking outside
-  $effect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (!actionsOpen) return;
-      const container = document.querySelector('.actions');
-      if (container && !container.contains(e.target as Node)) {
-        actionsOpen = false;
-      }
-    };
-    window.addEventListener('click', onClick);
-    return () => window.removeEventListener('click', onClick);
-  });
 
-  // Normalize human-readable sizes like "120 MB", "900KB", or raw numbers into bytes
   function toBytes(val: string | number | undefined | null): number {
     if (val === undefined || val === null) return 0;
     const s = String(val).trim();
@@ -126,7 +137,6 @@
     return num * (map[unit] ?? 1);
   }
 
-  // Custom status weight for more intuitive ordering
   const statusWeight: Record<string, number> = {
     available: 1,
     pending: 2,
@@ -179,7 +189,7 @@
       return 0;
     }
   }
-  function setSort(key: 'name'|'size'|'status'|'eta'|'fileType'|'category') {
+  function setSort(key: SortKey) {
     if (sortBy === key) {
       sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
     } else {
@@ -200,7 +210,6 @@
         ? download.category.toLowerCase().includes(filters.category.toLowerCase())
         : true;
 
-      // Support unit-aware numeric filtering like "50MB", "1.5 GB", "900KB"
       const downloadSizeBytes = toBytes(download.size);
       const minSizeBytes = filters.minSize !== '' ? toBytes(filters.minSize) : undefined;
       const maxSizeBytes = filters.maxSize !== '' ? toBytes(filters.maxSize) : undefined;
@@ -245,7 +254,6 @@
   const failedCount = $derived($downloads.filter(d => d.status === 'failed').length);
   const selectedCompletedCount = $derived(filteredDownloads.filter(d => selectedIds.has(d.id) && d.status === 'completed').length);
 
-  // Keep the select-all checkbox in sync (checked/indeterminate)
   $effect(() => {
     const filteredIds = new Set(filteredDownloads.map(d => d.id));
     let selectedInFilter = 0;
@@ -389,8 +397,7 @@
     selectedIds = next;
   }
 
-  // Utility actions
-  function handleHeaderKey(e: KeyboardEvent, key: 'name'|'size'|'status'|'eta'|'fileType'|'category') {
+  function handleHeaderKey(e: KeyboardEvent, key: SortKey) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       setSort(key);
@@ -442,333 +449,254 @@
   }
 </script>
 
-<div class="main-content">
+<div class="space-y-6">
   <div class="sr-only" aria-live="polite">{announce}</div>
-  <div class="header-card">
-    <h1>Downloader</h1>
-    <p class="muted">Search, filter and manage app downloads.</p>
-  </div>
 
-  <section class="panel">
-    <div class="header-section">
-      <p>
-        Showing {availableDownloads} / {totalDownloads}
-        · Size: {formatBytes(filteredTotalBytes)}
-        · Active: {activeCount} · Completed: {completedCount} · Failed: {failedCount}
-      </p>
-      <div class="search-filter-group">
-        <div class="status-chips" role="group" aria-label="Quick status filters">
-          <button class:active={statusGroup==='all'} onclick={() => statusGroup='all'} title="Show all">All</button>
-          <button class:active={statusGroup==='available'} onclick={() => statusGroup='available'} title="Show available">Available</button>
-          <button class:active={statusGroup==='active'} onclick={() => statusGroup='active'} title="Show active (downloading/pending/queued)">Active</button>
-          <button class:active={statusGroup==='completed'} onclick={() => statusGroup='completed'} title="Show completed">Completed</button>
-          <button class:active={statusGroup==='failed'} onclick={() => statusGroup='failed'} title="Show failed">Failed</button>
+  <Card class="border border-border/60 bg-card/80 shadow-sm">
+    <CardHeader>
+      <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
+      <CardDescription>Search, filter, and manage app downloads.</CardDescription>
+    </CardHeader>
+    <CardContent class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+      <span>Showing {availableDownloads} / {totalDownloads}</span>
+      <Separator orientation="vertical" class="hidden h-4 md:flex" />
+      <span>Size: {formatBytes(filteredTotalBytes)}</span>
+      <Separator orientation="vertical" class="hidden h-4 md:flex" />
+      <span class="text-primary">Active: {activeCount}</span>
+      <span class="text-emerald-500">Completed: {completedCount}</span>
+      <span class="text-destructive">Failed: {failedCount}</span>
+    </CardContent>
+  </Card>
+
+  <Card class="border border-border/60 bg-card/70 shadow-sm">
+    <CardHeader class="gap-4 pb-2">
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex min-w-[220px] flex-1 items-center gap-2">
+            <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} />
+            <Button
+              type="button"
+              variant="outline"
+              onclick={() => (showFilters = !showFilters)}
+              aria-expanded={showFilters}
+            >
+              <SlidersHorizontal class="size-4" />
+              <span class="ml-2 hidden sm:inline">Filters</span>
+            </Button>
+            <Sheet bind:open={actionsOpen}>
+              <SheetTrigger>
+                <Button type="button" variant="secondary">
+                  <ListChecks class="size-4" />
+                  <span class="ml-2 hidden sm:inline">Actions</span>
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" class="w-[320px] sm:w-[360px]">
+                <SheetHeader>
+                  <SheetTitle>Bulk actions</SheetTitle>
+                  <SheetDescription>Apply actions to the current selection or filtered list.</SheetDescription>
+                </SheetHeader>
+                <div class="mt-4 grid gap-3">
+                  <Button type="button" onclick={() => { startAll(); actionsOpen = false; }}>Start all</Button>
+                  <Button type="button" variant="destructive" onclick={() => { cancelAllActive(); actionsOpen = false; }}>
+                    Cancel active
+                  </Button>
+                  <Separator class="my-1" />
+                  <Button type="button" variant="outline" onclick={() => { startAllFiltered(); actionsOpen = false; }}>
+                    Start filtered
+                  </Button>
+                  <Button type="button" variant="outline" onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
+                    Cancel filtered
+                  </Button>
+                  <Separator class="my-1" />
+                  <Button type="button" disabled={selectedIds.size === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
+                    Start selected
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={selectedIds.size === 0}
+                    onclick={() => { cancelSelected(); actionsOpen = false; }}
+                  >
+                    Cancel selected
+                  </Button>
+                  <Separator class="my-1" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={selectedIds.size === 0}
+                    onclick={() => { copySelectedLinks(); actionsOpen = false; }}
+                  >
+                    Copy selected links
+                  </Button>
+                  <Button type="button" variant="outline" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
+                    Export CSV
+                  </Button>
+                  <Separator class="my-1" />
+                  <Button type="button" variant="outline" onclick={() => { retryFailedFiltered(); actionsOpen = false; }}>
+                    Retry failed (filtered)
+                  </Button>
+                  <Button type="button" variant="outline" onclick={() => { retryAllFailed(); actionsOpen = false; }}>
+                    Retry all failed
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Select type="single" bind:value={sortBy}>
+              <SelectTrigger class="w-36" placeholder="Sort by"/>
+              <SelectContent>
+                {#each sortOptions as option}
+                  <SelectItem value={option.value}>{option.label}</SelectItem>
+                {/each}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onclick={() => (sortDirection = sortDirection === 'asc' ? 'desc' : 'asc')}
+              aria-label={`Sort direction: ${sortDirection === 'asc' ? 'ascending' : 'descending'}`}
+            >
+              <ArrowUpDown class="size-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon" onclick={() => (showHelp = true)}>
+              <Keyboard class="size-4" />
+              <span class="sr-only">Keyboard shortcuts</span>
+            </Button>
+          </div>
         </div>
-        <input
-          type="text"
-          placeholder="Search downloads..."
-          bind:value={searchTerm}
-        />
-        <div class="actions" onkeydown={(e) => { if (e.key === 'Escape') actionsOpen = false; }}>
-          <button class="btn action-toggle" aria-haspopup="menu" aria-expanded={actionsOpen} onclick={() => actionsOpen = !actionsOpen}>
-            Actions ▾
-          </button>
-          {#if actionsOpen}
-            <div class="actions-menu" role="menu" tabindex="-1" onfocusout={(e) => { const r = (e.currentTarget as HTMLElement).contains(e.relatedTarget as Node); if (!r) actionsOpen = false; }}>
-              <button role="menuitem" class="menu-item" onclick={() => { startAll(); actionsOpen = false; }}>Start All</button>
-              <button role="menuitem" class="menu-item" onclick={() => { cancelAllActive(); actionsOpen = false; }}>Cancel Active</button>
-              <hr />
-              <button role="menuitem" class="menu-item" onclick={() => { startAllFiltered(); actionsOpen = false; }}>Start Filtered</button>
-              <button role="menuitem" class="menu-item" onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>Cancel Filtered</button>
-              <hr />
-              <button role="menuitem" class="menu-item" onclick={() => { startSelected(); actionsOpen = false; }} disabled={selectedIds.size === 0}>Start Selected</button>
-              <button role="menuitem" class="menu-item" onclick={() => { cancelSelected(); actionsOpen = false; }} disabled={selectedIds.size === 0}>Cancel Selected</button>
-              <hr />
-              <button role="menuitem" class="menu-item" onclick={() => { copySelectedLinks(); actionsOpen = false; }} disabled={selectedIds.size === 0}>Copy Selected Links</button>
-              <button role="menuitem" class="menu-item" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>Export CSV</button>
-              <hr />
-              <button role="menuitem" class="menu-item" onclick={() => { retryFailedFiltered(); actionsOpen = false; }} title="Retry failed items in current filter">Retry Failed (Filtered)</button>
-              <button role="menuitem" class="menu-item" onclick={() => { retryAllFailed(); actionsOpen = false; }} title="Retry all failed items">Retry All Failed</button>
-            </div>
-          {/if}
+
+        <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Quick status filters">
+          {#each statusFilters as filter}
+            <Button
+              type="button"
+              variant={statusGroup === filter.value ? 'default' : 'outline'}
+              size="sm"
+              onclick={() => (statusGroup = filter.value)}
+            >
+              {filter.label}
+            </Button>
+          {/each}
         </div>
-        <select bind:value={sortBy}>
-          <option value="name">Name</option>
-          <option value="size">Size</option>
-          <option value="status">Status</option>
-          <option value="eta">ETA</option>
-          <option value="fileType">File Type</option>
-          <option value="category">Category</option>
-        </select>
-        <button class="btn" onclick={() => sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'} aria-label={`Sort direction: ${sortDirection === 'asc' ? 'Ascending' : 'Descending'}`}>
-          {sortDirection === 'asc' ? 'Asc' : 'Desc'}
-        </button>
-        <button class="btn primary" onclick={() => (showFilters = !showFilters)}>Filter</button>
-        <button class="btn" onclick={() => showHelp = true} title="View keyboard shortcuts and tips">Shortcuts</button>
       </div>
-    </div>
+    </CardHeader>
+  </Card>
 
-    <FilterPanel
-      bind:searchTerm={searchTerm}
-      bind:showFilters={showFilters}
-      bind:filters={filters}
-      onclearFilters={handleClearFilters}
-    />
-  </section>
+  <FilterPanel
+    bind:searchTerm={searchTerm}
+    bind:showFilters={showFilters}
+    bind:filters={filters}
+    on:clearFilters={handleClearFilters}
+  />
 
-  <div class="program-list panel">
+  <Card class="overflow-hidden border border-border/60">
     {#if selectedIds.size > 0}
-      <div class="selection-bar">
+      <div class="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/40 px-4 py-3 text-sm">
         <span><strong>{selectedIds.size}</strong> selected</span>
-        <div class="spacer" />
-        <button class="px-3 py-1 rounded-md border-none bg-green-700 text-white cursor-pointer hover:bg-green-800" onclick={startSelected} title="Start selected">Start</button>
-        <button class="px-3 py-1 rounded-md border-none bg-red-700 text-white cursor-pointer hover:bg-red-800" onclick={cancelSelected} title="Cancel selected">Cancel</button>
-        <button class="px-3 py-1 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer hover:bg-gray-700" onclick={copySelectedLinks} title="Copy selected links">Copy Links</button>
-        <button class="px-3 py-1 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer hover:bg-gray-700" onclick={exportFilteredCSV} title="Export current list as CSV">Export CSV</button>
-        <button class="px-3 py-1 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer hover:bg-gray-700" onclick={openSelectedCompleted} title="Open selected completed files" disabled={selectedCompletedCount === 0}>Open</button>
-        <button class="px-3 py-1 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer hover:bg-gray-700" onclick={showSelectedCompleted} title="Show selected completed in folder" disabled={selectedCompletedCount === 0}>Show</button>
-        <button class="px-3 py-1 rounded-md border border-gray-700 bg-gray-800 text-white cursor-pointer hover:bg-gray-700" onclick={invertSelection} title="Invert selection">Invert</button>
-        <button class="px-3 py-1 rounded-md border-none bg-gray-600 text-white cursor-pointer hover:bg-gray-700" onclick={clearSelection} title="Clear selection">Clear</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onclick={startSelected}>Start</Button>
+          <Button type="button" size="sm" variant="destructive" onclick={cancelSelected}>Cancel</Button>
+          <Button type="button" size="sm" variant="outline" onclick={copySelectedLinks}>Copy links</Button>
+          <Button type="button" size="sm" variant="outline" onclick={exportFilteredCSV}>Export CSV</Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onclick={openSelectedCompleted}
+            disabled={selectedCompletedCount === 0}
+          >
+            Open
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onclick={showSelectedCompleted}
+            disabled={selectedCompletedCount === 0}
+          >
+            Show
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onclick={invertSelection}>Invert</Button>
+          <Button type="button" size="sm" variant="ghost" onclick={clearSelection}>Clear</Button>
+        </div>
       </div>
     {/if}
-    <div class="program-list-header">
-      <span>
-        <input bind:this={selectAllCheckbox} type="checkbox" onchange={(e) => {
-          const check = (e.target as HTMLInputElement).checked;
-          for (const d of filteredDownloads) toggleSelect(d.id, check);
-        }} title="Select/Deselect all filtered" />
-      </span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='name' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('name')} onkeydown={(e) => handleHeaderKey(e, 'name')}>Name {sortBy==='name' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='size' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('size')} onkeydown={(e) => handleHeaderKey(e, 'size')}>Size {sortBy==='size' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='fileType' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('fileType')} onkeydown={(e) => handleHeaderKey(e, 'fileType')}>File Type {sortBy==='fileType' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='category' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('category')} onkeydown={(e) => handleHeaderKey(e, 'category')}>Category {sortBy==='category' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='eta' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('eta')} onkeydown={(e) => handleHeaderKey(e, 'eta')}>ETA {sortBy==='eta' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-      <span role="button" tabindex="0" aria-sort={sortBy==='status' ? (sortDirection==='asc' ? 'ascending' : 'descending') : 'none'} onclick={() => setSort('status')} onkeydown={(e) => handleHeaderKey(e, 'status')}>Status {sortBy==='status' ? (sortDirection==='asc' ? '▲' : '▼') : ''}</span>
-    </div>
-    {#each filteredDownloads as download, i (download.id)}
-      <DownloadItem
-        {download}
-        {startDownload}
-        {cancelDownload}
-        selected={isSelected(download.id)}
-        ontoggleSelect={(e) => toggleSelectWithIndex(download.id, e.detail?.checked ?? false, i, !!e.detail?.shiftKey)}
-      />
-    {/each}
-    {#if filteredDownloads.length === 0}
-      <div class="no-results">
-        <p>No downloads match current filters.</p>
-        <button class="clear-btn" onclick={() => { handleClearFilters(); statusGroup = 'all'; }}>Clear filters</button>
-      </div>
-    {/if}
-  </div>
 
-  {#if showHelp}
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Downloader shortcuts" onclick={() => (showHelp = false)}>
-      <div class="modal-card" onclick={(e) => e.stopPropagation()}>
-        <h3>Shortcuts</h3>
-        <ul>
-          <li><strong>Ctrl/Cmd + A:</strong> Select all filtered</li>
-          <li><strong>Shift + Click:</strong> Range select</li>
-          <li><strong>Enter:</strong> Start/Cancel focused row</li>
-          <li><strong>Delete/Backspace:</strong> Cancel selected active</li>
-          <li><strong>Esc:</strong> Clear selection</li>
-        </ul>
-        <button class="btn" onclick={() => (showHelp = false)}>Close</button>
+    <CardContent class="p-0">
+      <div class="hidden border-b border-border/60 bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[auto,minmax(220px,1fr),repeat(4,minmax(120px,0.6fr)),minmax(160px,0.8fr)] md:items-center md:gap-3">
+        <span class="flex justify-center">
+          <input
+            bind:this={selectAllCheckbox}
+            type="checkbox"
+            class="h-4 w-4 rounded border-border bg-background text-primary focus:ring-ring"
+            onchange={(e) => {
+              const check = (e.target as HTMLInputElement).checked;
+              for (const d of filteredDownloads) toggleSelect(d.id, check);
+            }}
+            title="Select or deselect all filtered downloads"
+          />
+        </span>
+        {#each sortOptions as option (option.value)}
+          <button
+            type="button"
+            class="flex items-center gap-1 text-left transition hover:text-foreground"
+            aria-sort={sortBy === option.value ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+            onclick={() => setSort(option.value)}
+            onkeydown={(event) => handleHeaderKey(event, option.value)}
+          >
+            <span>{option.label}</span>
+            {#if sortBy === option.value}
+              <ArrowUpDown class="size-3 transition rotate-180={sortDirection === 'asc'}" />
+            {/if}
+          </button>
+        {/each}
       </div>
-    </div>
-  {/if}
+
+      <div class="divide-y divide-border/60">
+        {#each filteredDownloads as download, i (download.id)}
+          <DownloadItem
+            {download}
+            {startDownload}
+            {cancelDownload}
+            selected={isSelected(download.id)}
+            on:toggleSelect={(event) => toggleSelectWithIndex(download.id, event.detail?.checked ?? false, i, !!event.detail?.shiftKey)}
+          />
+        {/each}
+        {#if filteredDownloads.length === 0}
+          <div class="space-y-3 px-6 py-12 text-center text-sm text-muted-foreground">
+            <p>No downloads match the current filters.</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onclick={() => { handleClearFilters(); statusGroup = 'all'; }}
+            >
+              Reset filters
+            </Button>
+          </div>
+        {/if}
+      </div>
+    </CardContent>
+  </Card>
+
+  <Dialog bind:open={showHelp}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Keyboard shortcuts</DialogTitle>
+        <DialogDescription>Speed up triage with quick actions.</DialogDescription>
+      </DialogHeader>
+      <div class="grid gap-2 text-sm">
+        <p><strong>Ctrl/Cmd + A:</strong> Select all filtered downloads</p>
+        <p><strong>Shift + Click:</strong> Range select</p>
+        <p><strong>Enter:</strong> Start or cancel the focused row</p>
+        <p><strong>Delete / Backspace:</strong> Cancel selected active downloads</p>
+        <p><strong>Esc:</strong> Clear selection</p>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="secondary" onclick={() => (showHelp = false)}>Close</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </div>
-
-<style>
-  .header-section {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-  }
-
-  .header-section p {
-    font-size: 1.1em;
-    font-weight: bold;
-    margin: 0;
-  }
-
-  .search-filter-group {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .status-chips { display: inline-flex; gap: 6px; align-items: center; }
-  .status-chips > button {
-    padding: 6px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--avelonia-border);
-    background: #1b1c1f;
-    color: #fff;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .status-chips > button.active { background: var(--avelonia-purple); border-color: var(--avelonia-purple); }
-
-  .header-section input {
-    padding: 4px 8px;
-    height: 32px;
-    font-size: 12px;
-    border-radius: 6px;
-    border: 1px solid #333;
-    background-color: #2a2a2a;
-    color: #ffffff;
-    width: 240px;
-  }
-
-  .search-filter-group select {
-    height: 32px;
-    padding: 4px 8px;
-    font-size: 12px;
-    border-radius: 6px;
-    border: 1px solid #333;
-    background-color: #2a2a2a;
-    color: #ffffff;
-  }
-
-  .btn {
-    height: 32px;
-    padding: 4px 10px;
-    font-size: 12px;
-    border-radius: 6px;
-    border: 1px solid var(--avelonia-border);
-    background: #1b1c1f;
-    color: #fff;
-    cursor: pointer;
-  }
-  .btn.primary { background: var(--avelonia-purple); border-color: var(--avelonia-purple); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .actions { position: relative; }
-  .action-toggle { min-width: 88px; }
-  .actions-menu {
-    position: absolute;
-    top: 36px;
-    right: 0;
-    min-width: 200px;
-    background: #17181b;
-    border: 1px solid var(--avelonia-border);
-    border-radius: 8px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
-    padding: 6px;
-    z-index: 10;
-  }
-  .actions-menu .menu-item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-    color: #fff;
-    cursor: pointer;
-  }
-  .actions-menu .menu-item:hover { background: rgba(255,255,255,0.06); }
-  .actions-menu hr { border: none; border-top: 1px solid var(--avelonia-border); margin: 6px 0; }
-
-  .program-list {
-    border: none;
-    border-radius: 5px;
-    overflow: hidden;
-    background-color: rgba(0, 0, 0, 0.2);
-    flex: 1;
-    overflow: auto;
-    contain: content;
-  }
-
-  .selection-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--avelonia-border);
-    background: rgba(20, 20, 25, 0.65);
-    backdrop-filter: saturate(1.2) blur(6px);
-  }
-  .selection-bar .spacer { flex: 1; }
-
-  .program-list-header {
-    display: grid;
-    grid-template-columns: 40px 1.5fr 1fr 1fr 1fr 1fr 1fr; /* Icon/Select, Name, Size, File Type, Category, ETA, Status */
-    padding: 10px;
-    align-items: center;
-    height: 46px;
-    box-sizing: border-box;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: rgba(23, 24, 27, 0.8);
-    backdrop-filter: saturate(1.2) blur(6px);
-  }
-
-  .program-list-header span:nth-child(1) {
-    justify-self: center;
-  }
-
-  .program-list-header span:nth-child(2),
-  .program-list-header span:nth-child(3) {
-    justify-self: start;
-  }
-
-  .program-list-header span:nth-child(4),
-  .program-list-header span:nth-child(5),
-  .program-list-header span:nth-child(6),
-  .program-list-header span:nth-child(7) {
-    justify-self: end;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
-  .no-results { padding: 24px; text-align: center; color: var(--avelonia-text-muted); }
-  .no-results .clear-btn {
-    margin-top: 8px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--avelonia-border);
-    background: #1b1c1f;
-    color: #fff;
-    cursor: pointer;
-  }
-
-  /* Simple modal */
-  .modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 50;
-  }
-  .modal-card {
-    background: #17181b;
-    border: 1px solid var(--avelonia-border);
-    border-radius: 10px;
-    padding: 16px;
-    color: var(--avelonia-text);
-    width: min(420px, 90vw);
-  }
-  .modal-card h3 { margin-top: 0; margin-bottom: 8px; }
-  .modal-card ul { margin: 0 0 12px 18px; padding: 0; }
-  .modal-card li { margin: 6px 0; }
-</style>
-
-

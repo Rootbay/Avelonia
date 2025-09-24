@@ -6,14 +6,16 @@
   let timer: any;
   $: if (show) {
     clearTimeout(timer);
-    timer = setTimeout(() => { show = false; }, duration);
+    timer = setTimeout(() => {
+      show = false;
+    }, duration);
   }
   import { onDestroy } from 'svelte';
   onDestroy(() => clearTimeout(timer));
 </script>
 
 {#if show}
-  <div class="toast" on:click={() => show = false}>
+  <div class="toast" on:click={() => (show = false)}>
     {text}
   </div>
 {/if}
@@ -34,4 +36,3 @@
     cursor: pointer;
   }
 </style>
-

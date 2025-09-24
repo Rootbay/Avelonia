@@ -7,6 +7,30 @@
   import { slide } from 'svelte/transition';
   import Toast from '$lib/components/Toast.svelte';
 
+  import { Button } from '$lib/components/ui/button';
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent
+  } from '$lib/components/ui/card';
+  import { Checkbox } from '$lib/components/ui/checkbox';
+  import { Label } from '$lib/components/ui/label';
+  import { Input } from '$lib/components/ui/input';
+  import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter
+  } from '$lib/components/ui/dialog';
+  import { ScrollArea } from '$lib/components/ui/scroll-area';
+  import { Separator } from '$lib/components/ui/separator';
+
+  import { Trash2, RefreshCw, Scan, HardDrive, FolderOpen, Files as FilesIcon, Eraser } from '@lucide/svelte';
+
   interface FileEntry {
     path: string;
     size?: number;
@@ -29,8 +53,7 @@
   let isLoading: boolean = false;
   let toastMsg: string = '';
   let showToast: boolean = false;
-  
-  // Secure Eraser state
+
   let eraserSelectedFiles: string[] = [];
   let eraserPasses: number = 1;
   let isErasing: boolean = false;
@@ -48,11 +71,11 @@
 
     listen('scan_progress', (event) => {
       progressMessage = event.payload as string;
-    }).then((fn) => {
-      unlisten = fn;
-    }).catch(() => {
-      // no-op if event bridge isn't available
-    });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
 
     getDiskInfo();
 
@@ -71,7 +94,6 @@
     }
   }
 
-  // Secure Eraser logic
   async function eraserPickFiles() {
     const result = await open({ multiple: true });
     if (Array.isArray(result)) {
@@ -86,7 +108,10 @@
     isErasing = true;
     eraserMessage = '';
     try {
-      const count: number = await invoke('secure_erase', { files: eraserSelectedFiles, passes: eraserPasses });
+      const count: number = await invoke('secure_erase', {
+        files: eraserSelectedFiles,
+        passes: eraserPasses,
+      });
       eraserMessage = `Securely erased ${count} item(s).`;
       eraserSelectedFiles = [];
     } catch (e) {
@@ -113,7 +138,7 @@
     try {
       message = 'Scanning for temporary files...';
       const result: string[] = await invoke('get_temp_files');
-      tempFiles = result.map(path => ({ path }));
+      tempFiles = result.map((path) => ({ path }));
       message = `Found ${tempFiles.length} temporary files.`;
     } catch (error) {
       message = `Error scanning temporary files: ${error}`;
@@ -202,7 +227,7 @@
     try {
       message = 'Scanning for empty folders...';
       const result: string[] = await invoke('find_empty_folders');
-      emptyFolders = result.map(path => ({ path }));
+      emptyFolders = result.map((path) => ({ path }));
       message = `Found ${emptyFolders.length} empty folders.`;
     } catch (error) {
       message = `Error finding empty folders: ${error}`;
@@ -225,7 +250,7 @@
     try {
       message = 'Scanning for broken shortcuts...';
       const result: string[] = await invoke('find_broken_shortcuts');
-      brokenShortcuts = result.map(path => ({ path }));
+      brokenShortcuts = result.map((path) => ({ path }));
       message = `Found ${brokenShortcuts.length} broken shortcuts.`;
     } catch (error) {
       message = `Error finding broken shortcuts: ${error}`;
@@ -241,42 +266,35 @@
     confirmDeletion(selectedBrokenShortcuts);
   }
 
-  function handleFileSelection(file: string, type: 'temp' | 'large' | 'duplicate' | 'empty' | 'broken_shortcut') {
+  function handleFileSelection(
+    file: string,
+    type: 'temp' | 'large' | 'duplicate' | 'empty' | 'broken_shortcut'
+  ) {
     switch (type) {
       case 'temp':
-        if (selectedTempFiles.includes(file)) {
-          selectedTempFiles = selectedTempFiles.filter(f => f !== file);
-        } else {
-          selectedTempFiles = [...selectedTempFiles, file];
-        }
+        selectedTempFiles = selectedTempFiles.includes(file)
+          ? selectedTempFiles.filter((f) => f !== file)
+          : [...selectedTempFiles, file];
         break;
       case 'large':
-        if (selectedLargeFiles.includes(file)) {
-          selectedLargeFiles = selectedLargeFiles.filter(f => f !== file);
-        } else {
-          selectedLargeFiles = [...selectedLargeFiles, file];
-        }
+        selectedLargeFiles = selectedLargeFiles.includes(file)
+          ? selectedLargeFiles.filter((f) => f !== file)
+          : [...selectedLargeFiles, file];
         break;
       case 'duplicate':
-        if (selectedDuplicateFiles.includes(file)) {
-          selectedDuplicateFiles = selectedDuplicateFiles.filter(f => f !== file);
-        } else {
-          selectedDuplicateFiles = [...selectedDuplicateFiles, file];
-        }
+        selectedDuplicateFiles = selectedDuplicateFiles.includes(file)
+          ? selectedDuplicateFiles.filter((f) => f !== file)
+          : [...selectedDuplicateFiles, file];
         break;
       case 'empty':
-        if (selectedEmptyFolders.includes(file)) {
-          selectedEmptyFolders = selectedEmptyFolders.filter(f => f !== file);
-        } else {
-          selectedEmptyFolders = [...selectedEmptyFolders, file];
-        }
+        selectedEmptyFolders = selectedEmptyFolders.includes(file)
+          ? selectedEmptyFolders.filter((f) => f !== file)
+          : [...selectedEmptyFolders, file];
         break;
       case 'broken_shortcut':
-        if (selectedBrokenShortcuts.includes(file)) {
-          selectedBrokenShortcuts = selectedBrokenShortcuts.filter(f => f !== file);
-        } else {
-          selectedBrokenShortcuts = [...selectedBrokenShortcuts, file];
-        }
+        selectedBrokenShortcuts = selectedBrokenShortcuts.includes(file)
+          ? selectedBrokenShortcuts.filter((f) => f !== file)
+          : [...selectedBrokenShortcuts, file];
         break;
     }
   }
@@ -284,39 +302,30 @@
   function toggleSelectAll(type: 'temp' | 'large' | 'duplicate' | 'empty' | 'broken_shortcut') {
     switch (type) {
       case 'temp':
-        if (selectedTempFiles.length === tempFiles.length) {
-          selectedTempFiles = [];
-        } else {
-          selectedTempFiles = tempFiles.map(f => f.path);
-        }
+        selectedTempFiles =
+          selectedTempFiles.length === tempFiles.length ? [] : tempFiles.map((f) => f.path);
         break;
       case 'large':
-        if (selectedLargeFiles.length === largeFiles.length) {
-          selectedLargeFiles = [];
-        } else {
-          selectedLargeFiles = largeFiles.map(f => f.path);
-        }
+        selectedLargeFiles =
+          selectedLargeFiles.length === largeFiles.length ? [] : largeFiles.map((f) => f.path);
         break;
       case 'duplicate':
-        if (selectedDuplicateFiles.length === duplicateFiles.length) {
-          selectedDuplicateFiles = [];
-        } else {
-          selectedDuplicateFiles = duplicateFiles.map(f => f.path);
-        }
+        selectedDuplicateFiles =
+          selectedDuplicateFiles.length === duplicateFiles.length
+            ? []
+            : duplicateFiles.map((f) => f.path);
         break;
       case 'empty':
-        if (selectedEmptyFolders.length === emptyFolders.length) {
-          selectedEmptyFolders = [];
-        } else {
-          selectedEmptyFolders = emptyFolders.map(f => f.path);
-        }
+        selectedEmptyFolders =
+          selectedEmptyFolders.length === emptyFolders.length
+            ? []
+            : emptyFolders.map((f) => f.path);
         break;
       case 'broken_shortcut':
-        if (selectedBrokenShortcuts.length === brokenShortcuts.length) {
-          selectedBrokenShortcuts = [];
-        } else {
-          selectedBrokenShortcuts = brokenShortcuts.map(f => f.path);
-        }
+        selectedBrokenShortcuts =
+          selectedBrokenShortcuts.length === brokenShortcuts.length
+            ? []
+            : brokenShortcuts.map((f) => f.path);
         break;
     }
   }
@@ -335,11 +344,11 @@
       const deletedCount: number = await invoke('move_to_trash', { files: filesToDelete });
       message = `Moved ${deletedCount} item(s) to Trash.`;
 
-      tempFiles = tempFiles.filter(f => !filesToDelete.includes(f.path));
-      largeFiles = largeFiles.filter(f => !filesToDelete.includes(f.path));
-      duplicateFiles = duplicateFiles.filter(f => !filesToDelete.includes(f.path));
-      emptyFolders = emptyFolders.filter(f => !filesToDelete.includes(f.path));
-      brokenShortcuts = brokenShortcuts.filter(f => !filesToDelete.includes(f.path));
+      tempFiles = tempFiles.filter((f) => !filesToDelete.includes(f.path));
+      largeFiles = largeFiles.filter((f) => !filesToDelete.includes(f.path));
+      duplicateFiles = duplicateFiles.filter((f) => !filesToDelete.includes(f.path));
+      emptyFolders = emptyFolders.filter((f) => !filesToDelete.includes(f.path));
+      brokenShortcuts = brokenShortcuts.filter((f) => !filesToDelete.includes(f.path));
 
       selectedTempFiles = [];
       selectedLargeFiles = [];
@@ -347,7 +356,6 @@
       selectedEmptyFolders = [];
       selectedBrokenShortcuts = [];
       filesToDelete = [];
-
     } catch (error) {
       message = `Error deleting files: ${error}`;
       console.error(error);
@@ -361,523 +369,532 @@
     filesToDelete = [];
   }
 
-  // Quick Clean helpers
   async function clearUserTemp() {
-    isLoading = true; message = '';
+    isLoading = true;
+    message = '';
     try {
       const res: any = await invoke('quick_clear_user_temp');
       message = `Cleared user temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
       triggerToast(message);
     } catch (e) {
-      console.error(e); message = `Failed: ${e}`;
-    } finally { isLoading = false; }
+      console.error(e);
+      message = `Failed: ${e}`;
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function clearSystemTemp() {
-    isLoading = true; message = '';
+    isLoading = true;
+    message = '';
     try {
       const res: any = await invoke('quick_clear_system_temp');
       message = `Cleared system temp: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
       triggerToast(message);
     } catch (e) {
-      console.error(e); message = `Failed: ${e}`;
-    } finally { isLoading = false; }
+      console.error(e);
+      message = `Failed: ${e}`;
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function clearPrefetch() {
-    isLoading = true; message = '';
+    isLoading = true;
+    message = '';
     try {
       const res: any = await invoke('quick_clear_prefetch');
       message = `Cleared Prefetch: ${res.files_deleted} files (${formatBytes(res.bytes_deleted)}).`;
       triggerToast(message);
     } catch (e) {
-      console.error(e); message = `Failed: ${e}`;
-    } finally { isLoading = false; }
+      console.error(e);
+      message = `Failed: ${e}`;
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function clearRecent() {
-    isLoading = true; message = '';
+    isLoading = true;
+    message = '';
     try {
       const res: any = await invoke('quick_clear_recent');
       message = `Cleared Recent shortcuts: ${res.files_deleted} items (${formatBytes(res.bytes_deleted)}).`;
       triggerToast(message);
     } catch (e) {
-      console.error(e); message = `Failed: ${e}`;
-    } finally { isLoading = false; }
+      console.error(e);
+      message = `Failed: ${e}`;
+    } finally {
+      isLoading = false;
+    }
   }
 
   function triggerToast(msg: string) {
     toastMsg = msg;
     showToast = true;
-    const t = setTimeout(() => { showToast = false; }, 3000);
+    const t = setTimeout(() => {
+      showToast = false;
+    }, 3000);
   }
 </script>
 
-<div class="main-content">
-  <div class="header-card">
-    <h1>Cleaner</h1>
-    <p class="muted">Scan, select and remove clutter safely.</p>
-  </div>
+<div class="container mx-auto p-4 space-y-6">
+  <Card>
+    <CardHeader>
+      <CardTitle class="text-3xl">Cleaner</CardTitle>
+      <CardDescription>Scan, select and remove clutter safely.</CardDescription>
+    </CardHeader>
+  </Card>
 
-<style>
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.65rem 0.95rem;
-    border-radius: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    border: 1px solid transparent;
-    cursor: pointer;
-    user-select: none;
-    transition: transform 0.15s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
-    box-shadow: 0 1px 1px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.25);
-    will-change: transform;
-  }
+  <div>
+    <h1 class="text-2xl font-bold mb-4">PC Cleaner &amp; Cloner</h1>
 
-  .btn:hover { transform: translateY(-1px); }
-  .btn:active { transform: translateY(0); }
-  .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-  .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(268 100% 70% / 0.35), 0 1px 1px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.25); }
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Quick Clean</CardTitle>
+          <CardDescription>One-click cleanup for common clutter.</CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-wrap gap-2">
+          <Button onclick={clearUserTemp} disabled={isLoading}>
+            <Trash2 class="h-4 w-4" />
+            Clear User Temp
+          </Button>
+          <Button variant="secondary" onclick={clearSystemTemp} disabled={isLoading}>
+            <Trash2 class="h-4 w-4" />
+            Clear System Temp
+          </Button>
+          <Button variant="secondary" onclick={clearPrefetch} disabled={isLoading}>
+            <RefreshCw class="h-4 w-4" />
+            Clear Prefetch
+          </Button>
+          <Button variant="secondary" onclick={clearRecent} disabled={isLoading}>
+            <RefreshCw class="h-4 w-4" />
+            Clear Recent
+          </Button>
+        </CardContent>
+      </Card>
 
-  .btn-primary {
-    background-image: var(--gradient-purple);
-    color: white;
-    border-color: hsl(268 100% 70% / 0.35);
-    box-shadow: 0 8px 24px -8px hsl(268 100% 70% / 0.35);
-  }
-
-  .btn-secondary {
-    background-color: var(--secondary);
-    color: var(--avelonia-text);
-    border-color: var(--avelonia-border);
-  }
-
-  .btn-danger {
-    background-image: linear-gradient(135deg, hsl(0 84% 60%) 0%, hsl(0 84% 55%) 100%);
-    color: white;
-    border-color: hsl(0 84% 60% / 0.35);
-    box-shadow: 0 8px 24px -8px hsl(0 84% 60% / 0.35);
-  }
-
-  /* Toast styles moved to $lib/components/Toast.svelte */
-</style>
-
-<div class="p-4">
-  <h1 class="text-2xl font-bold mb-4">PC Cleaner & Cloner</h1>
-
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Quick Clean</h2>
-      <p class="text-gray-400 mb-2">One-click cleanup for common clutter.</p>
-      <div class="flex flex-wrap gap-2">
-        <button on:click={clearUserTemp} class="btn btn-primary" disabled={isLoading}>Clear User Temp</button>
-        <button on:click={clearSystemTemp} class="btn btn-secondary" disabled={isLoading}>Clear System Temp</button>
-        <button on:click={clearPrefetch} class="btn btn-secondary" disabled={isLoading}>Clear Prefetch</button>
-        <button on:click={clearRecent} class="btn btn-secondary" disabled={isLoading}>Clear Recent</button>
-      </div>
-    </div>
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Temporary Files</h2>
-        <button
-          on:click={getTempFiles}
-          class="btn btn-primary mr-2"
-          disabled={isLoading}
-        >
-          Scan Temp Files
-        </button>
-        <button
-          on:click={getTempFiles}
-          class="btn btn-secondary"
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
-        <button
-          on:click={deleteSelectedTempFiles}
-          class="btn btn-danger"
-          disabled={selectedTempFiles.length === 0 || isLoading}
-        >
-          Clean Selected Temp Files ({selectedTempFiles.length})
-        </button>
-        {#if tempFiles.length > 0}
-          <div class="mt-4" transition:slide>
-            <label class="inline-flex items-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                on:change={() => toggleSelectAll('temp')}
-                checked={selectedTempFiles.length === tempFiles.length && tempFiles.length > 0}
-              />
-              <span class="ml-2 text-gray-300">Select All</span>
-            </label>
-            <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded">
-              {#each tempFiles as file (file.path)}
-                <li class="flex items-center">
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                    checked={selectedTempFiles.includes(file.path)}
-                    on:change={() => handleFileSelection(file.path, 'temp')}
-                  />
-                  <span class="ml-2">{file.path}</span>
-                </li>
-              {/each}
-            </ul>
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Temporary Files</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button onclick={getTempFiles} disabled={isLoading}>
+              <Scan class="h-4 w-4" />
+              Scan Temp Files
+            </Button>
+            <Button variant="secondary" onclick={getTempFiles} disabled={isLoading}>
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              onclick={deleteSelectedTempFiles}
+              disabled={selectedTempFiles.length === 0 || isLoading}
+            >
+              <Trash2 class="h-4 w-4" />
+              Clean Selected ({selectedTempFiles.length})
+            </Button>
           </div>
-        {/if}
-    </div>
 
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Recycle Bin</h2>
-        <button
-          on:click={confirmEmptyRecycleBin}
-          class="btn btn-danger"
-          disabled={isLoading}
-        >
-          Empty Recycle Bin
-        </button>
-    </div>
+          {#if tempFiles.length > 0}
+            <div transition:slide>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedTempFiles.length === tempFiles.length && tempFiles.length > 0}
+                  onCheckedChange={() => toggleSelectAll('temp')}
+                  id="select-all-temp"
+                />
+                <Label for="select-all-temp" class="text-sm">Select All</Label>
+              </div>
 
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Disk Space</h2>
-        {#if totalDiskSpace !== null}
-          <p class="text-gray-300">Total: {formatBytes(totalDiskSpace)}</p>
-        {/if}
-        {#if availableDiskSpace !== null}
-          <p class="text-gray-300">Available: {formatBytes(availableDiskSpace)}</p>
-        {/if}
-        <button
-          on:click={getDiskInfo}
-          class="btn btn-primary mt-2"
-          disabled={isLoading}
-        >
-          Refresh Disk Info
-        </button>
-    </div>
+              <ScrollArea class="h-48 mt-2 rounded border">
+                <ul class="text-sm">
+                  {#each tempFiles as file (file.path)}
+                    <li class="flex items-center gap-2 px-2 py-1">
+                      <Checkbox
+                        checked={selectedTempFiles.includes(file.path)}
+                        onCheckedChange={() => handleFileSelection(file.path, 'temp')}
+                      />
+                      <span class="truncate">{file.path}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </ScrollArea>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
 
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Large Files (>{formatBytes(100 * 1024 * 1024)})</h2>
-        <button
-          on:click={findLargeFiles}
-          class="btn btn-primary mr-2"
-          disabled={isLoading}
-        >
-          Find Large Files
-        </button>
-        <button
-          on:click={findLargeFiles}
-          class="btn btn-secondary"
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
-        <button
-          on:click={deleteSelectedLargeFiles}
-          class="btn btn-danger"
-          disabled={selectedLargeFiles.length === 0 || isLoading}
-        >
-          Delete Selected Large Files ({selectedLargeFiles.length})
-        </button>
-        {#if largeFiles.length > 0}
-          <div class="mt-4" transition:slide>
-            <label class="inline-flex items-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                on:change={() => toggleSelectAll('large')}
-                checked={selectedLargeFiles.length === largeFiles.length && largeFiles.length > 0}
-              />
-              <span class="ml-2 text-gray-300">Select All</span>
-            </label>
-            <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded">
-              {#each largeFiles as file (file.path)}
-                <li class="flex items-center justify-between">
-                  <label class="inline-flex items-center">
-                    <input
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                      checked={selectedLargeFiles.includes(file.path)}
-                      on:change={() => handleFileSelection(file.path, 'large')}
-                    />
-                    <span class="ml-2">{file.path}</span>
-                  </label>
-                  {#if file.size}
-                    <span class="text-xs text-gray-500">{formatBytes(file.size)}</span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
+      <!-- Recycle Bin -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Recycle Bin</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Button variant="destructive" onclick={confirmEmptyRecycleBin} disabled={isLoading}>
+            <Trash2 class="h-4 w-4" />
+            Empty Recycle Bin
+          </Button>
+        </CardContent>
+      </Card>
+
+      <!-- Disk Space -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Disk Space</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-2">
+          {#if totalDiskSpace !== null}
+            <div class="flex items-center gap-2">
+              <HardDrive class="h-4 w-4" />
+              <p>Total: {formatBytes(totalDiskSpace)}</p>
+            </div>
+          {/if}
+          {#if availableDiskSpace !== null}
+            <div class="flex items-center gap-2">
+              <HardDrive class="h-4 w-4" />
+              <p>Available: {formatBytes(availableDiskSpace)}</p>
+            </div>
+          {/if}
+          <Button onclick={getDiskInfo} disabled={isLoading} class="mt-2">
+            <RefreshCw class="h-4 w-4" />
+            Refresh Disk Info
+          </Button>
+        </CardContent>
+      </Card>
+
+      <!-- Large Files -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Large Files (&gt;{formatBytes(100 * 1024 * 1024)})</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button onclick={findLargeFiles} disabled={isLoading}>
+              <Scan class="h-4 w-4" />
+              Find Large Files
+            </Button>
+            <Button variant="secondary" onclick={findLargeFiles} disabled={isLoading}>
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              onclick={deleteSelectedLargeFiles}
+              disabled={selectedLargeFiles.length === 0 || isLoading}
+            >
+              <Trash2 class="h-4 w-4" />
+              Delete Selected ({selectedLargeFiles.length})
+            </Button>
           </div>
-        {/if}
-      </div>
 
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Duplicate Files</h2>
-        <button
-          on:click={findDuplicateFiles}
-          class="btn btn-primary mr-2"
-          disabled={isLoading}
-        >
-          Find Duplicate Files
-        </button>
-        <button
-          on:click={findDuplicateFiles}
-          class="btn btn-secondary"
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
-        <button
-          on:click={deleteSelectedDuplicateFiles}
-          class="btn btn-danger"
-          disabled={selectedDuplicateFiles.length === 0 || isLoading}
-        >
-          Delete Selected Duplicate Files ({selectedDuplicateFiles.length})
-        </button>
-        {#if duplicateFiles.length > 0}
-          <div class="mt-4" transition:slide>
-            <label class="inline-flex items-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                on:change={() => toggleSelectAll('duplicate')}
-                checked={selectedDuplicateFiles.length === duplicateFiles.length && duplicateFiles.length > 0}
-              />
-              <span class="ml-2 text-gray-300">Select All</span>
-            </label>
-            <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded">
-              {#each duplicateFiles as file (file.path)}
-                <li class="flex items-center">
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                    checked={selectedDuplicateFiles.includes(file.path)}
-                    on:change={() => handleFileSelection(file.path, 'duplicate')}
-                  />
-                  <span class="ml-2">{file.path}</span>
-                </li>
-              {/each}
-            </ul>
+          {#if largeFiles.length > 0}
+            <div transition:slide>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedLargeFiles.length === largeFiles.length && largeFiles.length > 0}
+                  onCheckedChange={() => toggleSelectAll('large')}
+                  id="select-all-large"
+                />
+                <Label for="select-all-large" class="text-sm">Select All</Label>
+              </div>
+
+              <ScrollArea class="h-48 mt-2 rounded border">
+                <ul class="text-sm">
+                  {#each largeFiles as file (file.path)}
+                    <li class="flex items-center justify-between gap-2 px-2 py-1">
+                      <div class="flex items-center gap-2">
+                        <Checkbox
+                          checked={selectedLargeFiles.includes(file.path)}
+                          onCheckedChange={() => handleFileSelection(file.path, 'large')}
+                        />
+                        <span class="truncate">{file.path}</span>
+                      </div>
+                      {#if file.size}
+                        <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(file.size)}</span>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              </ScrollArea>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+
+      <!-- Duplicate Files -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Duplicate Files</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button onclick={findDuplicateFiles} disabled={isLoading}>
+              <FilesIcon class="h-4 w-4" />
+              Find Duplicate Files
+            </Button>
+            <Button variant="secondary" onclick={findDuplicateFiles} disabled={isLoading}>
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              onclick={deleteSelectedDuplicateFiles}
+              disabled={selectedDuplicateFiles.length === 0 || isLoading}
+            >
+              <Trash2 class="h-4 w-4" />
+              Delete Selected ({selectedDuplicateFiles.length})
+            </Button>
           </div>
-        {/if}
+
+          {#if duplicateFiles.length > 0}
+            <div transition:slide>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedDuplicateFiles.length === duplicateFiles.length && duplicateFiles.length > 0}
+                  onCheckedChange={() => toggleSelectAll('duplicate')}
+                  id="select-all-dup"
+                />
+                <Label for="select-all-dup" class="text-sm">Select All</Label>
+              </div>
+
+              <ScrollArea class="h-48 mt-2 rounded border">
+                <ul class="text-sm">
+                  {#each duplicateFiles as file (file.path)}
+                    <li class="flex items-center gap-2 px-2 py-1">
+                      <Checkbox
+                        checked={selectedDuplicateFiles.includes(file.path)}
+                        onCheckedChange={() => handleFileSelection(file.path, 'duplicate')}
+                      />
+                      <span class="truncate">{file.path}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </ScrollArea>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+
+      <!-- Empty Folders -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Empty Folders</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button onclick={findEmptyFolders} disabled={isLoading}>
+              <FolderOpen class="h-4 w-4" />
+              Find Empty Folders
+            </Button>
+            <Button variant="secondary" onclick={findEmptyFolders} disabled={isLoading}>
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              onclick={deleteSelectedEmptyFolders}
+              disabled={selectedEmptyFolders.length === 0 || isLoading}
+            >
+              <Trash2 class="h-4 w-4" />
+              Delete Selected ({selectedEmptyFolders.length})
+            </Button>
+          </div>
+
+          {#if emptyFolders.length > 0}
+            <div transition:slide>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedEmptyFolders.length === emptyFolders.length && emptyFolders.length > 0}
+                  onCheckedChange={() => toggleSelectAll('empty')}
+                  id="select-all-empty"
+                />
+                <Label for="select-all-empty" class="text-sm">Select All</Label>
+              </div>
+
+              <ScrollArea class="h-48 mt-2 rounded border">
+                <ul class="text-sm">
+                  {#each emptyFolders as folder (folder.path)}
+                    <li class="flex items-center gap-2 px-2 py-1">
+                      <Checkbox
+                        checked={selectedEmptyFolders.includes(folder.path)}
+                        onCheckedChange={() => handleFileSelection(folder.path, 'empty')}
+                      />
+                      <span class="truncate">{folder.path}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </ScrollArea>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+
+      <!-- Broken Shortcuts -->
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Broken Shortcuts</CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button onclick={findBrokenShortcuts} disabled={isLoading}>
+              <FolderOpen class="h-4 w-4" />
+              Find Broken Shortcuts
+            </Button>
+            <Button variant="secondary" onclick={findBrokenShortcuts} disabled={isLoading}>
+              <RefreshCw class="h-4 w-4" />
+              Refresh
+            </Button>
+            <Button
+              variant="destructive"
+              onclick={deleteSelectedBrokenShortcuts}
+              disabled={selectedBrokenShortcuts.length === 0 || isLoading}
+            >
+              <Trash2 class="h-4 w-4" />
+              Delete Selected ({selectedBrokenShortcuts.length})
+            </Button>
+          </div>
+
+          {#if brokenShortcuts.length > 0}
+            <div transition:slide>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedBrokenShortcuts.length === brokenShortcuts.length && brokenShortcuts.length > 0}
+                  onCheckedChange={() => toggleSelectAll('broken_shortcut')}
+                  id="select-all-shortcuts"
+                />
+                <Label for="select-all-shortcuts" class="text-sm">Select All</Label>
+              </div>
+
+              <ScrollArea class="h-48 mt-2 rounded border">
+                <ul class="text-sm">
+                  {#each brokenShortcuts as shortcut (shortcut.path)}
+                    <li class="flex items-center gap-2 px-2 py-1">
+                      <Checkbox
+                        checked={selectedBrokenShortcuts.includes(shortcut.path)}
+                        onCheckedChange={() => handleFileSelection(shortcut.path, 'broken_shortcut')}
+                      />
+                      <span class="truncate">{shortcut.path}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </ScrollArea>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Cloner / Backup</CardTitle>
+          <CardDescription>Features for file synchronization and backup will be implemented here.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-2">
+          <h3 class="text-lg font-medium">File Synchronization</h3>
+          <Button disabled>
+            <RefreshCw class="h-4 w-4" />
+            Sync Folders (Coming Soon)
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-xl">Secure Eraser</CardTitle>
+          <CardDescription>Overwrite files with random data, then delete.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <Button onclick={eraserPickFiles} disabled={isErasing}>
+              <Eraser class="h-4 w-4" />
+              Choose Files
+            </Button>
+
+            <div class="flex items-center gap-2">
+              <Label for="passes">Passes:</Label>
+              <Input id="passes" type="number" min="1" max="7" bind:value={eraserPasses} class="w-24" />
+            </div>
+
+            <Button variant="destructive" onclick={secureErase} disabled={isErasing || eraserSelectedFiles.length === 0}>
+              {#if isErasing}
+                Erasing...
+              {:else}
+                <Eraser class="h-4 w-4" />
+                Secure Erase
+              {/if}
+            </Button>
+          </div>
+
+          {#if eraserSelectedFiles.length > 0}
+            <ScrollArea class="h-48 rounded border">
+              <ul class="text-sm p-2">
+                {#each eraserSelectedFiles as f (f)}
+                  <li class="truncate py-1">{f}</li>
+                {/each}
+              </ul>
+            </ScrollArea>
+          {/if}
+
+          {#if eraserMessage}
+            <Separator />
+            <p class="text-sm">{eraserMessage}</p>
+          {/if}
+        </CardContent>
+      </Card>
     </div>
 
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Empty Folders</h2>
-        <button
-          on:click={findEmptyFolders}
-          class="btn btn-primary mr-2"
-          disabled={isLoading}
-        >
-          Find Empty Folders
-        </button>
-        <button
-          on:click={findEmptyFolders}
-          class="btn btn-secondary"
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
-        <button
-          on:click={deleteSelectedEmptyFolders}
-          class="btn btn-danger"
-          disabled={selectedEmptyFolders.length === 0 || isLoading}
-        >
-          Delete Selected Empty Folders ({selectedEmptyFolders.length})
-        </button>
-        {#if emptyFolders.length > 0}
-          <div class="mt-4" transition:slide>
-            <label class="inline-flex items-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                on:change={() => toggleSelectAll('empty')}
-                checked={selectedEmptyFolders.length === emptyFolders.length && emptyFolders.length > 0}
-              />
-              <span class="ml-2 text-gray-300">Select All</span>
-            </label>
-            <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded">
-              {#each emptyFolders as folder (folder.path)}
-                <li class="flex items-center">
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                    checked={selectedEmptyFolders.includes(folder.path)}
-                    on:change={() => handleFileSelection(folder.path, 'empty')}
-                  />
-                  <span class="ml-2">{folder.path}</span>
-                </li>
-              {/each}
-            </ul>
-          </div>
+    {#if message || progressMessage}
+      <p class="mt-4 text-center">
+        {#if isLoading}
+          <span class="animate-pulse">Loading...</span>
         {/if}
-    </div>
-
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Broken Shortcuts</h2>
-        <button
-          on:click={findBrokenShortcuts}
-          class="btn btn-primary mr-2"
-          disabled={isLoading}
-        >
-          Find Broken Shortcuts
-        </button>
-        <button
-          on:click={findBrokenShortcuts}
-          class="btn btn-secondary"
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
-        <button
-          on:click={deleteSelectedBrokenShortcuts}
-          class="btn btn-danger"
-          disabled={selectedBrokenShortcuts.length === 0 || isLoading}
-        >
-          Delete Selected Broken Shortcuts ({selectedBrokenShortcuts.length})
-        </button>
-        {#if brokenShortcuts.length > 0}
-          <div class="mt-4" transition:slide>
-            <label class="inline-flex items-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                on:change={() => toggleSelectAll('broken_shortcut')}
-                checked={selectedBrokenShortcuts.length === brokenShortcuts.length && brokenShortcuts.length > 0}
-              />
-              <span class="ml-2 text-gray-300">Select All</span>
-            </label>
-            <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded">
-              {#each brokenShortcuts as shortcut (shortcut.path)}
-                <li class="flex items-center">
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-600"
-                    checked={selectedBrokenShortcuts.includes(shortcut.path)}
-                    on:change={() => handleFileSelection(shortcut.path, 'broken_shortcut')}
-                  />
-                  <span class="ml-2">{shortcut.path}</span>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/if}
-    </div>
-
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Cloner / Backup</h2>
-      <p class="text-gray-400">
-        Features for file synchronization and backup will be implemented here.
+        {progressMessage || message}
       </p>
-      <div class="mt-4">
-        <h3 class="text-lg font-medium mb-2">File Synchronization</h3>
-        <button
-          class="btn btn-primary"
-          disabled
-        >
-          Sync Folders (Coming Soon)
-        </button>
-    </div>
-    </div>
-
-    <div class="panel">
-      <h2 class="text-xl font-semibold mb-4">Secure Eraser</h2>
-      <p class="text-gray-400 mb-4">Overwrite files with random data, then delete.</p>
-
-      <div class="flex flex-wrap items-center gap-3 mb-4">
-        <button class="btn btn-primary" on:click={eraserPickFiles} disabled={isErasing}>Choose Files</button>
-        <label class="text-gray-300 flex items-center gap-2">
-          Passes:
-          <input
-            type="number"
-            min="1"
-            max="7"
-            bind:value={eraserPasses}
-            class="w-20 px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-100"
-          />
-        </label>
-        <button class="btn btn-danger" on:click={secureErase} disabled={isErasing || eraserSelectedFiles.length === 0}>
-          {isErasing ? 'Erasing...' : 'Secure Erase'}
-        </button>
-      </div>
-
-      {#if eraserSelectedFiles.length > 0}
-        <ul class="mt-2 text-sm text-gray-400 max-h-48 overflow-y-auto border border-gray-700 p-2 rounded" transition:slide>
-          {#each eraserSelectedFiles as f (f)}
-            <li>{f}</li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if eraserMessage}
-        <p class="mt-3 text-gray-300">{eraserMessage}</p>
-      {/if}
-    </div>
+    {/if}
   </div>
 
-  {#if message || progressMessage}
-    <p class="mt-4 text-center text-gray-300">
-      {#if isLoading}
-        <span class="animate-pulse">Loading...</span>
-      {/if}
-      {progressMessage || message}
-    </p>
-  {/if}
-
-  {#if showConfirmationModal}
-    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="panel max-w-md w-full">
-        <h2 class="text-xl font-bold mb-4 text-white">Confirm Deletion</h2>
-        <p class="text-gray-300 mb-4">
+  <Dialog open={showConfirmationModal} onOpenChange={(e) => (showConfirmationModal = e.detail)}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Confirm Deletion</DialogTitle>
+        <DialogDescription>
           Are you sure you want to delete {filesToDelete.length} selected file(s)? This action cannot be undone.
-        </p>
-        <div class="flex justify-end space-x-4">
-          <button
-            on:click={cancelDeletion}
-            class="btn btn-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            on:click={executeDeletion}
-            class="btn btn-danger"
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2">
+        <Button variant="secondary" onclick={cancelDeletion}>Cancel</Button>
+        <Button variant="destructive" onclick={executeDeletion}>
+          <Trash2 class="h-4 w-4" />
+          Delete
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
-  {#if showRecycleBinConfirmationModal}
-    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="panel max-w-md w-full">
-        <h2 class="text-xl font-bold mb-4 text-white">Confirm Empty Recycle Bin</h2>
-        <p class="text-gray-300 mb-4">
+  <Dialog open={showRecycleBinConfirmationModal} onOpenChange={(e) => (showRecycleBinConfirmationModal = e.detail)}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Confirm Empty Recycle Bin</DialogTitle>
+        <DialogDescription>
           Are you sure you want to empty the recycle bin? This action cannot be undone.
-        </p>
-        <div class="flex justify-end space-x-4">
-          <button
-            on:click={() => showRecycleBinConfirmationModal = false}
-            class="btn btn-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            on:click={emptyRecycleBin}
-            class="btn btn-danger"
-          >
-            Empty
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
-  <Toast bind:show={showToast} text={toastMsg} />
-  <LoadingOverlay show={isLoading || isErasing} text={(progressMessage || (isErasing ? 'Securely erasing...' : 'Working...'))} />
-</div>
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2">
+        <Button variant="secondary" onclick={() => (showRecycleBinConfirmationModal = false)}>Cancel</Button>
+        <Button variant="destructive" onclick={emptyRecycleBin}>
+          <Trash2 class="h-4 w-4" />
+          Empty
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
+  <Toast bind:show={showToast} text={toastMsg} />
+  <LoadingOverlay
+    show={isLoading || isErasing}
+    text={progressMessage || (isErasing ? 'Securely erasing...' : 'Working...')}
+  />
 </div>

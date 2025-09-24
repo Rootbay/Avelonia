@@ -20,12 +20,16 @@ function loadDownloads(): Download[] {
         if (Array.isArray(parsed)) {
           const storedMap = new Map(parsed.map((dl: Download) => [dl.id, dl]));
 
-          return initialDownloads.map(initialDl => {
+          return initialDownloads.map((initialDl) => {
             const storedDl = storedMap.get(initialDl.id);
             if (storedDl) {
               let newStatus = storedDl.status as Download['status'];
               // Reset transient in-progress states to a sane default on reload
-              if (storedDl.status === 'downloading' || storedDl.status === 'pending' || storedDl.status === 'queued') {
+              if (
+                storedDl.status === 'downloading' ||
+                storedDl.status === 'pending' ||
+                storedDl.status === 'queued'
+              ) {
                 newStatus = 'available';
               }
               return {
@@ -38,7 +42,7 @@ function loadDownloads(): Download[] {
           });
         }
       } catch (error) {
-        console.error("Error parsing downloads from localStorage", error);
+        console.error('Error parsing downloads from localStorage', error);
         return initialDownloads;
       }
     }
@@ -50,7 +54,10 @@ function loadDownloads(): Download[] {
 export const downloads = writable<Download[]>(loadDownloads());
 
 downloads.subscribe((currentDownloads) => {
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') return;
+  try {
     localStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(currentDownloads));
+  } catch (error) {
+    console.error('Failed to persist downloads state', error);
   }
 });

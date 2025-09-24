@@ -21,7 +21,8 @@ async function compressFile(file) {
       const inp = createReadStream(file);
       const out = createWriteStream(file + '.gz');
       const gz = createGzip({ level: constants.Z_BEST_COMPRESSION });
-      inp.on('error', reject); out.on('error', reject);
+      inp.on('error', reject);
+      out.on('error', reject);
       out.on('finish', resolve);
       inp.pipe(gz).pipe(out);
     }),
@@ -29,10 +30,11 @@ async function compressFile(file) {
       const inp = createReadStream(file);
       const out = createWriteStream(file + '.br');
       const br = createBrotliCompress({ params: { [constants.BROTLI_PARAM_QUALITY]: 11 } });
-      inp.on('error', reject); out.on('error', reject);
+      inp.on('error', reject);
+      out.on('error', reject);
       out.on('finish', resolve);
       inp.pipe(br).pipe(out);
-    })
+    }),
   ]);
 }
 
@@ -49,4 +51,3 @@ async function compressFile(file) {
     process.exit(1);
   }
 })();
-

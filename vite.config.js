@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
-import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from 'vite';
+import { sveltekit } from '@sveltejs/kit/vite';
 import viteCompression from 'vite-plugin-compression';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -22,19 +22,20 @@ export default defineConfig(({ command, mode }) => {
           {
             urlPattern: ({ request }) => request.destination === 'document',
             handler: 'NetworkFirst',
-            options: { cacheName: 'html-cache', expiration: { maxEntries: 10 } }
+            options: { cacheName: 'html-cache', expiration: { maxEntries: 10 } },
           },
           {
-            urlPattern: ({ request }) => ['style','script','worker'].includes(request.destination),
+            urlPattern: ({ request }) =>
+              ['style', 'script', 'worker'].includes(request.destination),
             handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'assets-cache', expiration: { maxEntries: 60 } }
+            options: { cacheName: 'assets-cache', expiration: { maxEntries: 60 } },
           },
           {
             urlPattern: ({ request }) => request.destination === 'image',
             handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'images-cache', expiration: { maxEntries: 60 } }
-          }
-        ]
+            options: { cacheName: 'images-cache', expiration: { maxEntries: 60 } },
+          },
+        ],
       },
       manifest: {
         name: 'Avelonia',
@@ -44,56 +45,52 @@ export default defineConfig(({ command, mode }) => {
         display: 'standalone',
         icons: [
           { src: 'favicon.png', sizes: '192x192', type: 'image/png' },
-          { src: 'favicon.png', sizes: '512x512', type: 'image/png' }
-        ]
-      }
-    })
+          { src: 'favicon.png', sizes: '512x512', type: 'image/png' },
+        ],
+      },
+    }),
   ];
 
   return {
     plugins,
-  clearScreen: false,
-  optimizeDeps: {
-    exclude: [
-      "@tauri-apps/api",
-      "@tauri-apps/plugin-opener",
-      "@tauri-apps/plugin-dialog",
-    ],
-  },
-  server: {
-    port: 1420,
-    strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      ignored: ["**/src-tauri/**"],
+    clearScreen: false,
+    optimizeDeps: {
+      exclude: ['@tauri-apps/api', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-dialog'],
     },
-  },
-    build: {
-    cssCodeSplit: true,
-    assetsInlineLimit: 4096,
-    chunkSizeWarningLimit: 700,
-    target: 'es2020',
-    minify: 'esbuild',
-    rollupOptions: {
-      external: ["@tauri-apps/api/tauri"],
-      output: {
-        /** @param {any} assetInfo */
-        assetFileNames: (assetInfo) => {
-          if (assetInfo.name.endsWith('.css')) {
-            return 'assets/app.[ext]';
+    server: {
+      port: 1420,
+      strictPort: true,
+      host: host || false,
+      hmr: host
+        ? {
+            protocol: 'ws',
+            host,
+            port: 1421,
           }
-          return 'assets/[name].[ext]';
-        },
+        : undefined,
+      watch: {
+        ignored: ['**/src-tauri/**'],
       },
     },
-    esbuild: { drop: ['console','debugger'] },
-  },
+    build: {
+      cssCodeSplit: true,
+      assetsInlineLimit: 4096,
+      chunkSizeWarningLimit: 700,
+      target: 'es2020',
+      minify: 'esbuild',
+      rollupOptions: {
+        external: ['@tauri-apps/api/tauri'],
+        output: {
+          /** @param {any} assetInfo */
+          assetFileNames: (assetInfo) => {
+            if (assetInfo.name.endsWith('.css')) {
+              return 'assets/app.[ext]';
+            }
+            return 'assets/[name].[ext]';
+          },
+        },
+      },
+      esbuild: { drop: ['console', 'debugger'] },
+    },
   };
 });

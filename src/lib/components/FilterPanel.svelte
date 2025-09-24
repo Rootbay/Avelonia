@@ -1,23 +1,9 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-  import { slide } from 'svelte/transition';
-
-  const dispatch = createEventDispatcher();
-
-  export let searchTerm: string;
-  export let showFilters: boolean;
-  export let filters: Filters;
-
-  function clearFilters() {
-    searchTerm = "";
-    filters.fileType = "";
-    filters.category = "";
-    filters.minSize = "";
-    filters.maxSize = "";
-    filters.eta = "";
-    filters.status = "";
-    dispatch('clearFilters');
-  }
+  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
+  import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 
   interface Filters {
     fileType: string;
@@ -27,99 +13,77 @@
     eta: string;
     status: string;
   }
+
+  let {
+    searchTerm,
+    showFilters,
+    filters,
+    onClearFilters
+  }: {
+    searchTerm: string;
+    showFilters: boolean;
+    filters: Filters;
+    onClearFilters?: () => void;
+  } = $props();
+
+  function clearFilters() {
+    searchTerm = '';
+    filters.fileType = '';
+    filters.category = '';
+    filters.minSize = '';
+    filters.maxSize = '';
+    filters.eta = '';
+    filters.status = '';
+    onClearFilters?.();
+  }
 </script>
 
-
 {#if showFilters}
-  <div class="filter-settings" transition:slide>
-    <h3>Filter Settings</h3>
-    <div class="filter-group">
-      <label for="fileType">File Type:</label>
-      <input type="text" id="fileType" bind:value={filters.fileType} />
-    </div>
-    <div class="filter-group">
-      <label for="category">Category:</label>
-      <input type="text" id="category" bind:value={filters.category} />
-    </div>
-    <div class="filter-group">
-      <label for="minSize">Min Size:</label>
-      <input id="minSize" bind:value={filters.minSize} placeholder="e.g. 50MB" />
-    </div>
-    <div class="filter-group">
-      <label for="maxSize">Max Size:</label>
-      <input id="maxSize" bind:value={filters.maxSize} placeholder="e.g. 2 GB" />
-    </div>
-    <div class="filter-group">
-      <label for="eta">ETA:</label>
-      <input type="text" id="eta" bind:value={filters.eta} />
-    </div>
-    <div class="filter-group">
-      <label for="status">Status:</label>
-      <select id="status" bind:value={filters.status}>
-        <option value="">All</option>
-        <option value="available">Available</option>
-        <option value="pending">Pending</option>
-        <option value="queued">Queued</option>
-        <option value="downloading">Downloading</option>
-        <option value="paused">Paused</option>
-        <option value="completed">Completed</option>
-        <option value="failed">Failed</option>
-      </select>
-    </div>
-    <button class="action-button" on:click={clearFilters}>Clear Filters</button>
-  </div>
+  <Card class="border border-border/60 bg-card/80 shadow-sm">
+    <CardHeader class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <CardTitle class="text-base font-semibold">Refine downloads</CardTitle>
+      <Button variant="ghost" size="sm" onclick={clearFilters}>Clear all</Button>
+    </CardHeader>
+    <CardContent class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div class="space-y-2">
+        <Label for="filter-file-type">File type</Label>
+        <Input id="filter-file-type" bind:value={filters.fileType} placeholder="e.g. exe" />
+      </div>
+      <div class="space-y-2">
+        <Label for="filter-category">Category</Label>
+        <Input id="filter-category" bind:value={filters.category} placeholder="Utilities" />
+      </div>
+      <div class="space-y-2">
+        <Label for="filter-min-size">Min size</Label>
+        <Input id="filter-min-size" bind:value={filters.minSize} placeholder="50 MB" />
+      </div>
+      <div class="space-y-2">
+        <Label for="filter-max-size">Max size</Label>
+        <Input id="filter-max-size" bind:value={filters.maxSize} placeholder="2 GB" />
+      </div>
+      <div class="space-y-2">
+        <Label for="filter-eta">ETA</Label>
+        <Input id="filter-eta" bind:value={filters.eta} placeholder="< 5m" />
+      </div>
+      <div class="space-y-2">
+        <Label for="filter-status">Status</Label>
+        <Select type="single" bind:value={filters.status}>
+          <SelectTrigger id="filter-status" class="w-full" placeholder="All statuses"/>
+          <SelectContent>
+            <SelectItem value="">All statuses</SelectItem>
+            <SelectItem value="available">Available</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="queued">Queued</SelectItem>
+            <SelectItem value="downloading">Downloading</SelectItem>
+            <SelectItem value="paused">Paused</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="failed">Failed</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <Button variant="secondary" size="sm" class="md:col-span-2 xl:col-span-3 w-fit" onclick={clearFilters}>
+        Reset filters
+      </Button>
+    </CardContent>
+  </Card>
 {/if}
-
-<style>
-  .filter-settings {
-    background-color: rgba(0, 0, 0, 0.3);
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-  }
-
-  .filter-settings h3 {
-    grid-column: 1 / -1;
-    margin-top: 0;
-    margin-bottom: 10px;
-    color: #eee;
-  }
-
-  .filter-group {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .filter-group label {
-    margin-bottom: 5px;
-    font-size: 0.9em;
-    color: #ccc;
-  }
-
-  .filter-group input,
-  .filter-group select {
-    padding: 8px;
-    border-radius: 5px;
-    border: 1px solid #444;
-    background-color: #333;
-    color: var(--white);
-  }
-
-  .action-button {
-    padding: 5px 10px;
-    border-radius: 5px;
-    border: none;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.2s ease-in-out;
-    font-size: 0.8em;
-    background-color: #007bff;
-  }
-
-  .action-button:hover {
-    background-color: #0056b3;
-  }
-</style>

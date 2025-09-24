@@ -32,7 +32,12 @@
     border-top-color: var(--avelonia-purple);
     animation: spin 0.9s linear infinite;
   }
-  .label { font-size: 0.95rem; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .label {
+    font-size: 0.95rem;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 </style>
-

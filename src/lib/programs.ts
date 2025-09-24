@@ -42,6 +42,7 @@ export const programs = [
     size: '90 MB',
     fileType: 'exe',
     category: 'Communication',
-    downloadLink: 'https://discord.com/api/downloads/distributions/app/installers/latest?channel=stable&platform=win&arch=x86',
+    downloadLink:
+      'https://discord.com/api/downloads/distributions/app/installers/latest?channel=stable&platform=win&arch=x86',
   },
 ];
