@@ -45,14 +45,17 @@
   } from '$lib/components/ui/dialog';
   import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
   import { Checkbox } from '$lib/components/ui/checkbox';
+  import { startDownloadIntegrityWatch, stopDownloadIntegrityWatch } from '$lib/downloadIntegrity';
 
   import '../app.css';
 
   onMount(() => {
     initDownloadListener();
+    startDownloadIntegrityWatch(20000);
   });
   onDestroy(() => {
     disposeDownloadListener();
+    stopDownloadIntegrityWatch();
   });
 
   let { children }: { children?: Snippet } = $props();

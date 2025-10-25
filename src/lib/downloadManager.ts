@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { downloadDir, join } from '@tauri-apps/api/path';
 import { candidateFileNames, normalizeExtension, sanitizeFileName } from './downloadPath';
+import { pushLog, type LogLevel } from '$lib/logStore';
 
 export interface Download {
   id: number;
@@ -12,6 +13,7 @@ export interface Download {
   size: string;
   fileType: string;
   category: string;
+  tags?: string[];
   downloadLink: string;
   eta: string;
   status: 'available' | 'pending' | 'downloading' | 'paused' | 'completed' | 'queued' | 'failed';
@@ -26,6 +28,10 @@ const MAX_FILENAME_ATTEMPTS = 50;
 let progressUnlisten: Promise<UnlistenFn> | null = null;
 
 const lastSample = new Map<number, { bytes: number; time: number }>();
+const avgSpeedBps = new Map<number, number>();
+const lastUiEmit = new Map<number, number>();
+const UI_UPDATE_MS = 700;
+const EMA_ALPHA = 0.25;
 const activeDownloads = new Set<number>();
 const pendingQueue: number[] = [];
 
@@ -33,6 +39,13 @@ const reservedPaths = new Set<string>();
 const downloadPathReservations = new Map<number, string>();
 const usedPaths = new Set<string>();
 let usedPathsSeeded = false;
+async function appLog(level: LogLevel, message: string) {
+  try {
+    pushLog(level, message, 'Downloader');
+  } catch {
+    // ignore logging errors
+  }
+}
 
 function seedUsedPaths() {
   if (usedPathsSeeded) return;
@@ -155,6 +168,11 @@ async function performDownload(download: Download): Promise<void> {
   } catch (error) {
     if (activeDownloads.has(download.id)) {
       console.error(`Failed to start download for ${download.name}:`, error);
+      void (async () => {
+        try {
+          await appLog('ERROR', 'Download failed to start: ' + download.name);
+        } catch {}
+      })();
       updateDownloadById(download.id, (draft) => {
         draft.status = 'failed';
         draft.progress = 0;
@@ -172,6 +190,8 @@ function finalizeDownload(id: number) {
   releasePath(id);
   activeDownloads.delete(id);
   lastSample.delete(id);
+  avgSpeedBps.delete(id);
+  lastUiEmit.delete(id);
   removeFromQueue(id);
   processQueue();
 }
@@ -193,47 +213,80 @@ export function initDownloadListener() {
     const now = Date.now();
     const previous = lastSample.get(id);
 
+    // Always update progress and status promptly
     updateDownloadById(id, (draft) => {
       draft.progress = total === 0 ? -1 : Math.min(100, (downloaded / total) * 100);
-
-      if (previous) {
-        const deltaBytes = downloaded - previous.bytes;
-        const deltaTime = (now - previous.time) / 1000;
-        if (deltaTime > 0 && deltaBytes >= 0) {
-          const bps = deltaBytes / deltaTime;
-          draft.speed = formatBytesPerSec(bps);
-          if (total > 0 && downloaded <= total && bps > 0) {
-            const remaining = total - downloaded;
-            const etaSec = Math.max(0, Math.round(remaining / bps));
-            const mm = Math.floor(etaSec / 60)
-              .toString()
-              .padStart(2, '0');
-            const ss = (etaSec % 60).toString().padStart(2, '0');
-            draft.eta = `${mm}:${ss}`;
-          } else if (total === 0) {
-            draft.eta = 'Preparing.';
-          }
-        }
-      } else if (total === 0) {
-        draft.eta = 'Preparing.';
-        draft.speed = '';
-      }
-
-      if (total > 0 && downloaded >= total) {
-        draft.status = 'completed';
+      draft.status = total > 0 && downloaded >= total ? 'completed' : 'downloading';
+      if (draft.status === 'completed') {
         draft.progress = 100;
         draft.speed = '';
         draft.eta = 'Done';
-      } else {
-        draft.status = 'downloading';
       }
     });
 
     if (total > 0 && downloaded >= total) {
       lastSample.delete(id);
-    } else {
-      lastSample.set(id, { bytes: downloaded, time: now });
+      avgSpeedBps.delete(id);
+      lastUiEmit.delete(id);
+      void (async () => {
+        const snap = getDownloadSnapshot(id);
+        if (snap) {
+          await appLog(
+            'SUCCESS',
+            'Download completed: ' + snap.name + (snap.targetPath ? ' -> ' + snap.targetPath : '')
+          );
+        }
+      })();
+      return;
     }
+
+    // Compute smoothed speed (EMA) and throttle UI updates
+    if (previous) {
+      const deltaBytes = downloaded - previous.bytes;
+      const deltaTime = (now - previous.time) / 1000;
+      if (deltaTime > 0 && deltaBytes >= 0) {
+        const instBps = deltaBytes / deltaTime;
+        const prevAvg = avgSpeedBps.get(id) ?? instBps;
+        const nextAvg = EMA_ALPHA * instBps + (1 - EMA_ALPHA) * prevAvg;
+        avgSpeedBps.set(id, nextAvg);
+
+        const lastEmit = lastUiEmit.get(id) ?? 0;
+        const shouldEmit = now - lastEmit >= UI_UPDATE_MS;
+        if (shouldEmit) {
+          const bps = nextAvg;
+          let speedStr = formatBytesPerSec(bps);
+          let etaStr = '';
+          if (total > 0 && bps > 1) {
+            const remaining = Math.max(0, total - downloaded);
+            const etaSec = Math.max(0, Math.round(remaining / bps));
+            const hrs = Math.floor(etaSec / 3600);
+            const mins = Math.floor((etaSec % 3600) / 60);
+            const secs = etaSec % 60;
+            etaStr = hrs > 0
+              ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+              : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+          } else if (total === 0) {
+            etaStr = '—';
+          }
+
+          updateDownloadById(id, (draft) => {
+            if (speedStr) draft.speed = speedStr;
+            if (etaStr) draft.eta = etaStr;
+          });
+          lastUiEmit.set(id, now);
+        }
+      }
+    } else {
+      // First sample: show placeholder ETA
+      if (total === 0) {
+        updateDownloadById(id, (draft) => {
+          draft.eta = '—';
+          draft.speed = '';
+        });
+      }
+    }
+
+    lastSample.set(id, { bytes: downloaded, time: now });
   });
 }
 
@@ -270,12 +323,8 @@ export async function getDownloadPath(dl: Download): Promise<string | null> {
 
     const existingPath = typeof dl.targetPath === 'string' ? dl.targetPath : null;
 
-    if (
-      existingPath &&
-      !reservedPaths.has(existingPath) &&
-      !takenByOthers.has(existingPath) &&
-      !usedPaths.has(existingPath)
-    ) {
+    // Prefer an already assigned path for this item when available
+    if (existingPath && !reservedPaths.has(existingPath) && !takenByOthers.has(existingPath)) {
       return existingPath;
     }
 
@@ -338,6 +387,17 @@ export function startDownload(id: number) {
     draft.targetPath = undefined;
   });
 
+  // Log start/queue action for dashboard
+  void (async () => {
+    const snap = getDownloadSnapshot(id);
+    if (!snap) return;
+    if (willStartImmediately) {
+      await appLog('INFO', 'Starting download: ' + snap.name);
+    } else {
+      await appLog('INFO', 'Queued download: ' + snap.name);
+    }
+  })();
+
   pendingQueue.push(id);
   processQueue();
 }
@@ -366,4 +426,15 @@ export async function cancelDownload(id: number) {
 
   lastSample.delete(id);
   finalizeDownload(id);
+  void (async () => { const snap = getDownloadSnapshot(id); if (snap) await appLog('WARN', 'Canceled download: ' + snap.name); })();
 }
+
+
+
+
+
+
+
+
+
+

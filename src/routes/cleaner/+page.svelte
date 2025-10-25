@@ -454,7 +454,7 @@
   }
 </script>
 
-<div class="container mx-auto p-4 space-y-6">
+<div class="space-y-6 text-foreground">
   <Card>
     <CardHeader>
       <CardTitle class="text-3xl">Cleaner</CardTitle>

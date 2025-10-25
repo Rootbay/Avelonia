@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { downloads } from '$lib/downloads';
+  import { downloads, addDownload, removeDownloadsByIds } from '$lib/downloads';
   import FilterPanel from '$lib/components/FilterPanel.svelte';
   import DownloadItem from '$lib/components/DownloadItem.svelte';
   import { startDownload, cancelDownload, getDownloadPath } from '$lib/downloadManager';
@@ -7,6 +7,7 @@
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { pushLog as pushSystemLog, type LogLevel } from '$lib/logStore';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import {
@@ -16,8 +17,17 @@
     CardHeader,
     CardTitle,
   } from '$lib/components/ui/card';
+  import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+  import {
+    Table,
+    TableHeader,
+    TableRow,
+    TableHead,
+    TableBody,
+    TableCell,
+  } from '$lib/components/ui/table';
   import {
     Sheet,
     SheetContent,
@@ -36,6 +46,11 @@
   } from '$lib/components/ui/dialog';
   import { toast } from '$lib/components/ui/sonner';
   import { ArrowUpDown, ListChecks, SlidersHorizontal, Keyboard } from '@lucide/svelte';
+  import { Play, XCircle, RefreshCcw, Clipboard as ClipboardIcon, FileDown, Eye, FolderOpen, Trash2 } from '@lucide/svelte';
+  import { sanitizeFileName, normalizeExtension } from '$lib/downloadPath';
+  import { prettifyDisplayName } from '$lib/name';
+  import { tags as customTags, addTag, BUILT_IN_TAGS } from '$lib/tags';
+  import { invoke } from '@tauri-apps/api/core';
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
@@ -46,6 +61,7 @@
     return () => clearTimeout(t);
   });
   let showFilters = $state(false);
+  let filtersOpen = $state(false);
   let actionsOpen = $state(false);
   let filters = $state({
     fileType: '',
@@ -69,13 +85,13 @@
   ];
 
   const sortOptions: Array<{ value: SortKey; label: string }> = [
-    { value: 'name', label: 'Name' },
-    { value: 'size', label: 'Size' },
-    { value: 'fileType', label: 'File Type' },
-    { value: 'category', label: 'Category' },
-    { value: 'eta', label: 'ETA' },
-    { value: 'status', label: 'Status' },
-  ];
+  { value: 'name', label: 'Name' },
+  { value: 'size', label: 'Size' },
+  { value: 'fileType', label: 'File Type' },
+  { value: 'category', label: 'Category' },
+  { value: 'eta', label: 'ETA' },
+  { value: 'status', label: 'Status' },
+];
 
   let statusGroup = $state<StatusGroup>('all');
   let sortBy = $state<SortKey>('name');
@@ -86,6 +102,126 @@
   let announce = $state('');
   let showHelp = $state(false);
   let lastSelectedIndex: number | null = null;
+  let tableEl: HTMLTableElement | null = null;
+  let maxListHeight = $state(0);
+  let addOpen = $state(false);
+  let addUrl = $state('');
+  let addCategory = $state('');
+  let addName = $state('');
+  let nameTouched = $state(false);
+  const tagOptions = $derived([...new Set([...BUILT_IN_TAGS, ...$customTags])]);
+  const guessed = $derived.by(() => guessFromUrl(addUrl));
+  let probeName = $state('');
+  let probeExt = $state('');
+  let probeSize = $state(0);
+  let probing = $state(false);
+  const effectiveExt = $derived(probeExt || guessed.ext);
+  const effectiveName = $derived(prettifyDisplayName(probeName || guessed.name, effectiveExt));
+
+  // Keep suggested name in sync until user edits the field
+  $effect(() => {
+    if (!nameTouched) {
+      addName = effectiveName;
+    }
+  });
+
+  // Probe server headers for better filename/extension when URL looks valid
+  $effect(() => {
+    const u = addUrl.trim();
+    if (!/^https?:\/\//i.test(u)) {
+      probeName = '';
+      probeExt = '';
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        probing = true;
+        const res = (await invoke('probe_download', { url: u })) as { filename?: string; ext?: string; size?: number };
+        probeName = res?.filename || '';
+        probeExt = res?.ext || '';
+        probeSize = typeof res?.size === 'number' ? (res!.size as number) : 0;
+      } catch {
+        probeName = '';
+        probeExt = '';
+        probeSize = 0;
+      } finally {
+        probing = false;
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  });
+
+  function guessFromUrl(url: string): { name: string; ext: string } {
+    try {
+      const u = new URL(url);
+      let last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+      // Strip query-like suffixes sometimes embedded in filename
+      last = last.replace(/[?#].*$/, '');
+      if (!last) return { name: 'download', ext: '' };
+      // Try multi-dot extensions first
+      const lower = last.toLowerCase();
+      const multi = ['.tar.gz', '.tar.bz2', '.tar.xz', '.tar.zst'];
+      for (const m of multi) {
+        if (lower.endsWith(m)) {
+          const base = last.slice(0, -m.length);
+          const ext = m.slice(1);
+          return { name: sanitizeFileName(base), ext };
+        }
+      }
+      const idx = last.lastIndexOf('.');
+      if (idx > 0 && idx < last.length - 1) {
+        const base = last.slice(0, idx);
+        const ext = last.slice(idx + 1);
+        return { name: sanitizeFileName(base), ext };
+      }
+      return { name: sanitizeFileName(last), ext: '' };
+    } catch {
+      return { name: 'download', ext: '' };
+    }
+  }
+
+  function addNewDownload() {
+    const url = addUrl.trim();
+    if (!url) {
+      toast.error('Enter a valid URL');
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      toast.error('Only http(s) URLs are supported');
+      return;
+    }
+    const name = (addName || '').trim() || effectiveName;
+    const ext = effectiveExt;
+    const normExt = normalizeExtension(ext).replace(/^\./, '');
+    addDownload({
+      name,
+      description: '',
+      size: probeSize > 0 ? formatBytes(probeSize) : 'N/A',
+      fileType: normExt,
+      category: addCategory.trim() || 'General',
+      tags: addCategory.trim() ? [addCategory.trim()] : ['General'],
+      downloadLink: url,
+    });
+    const cat = addCategory.trim();
+    if (cat && !tagOptions.includes(cat)) addTag(cat);
+    addOpen = false;
+    addUrl = '';
+    addCategory = '';
+    toast.success('Added to list');
+  }
+
+  const activeFilterCount = $derived.by(() => {
+    let c = 0;
+    if (debouncedSearchTerm.trim()) c += 1;
+    if (filters.fileType) c += 1;
+    if (filters.category) c += 1;
+    if (filters.minSize) c += 1;
+    if (filters.maxSize) c += 1;
+    if (filters.eta) c += 1;
+    if (filters.status) c += 1;
+    if (statusGroup !== 'all') c += 1;
+    return c;
+  });
 
   function toggleSelect(id: number, value?: boolean) {
     if (value === undefined) {
@@ -99,6 +235,27 @@
   }
   function clearSelection() {
     selectedIds = new Set();
+  }
+
+  // Uncheck items automatically when they complete
+  $effect(() => {
+    let changed = false;
+    for (const d of $downloads) {
+      if (d.status === 'completed' && selectedIds.has(d.id)) {
+        selectedIds.delete(d.id);
+        changed = true;
+      }
+    }
+    if (changed) selectedIds = new Set(selectedIds);
+  });
+
+  // Utility to send app logs to Dashboard via Tauri event bus
+  async function appLog(level: LogLevel, message: string) {
+    try {
+      // Reduce noise: only persist WARN/ERROR/SUCCESS; ignore INFO here
+      if (level === 'INFO') return;
+      pushSystemLog(level, message, 'Downloader');
+    } catch {}
   }
 
   const STORAGE_KEY = 'avelonia_downloader_ui_v1';
@@ -156,6 +313,34 @@
         JSON.stringify({ searchTerm, filters, sortBy, sortDirection, statusGroup })
       );
     } catch {}
+  });
+
+  function recomputeMaxHeight() {
+    try {
+      const header = tableEl?.querySelector('thead') as HTMLElement | null;
+      const firstRow = tableEl?.querySelector('tbody tr') as HTMLElement | null;
+      const headerH = header ? header.getBoundingClientRect().height : 44;
+      const rowH = firstRow ? firstRow.getBoundingClientRect().height : 56;
+      const cap = Math.ceil(headerH + rowH * 10 + 6); // header + 10 rows + small buffer
+      maxListHeight = cap;
+    } catch {
+      maxListHeight = 0;
+    }
+  }
+
+  $effect(() => {
+    // Recalculate when the filtered list length changes
+    const _len = filteredDownloads.length;
+    // Next tick to allow DOM to render
+    setTimeout(recomputeMaxHeight, 0);
+  });
+
+  onMount(() => {
+    const onR = () => recomputeMaxHeight();
+    window.addEventListener('resize', onR);
+    // initial calculation
+    setTimeout(onR, 0);
+    return () => window.removeEventListener('resize', onR);
   });
 
   function toBytes(val: string | number | undefined | null): number {
@@ -313,6 +498,17 @@
     filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'completed').length
   );
 
+  // Action counts for nicer Bulk actions UI
+  const startableAll = $derived($downloads.filter((d) => d.status === 'available' && !!d.downloadLink).length);
+  const cancelableAll = $derived($downloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
+  const startableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'available' && !!d.downloadLink).length);
+  const cancelableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
+  const startableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'available' && !!d.downloadLink).length);
+  const cancelableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')).length);
+  const failedFiltered = $derived(filteredDownloads.filter((d) => d.status === 'failed').length);
+  const deletableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id)).length);
+  const deletableFiltered = $derived(filteredDownloads.length);
+
   $effect(() => {
     const filteredIds = new Set(filteredDownloads.map((d) => d.id));
     let selectedInFilter = 0;
@@ -355,15 +551,19 @@
     for (const d of list) {
       if (d.status === 'available' && d.downloadLink) startDownload(d.id);
     }
+    void appLog('INFO', 'Queued all available downloads');
   }
 
   function cancelAllActive() {
     const list = get(downloads);
+    let canceled = 0;
     for (const d of list) {
       if (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued') {
         cancelDownload(d.id);
+        canceled += 1;
       }
     }
+    if (canceled > 0) void appLog('INFO', `Canceled ${canceled} active downloads`);
   }
 
   function startAllFiltered() {
@@ -376,6 +576,7 @@
     }
     if (queued > 0) {
       toast.success(`Queued ${queued} download${queued === 1 ? '' : 's'}`);
+      void appLog('INFO', `Queued ${queued} download(s) from current filter`);
     } else {
       toast.info('No available downloads to start');
     }
@@ -390,6 +591,7 @@
     }
     if (canceled > 0) {
       toast.success(`Canceled ${canceled} download${canceled === 1 ? '' : 's'}`);
+      void appLog('INFO', `Canceled ${canceled} download(s) from current filter`);
     } else {
       toast.info('No active downloads to cancel');
     }
@@ -404,6 +606,7 @@
     }
     if (queued > 0) {
       toast.success(`Queued ${queued} selected download${queued === 1 ? '' : 's'}`);
+      void appLog('INFO', `Queued ${queued} selected download(s)`);
     } else {
       toast.info('Select an available download first');
     }
@@ -421,9 +624,47 @@
     }
     if (canceled > 0) {
       toast.success(`Canceled ${canceled} selected download${canceled === 1 ? '' : 's'}`);
+      void appLog('INFO', `Canceled ${canceled} selected download(s)`);
     } else {
       toast.info('No active selected downloads to cancel');
     }
+  }
+
+  function deleteSelected() {
+    const ids = filteredDownloads.filter((d) => selectedIds.has(d.id)).map((d) => d.id);
+    if (ids.length === 0) {
+      toast.info('No selected downloads to delete');
+      return;
+    }
+    // Cancel active ones before removing
+    for (const d of filteredDownloads) {
+      if (selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')) {
+        cancelDownload(d.id);
+      }
+    }
+    removeDownloadsByIds(ids);
+    for (const id of ids) selectedIds.delete(id);
+    selectedIds = new Set(selectedIds);
+    toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
+    void appLog('WARN', `Deleted ${ids.length} selected download(s)`);
+  }
+
+  function deleteFiltered() {
+    const ids = filteredDownloads.map((d) => d.id);
+    if (ids.length === 0) {
+      toast.info('No filtered downloads to delete');
+      return;
+    }
+    for (const d of filteredDownloads) {
+      if (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued') {
+        cancelDownload(d.id);
+      }
+    }
+    removeDownloadsByIds(ids);
+    for (const id of ids) selectedIds.delete(id);
+    selectedIds = new Set(selectedIds);
+    toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
+    void appLog('WARN', `Deleted ${ids.length} filtered download(s)`);
   }
 
   async function openSelectedCompleted() {
@@ -452,6 +693,7 @@
     }
     if (opened > 0) {
       toast.success(`Opened ${opened} completed download${opened === 1 ? '' : 's'}`);
+      void appLog('INFO', `Opened ${opened} completed download(s)`);
     }
     if (failures > 0) {
       toast.error('Some items could not be opened');
@@ -486,6 +728,7 @@
       toast.success(
         `Revealed ${revealed} download${revealed === 1 ? '' : 's'} in the file explorer`
       );
+      void appLog('INFO', `Revealed ${revealed} completed download(s) in explorer`);
     }
     if (failures > 0) {
       toast.error('Some items could not be shown');
@@ -502,6 +745,7 @@
     }
     if (retried > 0) {
       toast.success(`Retrying ${retried} failed download${retried === 1 ? '' : 's'}`);
+      void appLog('INFO', `Retrying ${retried} failed download(s) in current view`);
     } else {
       toast.info('No failed downloads in view to retry');
     }
@@ -517,6 +761,7 @@
     }
     if (retried > 0) {
       toast.success(`Retrying ${retried} failed download${retried === 1 ? '' : 's'}`);
+      void appLog('INFO', `Retrying ${retried} failed download(s)`);
     } else {
       toast.info('No failed downloads to retry');
     }
@@ -637,7 +882,7 @@
 <div class="space-y-6">
   <div class="sr-only" aria-live="polite">{announce}</div>
 
-  <Card class="border border-border/60 bg-card/80 shadow-sm">
+  <Card class="bg-card/80 shadow-sm">
     <CardHeader>
       <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
       <CardDescription>Search, filter, and manage app downloads.</CardDescription>
@@ -653,21 +898,65 @@
     </CardContent>
   </Card>
 
-  <Card class="border border-border/60 bg-card/70 shadow-sm">
+  <Dialog bind:open={addOpen}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Add download</DialogTitle>
+        <DialogDescription>Paste a direct download link and choose a category.</DialogDescription>
+      </DialogHeader>
+      <div class="grid gap-3">
+        <div class="space-y-1">
+          <label class="text-sm font-medium" for="add-url">URL</label>
+          <Input id="add-url" placeholder="https://example.com/file.exe" bind:value={addUrl} />
+        </div>
+        <div class="space-y-1">
+          <label class="text-sm font-medium" for="add-cat">Category</label>
+          <Input id="add-cat" placeholder="e.g. Utilities" bind:value={addCategory} list="category-options" />
+          <datalist id="category-options">
+            {#each tagOptions as t}
+              <option value={t}></option>
+            {/each}
+          </datalist>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1">
+            <label class="text-sm font-medium" for="add-name">Name</label>
+            <Input id="add-name" placeholder="App name" bind:value={addName} oninput={() => (nameTouched = true)} />
+            {#if !nameTouched}
+              <p class="text-xs text-muted-foreground">Suggested: {effectiveName}{#if probing} (detecting...){/if}</p>
+            {/if}
+          </div>
+          <div class="space-y-1">
+            <div class="text-sm font-medium">Type</div>
+            <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || '—'}</div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="secondary" onclick={() => (addOpen = false)}>Cancel</Button>
+        <Button type="button" onclick={addNewDownload}>Add</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Card class="bg-card/70 shadow-sm">
     <CardHeader class="gap-4 pb-2">
       <div class="flex flex-col gap-3">
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="flex min-w-[220px] flex-1 items-center gap-2">
-            <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} />
-            <Button
-              type="button"
-              variant="outline"
-              onclick={() => (showFilters = !showFilters)}
-              aria-expanded={showFilters}
-            >
-              <SlidersHorizontal class="size-4" />
-              <span class="ml-2 hidden sm:inline">Filters</span>
-            </Button>
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex min-w-[220px] flex-1 items-center gap-2">
+              <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} />
+              <Button
+                type="button"
+                variant="outline"
+                onclick={() => (filtersOpen = true)}
+              >
+                <SlidersHorizontal class="size-4" />
+                <span class="ml-2 hidden sm:inline">Filters</span>
+              </Button>
+              <Button type="button" variant="secondary" onclick={() => (addOpen = true)}>
+                <span class="hidden sm:inline">Add</span>
+                <span class="sm:hidden">+</span>
+              </Button>
               {#snippet ActionsTrigger({ props }: ButtonSnippetContext)}
                 {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
                 {@const { class: propsClass, ...restWithoutClass } = rawProps}
@@ -684,117 +973,100 @@
               {/snippet}
             <Sheet bind:open={actionsOpen}>
               <SheetTrigger child={ActionsTrigger} />
-              <SheetContent side="right" class="w-[320px] sm:w-[360px]">
-                <SheetHeader>
+              <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+                <SheetHeader class="space-y-1 p-0">
                   <SheetTitle>Bulk actions</SheetTitle>
                   <SheetDescription
                     >Apply actions to the current selection or filtered list.</SheetDescription
                   >
                 </SheetHeader>
-                <div class="mt-4 grid gap-3">
-                  <Button
-                    type="button"
-                    onclick={() => {
-                      startAll();
-                      actionsOpen = false;
-                    }}>Start all</Button
-                  >
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onclick={() => {
-                      cancelAllActive();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Cancel active
-                  </Button>
-                  <Separator class="my-1" />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => {
-                      startAllFiltered();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Start filtered
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => {
-                      cancelAllFiltered();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Cancel filtered
-                  </Button>
-                  <Separator class="my-1" />
-                  <Button
-                    type="button"
-                    disabled={selectedIds.size === 0}
-                    onclick={() => {
-                      startSelected();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Start selected
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={selectedIds.size === 0}
-                    onclick={() => {
-                      cancelSelected();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Cancel selected
-                  </Button>
-                  <Separator class="my-1" />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={selectedIds.size === 0}
-                    onclick={() => {
-                      copySelectedLinks();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Copy selected links
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => {
-                      exportFilteredCSV();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Export CSV
-                  </Button>
-                  <Separator class="my-1" />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => {
-                      retryFailedFiltered();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Retry failed (filtered)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => {
-                      retryAllFailed();
-                      actionsOpen = false;
-                    }}
-                  >
-                    Retry all failed
-                  </Button>
+                <div class="mt-3 space-y-3">
+                  <div class="space-y-2">
+                    <p class="text-xs uppercase tracking-wide text-muted-foreground">All downloads</p>
+                    <div class="grid gap-2">
+                      <Button type="button" class="justify-between" onclick={() => { startAll(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
+                        {#if startableAll > 0}<Badge variant="secondary">{startableAll}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="destructive" class="justify-between" onclick={() => { cancelAllActive(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel active</span>
+                        {#if cancelableAll > 0}<Badge variant="secondary">{cancelableAll}</Badge>{/if}
+                      </Button>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div class="space-y-2">
+                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Current view</p>
+                    <div class="grid gap-2">
+                      <Button type="button" variant="outline" class="justify-between" disabled={startableFiltered === 0} onclick={() => { startAllFiltered(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><Play class="size-4" /> Start filtered</span>
+                        {#if startableFiltered > 0}<Badge variant="secondary">{startableFiltered}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="destructive" class="justify-between" disabled={cancelableFiltered === 0} onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel filtered</span>
+                        {#if cancelableFiltered > 0}<Badge variant="secondary">{cancelableFiltered}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="destructive" class="justify-between" disabled={deletableFiltered === 0} onclick={() => { deleteFiltered(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete filtered</span>
+                        {#if deletableFiltered > 0}<Badge variant="secondary">{deletableFiltered}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="outline" class="justify-between" disabled={failedFiltered === 0} onclick={() => { retryFailedFiltered(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry failed (filtered)</span>
+                        {#if failedFiltered > 0}<Badge variant="secondary">{failedFiltered}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="ghost" class="justify-between" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><FileDown class="size-4" /> Export CSV</span>
+                      </Button>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div class="space-y-2">
+                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
+                    <div class="grid gap-2">
+                      <Button type="button" class="justify-between" disabled={startableSelected === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><Play class="size-4" /> Start selected</span>
+                        {#if startableSelected > 0}<Badge variant="secondary">{startableSelected}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="destructive" class="justify-between" disabled={cancelableSelected === 0} onclick={() => { cancelSelected(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel selected</span>
+                        {#if cancelableSelected > 0}<Badge variant="secondary">{cancelableSelected}</Badge>{/if}
+                      </Button>
+                      <Button type="button" variant="destructive" class="justify-between" disabled={deletableSelected === 0} onclick={() => { deleteSelected(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete selected</span>
+                        {#if deletableSelected > 0}<Badge variant="secondary">{deletableSelected}</Badge>{/if}
+                      </Button>
+                      <div class="grid grid-cols-2 gap-2">
+                        <Button type="button" variant="outline" class="justify-center" disabled={selectedCompletedCount === 0} onclick={() => { openSelectedCompleted(); actionsOpen = false; }}>
+                          <Eye class="size-4" />
+                          <span class="ml-2">Open</span>
+                        </Button>
+                        <Button type="button" variant="outline" class="justify-center" disabled={selectedCompletedCount === 0} onclick={() => { showSelectedCompleted(); actionsOpen = false; }}>
+                          <FolderOpen class="size-4" />
+                          <span class="ml-2">Show</span>
+                        </Button>
+                      </div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <Button type="button" variant="ghost" class="justify-center" disabled={selectedIds.size === 0} onclick={() => { copySelectedLinks(); actionsOpen = false; }}>
+                          <ClipboardIcon class="size-4" />
+                          <span class="ml-2">Copy links</span>
+                        </Button>
+                        <Button type="button" variant="ghost" class="justify-center" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
+                          <FileDown class="size-4" />
+                          <span class="ml-2">Export</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div class="space-y-2">
+                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Failed</p>
+                    <div class="grid gap-2">
+                      <Button type="button" variant="outline" class="justify-between" disabled={failedCount === 0} onclick={() => { retryAllFailed(); actionsOpen = false; }}>
+                        <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry all failed</span>
+                        {#if failedCount > 0}<Badge variant="secondary">{failedCount}</Badge>{/if}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </SheetContent>
             </Sheet>
@@ -845,119 +1117,130 @@
     </CardHeader>
   </Card>
 
-  <FilterPanel bind:searchTerm bind:showFilters bind:filters onClearFilters={handleClearFilters} />
-
-  <Card class="overflow-hidden border border-border/60">
-    {#if selectedIds.size > 0}
-      <div
-        class="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/40 px-4 py-3 text-sm"
-      >
-        <span><strong>{selectedIds.size}</strong> selected</span>
-        <div class="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onclick={startSelected}>Start</Button>
-          <Button type="button" size="sm" variant="destructive" onclick={cancelSelected}
-            >Cancel</Button
-          >
-          <Button type="button" size="sm" variant="outline" onclick={copySelectedLinks}
-            >Copy links</Button
-          >
-          <Button type="button" size="sm" variant="outline" onclick={exportFilteredCSV}
-            >Export CSV</Button
-          >
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onclick={openSelectedCompleted}
-            disabled={selectedCompletedCount === 0}
-          >
-            Open
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onclick={showSelectedCompleted}
-            disabled={selectedCompletedCount === 0}
-          >
-            Show
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onclick={invertSelection}>Invert</Button>
-          <Button type="button" size="sm" variant="ghost" onclick={clearSelection}>Clear</Button>
-        </div>
+  <Sheet bind:open={filtersOpen}>
+    <SheetContent side="right" class="sm:max-w-md">
+      <SheetHeader>
+        <SheetTitle>Filters</SheetTitle>
+        <SheetDescription>Refine downloads list</SheetDescription>
+      </SheetHeader>
+      <div class="mt-4">
+        <FilterPanel
+          bind:searchTerm
+          filters={filters}
+          showFilters={true}
+          onClearFilters={() => {
+            searchTerm = '';
+            filters = { fileType: '', category: '', minSize: '', maxSize: '', eta: '', status: '' };
+          }}
+        />
       </div>
-    {/if}
+    </SheetContent>
+  </Sheet>
+
+  <Card class="relative overflow-hidden border border-border/60">
 
     <CardContent class="p-0">
-      <div
-        class="hidden border-b border-border/60 bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[auto,minmax(220px,1fr),repeat(4,minmax(120px,0.6fr)),minmax(160px,0.8fr)] md:items-center md:gap-3"
-      >
-        <span class="flex justify-center">
-          <input
-            bind:this={selectAllCheckbox}
-            type="checkbox"
-            class="h-4 w-4 rounded border-border bg-background text-primary focus:ring-ring"
-            onchange={(e) => {
-              const check = (e.target as HTMLInputElement).checked;
-              for (const d of filteredDownloads) toggleSelect(d.id, check);
-            }}
-            title="Select or deselect all filtered downloads"
-          />
-        </span>
-        {#each sortOptions as option (option.value)}
-          <div
-            role="columnheader"
-            aria-sort={sortBy === option.value
-              ? sortDirection === 'asc'
-                ? 'ascending'
-                : 'descending'
-              : 'none'}
-            class="flex items-center"
-          >
-            <button
-              type="button"
-              class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
-              onclick={() => setSort(option.value)}
-              onkeydown={(event) => handleHeaderKey(event, option.value)}
-            >
-              <span>{option.label}</span>
-              {#if sortBy === option.value}
-                <ArrowUpDown class="size-3 transition rotate-180={sortDirection === 'asc'}" />
-              {/if}
-            </button>
-          </div>
-        {/each}
+      <div class="overflow-auto" style:max-height={`${maxListHeight || ''}px`}>
+        <Table ref={tableEl} class="min-w-[960px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead class="w-[40px]">
+                <span class="flex justify-center">
+                  <input
+                    bind:this={selectAllCheckbox}
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-border bg-background text-primary focus:ring-ring"
+                    checked={filteredDownloads.length > 0 && filteredDownloads.every((d) => selectedIds.has(d.id))}
+                    aria-checked={(() => {
+                      const any = filteredDownloads.some((d) => selectedIds.has(d.id));
+                      const all = any && filteredDownloads.every((d) => selectedIds.has(d.id));
+                      return all ? 'true' : any ? 'mixed' : 'false';
+                    })()}
+                    onchange={(e) => {
+                      const check = (e.target as HTMLInputElement).checked;
+                      for (const d of filteredDownloads) toggleSelect(d.id, check);
+                    }}
+                    title="Select or deselect all filtered downloads"
+                  />
+                </span>
+              </TableHead>
+              <TableHead>
+                <button
+                  type="button"
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('name')}
+                  onkeydown={(event) => handleHeaderKey(event, 'name')}
+                >
+                  <span>Name</span>
+                  {#if sortBy === 'name'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+              <TableHead>
+                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('size')} onkeydown={(event) => handleHeaderKey(event, 'size')}>
+                  <span>Size</span>
+                  {#if sortBy === 'size'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+              <TableHead>
+                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('fileType')} onkeydown={(event) => handleHeaderKey(event, 'fileType')}>
+                  <span>File Type</span>
+                  {#if sortBy === 'fileType'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+              <TableHead>
+                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('category')} onkeydown={(event) => handleHeaderKey(event, 'category')}>
+                  <span>Category</span>
+                  {#if sortBy === 'category'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+              <TableHead>
+                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('eta')} onkeydown={(event) => handleHeaderKey(event, 'eta')}>
+                  <span>ETA</span>
+                  {#if sortBy === 'eta'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+              <TableHead class="w-[180px] pl-6 sm:pl-8">
+                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('status')} onkeydown={(event) => handleHeaderKey(event, 'status')}>
+                  <span>Status</span>
+                  {#if sortBy === 'status'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                </button>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {#each filteredDownloads as download, i (download.id)}
+              <DownloadItem
+                {download}
+                {startDownload}
+                {cancelDownload}
+                selected={isSelected(download.id)}
+                onToggleSelect={(payload: { checked: boolean; shiftKey: boolean }) => 
+                  toggleSelectWithIndex(download.id, payload?.checked ?? false, i, !!payload?.shiftKey)}
+              />
+            {/each}
+            {#if filteredDownloads.length === 0}
+              <TableRow>
+                <TableCell colspan={7} class="py-12 text-center text-sm text-muted-foreground">
+                  No downloads match the current filters.
+                </TableCell>
+              </TableRow>
+            {/if}
+          </TableBody>
+        </Table>
       </div>
 
-      <div class="divide-y divide-border/60">
-        {#each filteredDownloads as download, i (download.id)}
-          <DownloadItem
-            {download}
-            {startDownload}
-            {cancelDownload}
-            selected={isSelected(download.id)}
-            onToggleSelect={(payload) =>
-              toggleSelectWithIndex(download.id, payload?.checked ?? false, i, !!payload?.shiftKey)}
-          />
-        {/each}
-        {#if filteredDownloads.length === 0}
-          <div class="space-y-3 px-6 py-12 text-center text-sm text-muted-foreground">
-            <p>No downloads match the current filters.</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onclick={() => {
-                handleClearFilters();
-                statusGroup = 'all';
-              }}
-            >
-              Reset filters
-            </Button>
+      {#if selectedIds.size > 0}
+        <div class="pointer-events-none">
+          <div class="pointer-events-auto md:absolute md:bottom-4 md:right-4 fixed bottom-6 right-6 z-20 rounded-md border bg-card/95 backdrop-blur p-2 shadow-md flex items-center gap-2">
+            <Badge variant="secondary">{selectedIds.size} selected</Badge>
+            <Button size="sm" onclick={startSelected}>Start</Button>
+            <Button size="sm" variant="destructive" onclick={cancelSelected}>Cancel</Button>
+            <Button size="sm" variant="ghost" onclick={() => (actionsOpen = true)}>More</Button>
           </div>
-        {/if}
-      </div>
-    </CardContent>
+        </div>
+      {/if}
+
+      </CardContent>
   </Card>
 
   <Dialog bind:open={showHelp}>
@@ -979,3 +1262,17 @@
     </DialogContent>
   </Dialog>
 </div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+

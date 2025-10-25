@@ -1,6 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -22,6 +22,146 @@ struct DownloadProgress {
     id: u64,
     downloaded: u64,
     total: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct ProbeResult {
+    filename: String,
+    ext: String,
+    size: Option<u64>,
+}
+
+#[tauri::command]
+fn path_exists(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).exists())
+}
+
+fn filename_from_cd<S: AsRef<str>>(cd: S) -> Option<String> {
+    let cd = cd.as_ref();
+    // Try RFC 5987 filename*
+    if let Some(idx) = cd.to_lowercase().find("filename*=") {
+        let rest = &cd[idx+10..];
+        let parts: Vec<&str> = rest.split(';').collect();
+        let val = parts[0].trim();
+        // format: charset''encoded
+        if let Some(pos) = val.find("''") {
+            let enc = &val[pos+2..];
+            if let Ok(decoded) = percent_encoding::percent_decode_str(enc).decode_utf8() {
+                return Some(decoded.to_string());
+            }
+        } else {
+            // Sometimes quoted
+            let v = val.trim_matches('"');
+            return Some(v.to_string());
+        }
+    }
+    // Fallback: filename="..."
+    if let Some(idx) = cd.to_lowercase().find("filename=") {
+        let rest = &cd[idx+9..];
+        let v = rest.split(';').next().unwrap_or("").trim().trim_matches('"');
+        if !v.is_empty() { return Some(v.to_string()); }
+    }
+    None
+}
+
+fn ext_from_content_type<S: AsRef<str>>(ct: S) -> Option<String> {
+    let ct = ct.as_ref().to_lowercase();
+    let ext = if ct.contains("application/zip") { "zip" }
+    else if ct.contains("application/x-7z-compressed") { "7z" }
+    else if ct.contains("application/x-rar-compressed") { "rar" }
+    else if ct.contains("application/x-msdownload") { "exe" }
+    else if ct.contains("application/x-msi") || ct.contains("application/x-ms-installer") || ct.contains("application/x-msdownload") { "msi" }
+    else if ct.contains("application/x-dosexec") { "exe" }
+    else if ct.contains("application/x-tar") { "tar" }
+    else if ct.contains("application/gzip") { "tar.gz" }
+    else if ct.contains("application/x-bzip2") { "tar.bz2" }
+    else if ct.contains("application/x-xz") { "tar.xz" }
+    else if ct.contains("application/x-zstd") { "tar.zst" }
+    else if ct.contains("application/pdf") { "pdf" }
+    else if ct.contains("application/json") { "json" }
+    else if ct.contains("text/plain") { "txt" }
+    else if ct.contains("image/png") { "png" }
+    else if ct.contains("image/jpeg") { "jpg" }
+    else { "" };
+    if ext.is_empty() { None } else { Some(ext.to_string()) }
+}
+
+#[tauri::command]
+async fn probe_download(url: String) -> Result<ProbeResult, String> {
+    let client = Client::builder()
+        .user_agent("Avelonia/0.1 (tauri)")
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    // Try HEAD first
+    let mut filename: Option<String> = None;
+    let mut ext: Option<String> = None;
+    let mut size: Option<u64> = None;
+    let head = client.head(&url).send().await;
+    if let Ok(resp) = head {
+        if resp.status().is_success() {
+            if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
+                if let Ok(s) = cd.to_str() { filename = filename_from_cd(s); }
+            }
+            if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+                if let Ok(s) = ct.to_str() { ext = ext_from_content_type(s); }
+            }
+            if let Some(cl) = resp.headers().get(reqwest::header::CONTENT_LENGTH) {
+                if let Ok(s) = cl.to_str() { if let Ok(v) = s.parse::<u64>() { size = Some(v); } }
+            }
+        }
+    }
+    // Fallback minimal GET (first bytes) if needed
+    if filename.is_none() || ext.is_none() {
+        let get = client.get(&url).header(reqwest::header::RANGE, "bytes=0-0").send().await;
+        if let Ok(resp) = get {
+            if filename.is_none() {
+                if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
+                    if let Ok(s) = cd.to_str() { filename = filename_from_cd(s); }
+                }
+            }
+            if ext.is_none() {
+                if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+                    if let Ok(s) = ct.to_str() { ext = ext_from_content_type(s); }
+                }
+            }
+            if size.is_none() {
+                // Try to parse Content-Range: bytes 0-0/123456
+                if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE) {
+                    if let Ok(s) = cr.to_str() {
+                        if let Some(pos) = s.rfind('/') {
+                            if let Ok(v) = s[pos+1..].trim().parse::<u64>() { size = Some(v); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Final fallbacks based on URL path
+    if filename.is_none() {
+        if let Ok(u) = Url::parse(&url) {
+            if let Some(seg) = u.path_segments().and_then(|s| s.last()).and_then(|s| percent_encoding::percent_decode_str(s).decode_utf8().ok()).map(|cow| cow.to_string()) {
+                filename = Some(seg);
+            }
+        }
+    }
+
+    let filename = filename.unwrap_or_else(|| "download".to_string());
+    // Try to infer extension from filename if still missing
+    if ext.is_none() {
+        let lower = filename.to_lowercase();
+        let multi = [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"];
+        for m in multi.iter() {
+            if lower.ends_with(m) { ext = Some(m.trim_start_matches('.').to_string()); break; }
+        }
+        if ext.is_none() {
+            if let Some(idx) = lower.rfind('.') { ext = Some(lower[idx+1..].to_string()); }
+        }
+    }
+
+    Ok(ProbeResult { filename, ext: ext.unwrap_or_default(), size })
 }
 
 #[tauri::command]
@@ -148,8 +288,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            path_exists,
             download_file,
             cancel_download,
+            probe_download,
             cleaner::get_temp_files,
             cleaner::clean_temp_files,
             cleaner::delete_files, // New command
@@ -163,6 +305,7 @@ pub fn run() {
             system_info::get_cpu_usage,
             system_info::get_memory_usage,
             system_info::get_total_memory,
+            system_info::get_boot_time,
             eraser::secure_erase,
             optimize::list_startup_shortcuts,
             optimize::remove_startup_shortcuts,
@@ -191,6 +334,7 @@ pub fn run() {
             optimize::purge_startup_approved,
             optimize::delete_tasks_by_match,
             optimize::remove_wmi_subscriptions_by_match,
+            optimize::restart_system,
             cleaner::quick_clear_user_temp,
             cleaner::quick_clear_system_temp,
             cleaner::quick_clear_prefetch,

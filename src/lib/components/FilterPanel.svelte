@@ -62,10 +62,6 @@
         <Input id="filter-max-size" bind:value={filters.maxSize} placeholder="2 GB" />
       </div>
       <div class="space-y-2">
-        <Label for="filter-eta">ETA</Label>
-        <Input id="filter-eta" bind:value={filters.eta} placeholder="< 5m" />
-      </div>
-      <div class="space-y-2">
         <Label for="filter-status">Status</Label>
         <Select type="single" bind:value={filters.status}>
           <SelectTrigger id="filter-status" class="w-full" placeholder="All statuses" />

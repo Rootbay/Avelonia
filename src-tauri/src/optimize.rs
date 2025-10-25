@@ -1393,3 +1393,17 @@ Write-Output $removed
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub fn remove_wmi_subscriptions_by_match(_images: Vec<String>, _paths: Vec<String>) -> Result<usize, String> { Ok(0) }
+
+// ---------------- System restart (Windows) ----------------
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn restart_system() -> Result<(), String> {
+    // Use elevated cmd.exe to invoke shutdown /r /t 0
+    let ok = run_cmd_elevated(&["/C", "shutdown", "/r", "/t", "0"]);
+    if ok { Ok(()) } else { Err("failed to trigger restart".into()) }
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn restart_system() -> Result<(), String> { Err("Only available on Windows".into()) }

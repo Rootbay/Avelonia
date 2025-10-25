@@ -13,6 +13,15 @@
   import { Alert, AlertDescription } from '$lib/components/ui/alert';
   import { toast } from '$lib/components/ui/sonner';
   import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogClose,
+  } from '$lib/components/ui/dialog';
+  import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -39,6 +48,9 @@
 
   // Shared message area
   let message = $state('');
+
+  // Snippet context helper for typed child buttons
+  type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
 
   // Startup shortcuts
   type StartupItem = { path: string; name: string };
@@ -179,6 +191,18 @@
   let registryRemoveWMIByMatch = $state(false);
   let registryUserRebooted = $state(false);
 
+  // Post-cleanup diagnostics & instructions popup
+  type CleanupDiagnostics = {
+    removedRegistry: { ok: string[]; stillPresent: string[] };
+    runningImages: { running: string[]; stopped: string[] };
+    taskMatches: { remaining: string[] };
+    serviceMatches: { running: string[]; disabled: string[] };
+    rebootRecommended: boolean;
+  };
+  let showPostCleanup = $state(false);
+  let postDiagLoading = $state(false);
+  let postDiag: CleanupDiagnostics | null = $state(null);
+
   // Presets for removal strategy
   let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
   function applyRegPreset(p: 'basic' | 'force' | 'aggressive' | 'full') {
@@ -223,6 +247,14 @@
     attempts: number;
     rebootConfirmed: boolean;
     lastOptions: { force: boolean; ifeo: boolean; dor: boolean; purge: boolean; tasks: boolean; wmi: boolean };
+    lastStrategy?: 'basic' | 'force' | 'aggressive' | 'full';
+    fullCleanupUsed?: boolean;
+    pendingVerification?: boolean; // set when full cleanup used; verified after reboot
+    suspicious?: boolean;
+    suspiciousReason?: string;
+    lastImages?: string[];
+    lastPaths?: string[];
+    lastSeenAt?: number;
   };
   let registryHistory = $state<Record<string, RegistryAttempt>>({});
   const REG_HISTORY_KEY = 'avelonia_registry_history_v1';
@@ -236,6 +268,20 @@
     try {
       localStorage.setItem(REG_HISTORY_KEY, JSON.stringify(registryHistory));
     } catch {}
+  }
+
+  // Track reboot with boot time signature from backend
+  let rebootDetected = $state(false);
+  async function initBootCheck() {
+    try {
+      const nowBoot = (await invoke('get_boot_time')) as number;
+      const key = 'avelonia_boot_time_v1';
+      const prev = Number(localStorage.getItem(key) || '0');
+      localStorage.setItem(key, String(nowBoot));
+      rebootDetected = prev > 0 && prev !== nowBoot;
+    } catch {
+      rebootDetected = false;
+    }
   }
 
   const regHasExeImage = $derived(
@@ -289,6 +335,7 @@
   async function confirmRemoveRegistry() {
     showRegistryConfirm = false;
     try {
+      const strategyUsed = regPreset;
       const removed: number = await invoke(registryForce ? 'force_remove_registry_run' : 'remove_registry_run', { entries: pendingRegistry });
       message = `Removed ${removed} registry startup entr${removed === 1 ? 'y' : 'ies'}.`;
       if (removed > 0) {
@@ -331,10 +378,14 @@
           if (n > 0) toast.success(`Blocked ${n} process${n === 1 ? '' : 'es'} via IFEO.`);
         } catch (e) { console.warn('block_process_ifeo failed', e); }
       }
+      let dorScheduled = false;
       if (registryDeleteOnReboot && paths.length) {
         try {
           const n = (await invoke('schedule_delete_on_reboot', { paths })) as number;
-          if (n > 0) toast.message(`Scheduled delete on reboot for ${n} file${n === 1 ? '' : 's'}.`);
+          if (n > 0) {
+            toast.message(`Scheduled delete on reboot for ${n} file${n === 1 ? '' : 's'}.`);
+            dorScheduled = true;
+          }
         } catch (e) { console.warn('schedule_delete_on_reboot failed', e); }
       }
       // Purge StartupApproved entries
@@ -359,29 +410,59 @@
           if (n > 0) toast.message('Removed WMI event subscriptions matching target.');
         } catch (e) { console.warn('remove_wmi_subscriptions_by_match failed', e); }
       }
+
+      // Post-cleanup diagnostics and instructions popup
+      try {
+        postDiagLoading = true;
+        const shouldSuggestReboot = dorScheduled || strategyUsed === 'full' || strategyUsed === 'aggressive';
+        const diag = await runPostCleanupDiagnostics(pendingRegistry, { images, paths, rebootRecommended: shouldSuggestReboot });
+        postDiag = diag;
+        showPostCleanup = true;
+      } catch (e) {
+        console.warn('post cleanup diagnostics failed', e);
+      } finally {
+        postDiagLoading = false;
+      }
     } catch (e) {
       console.error(e);
       message = `Failed to remove registry entries: ${e}`;
       toast.error(message);
     } finally {
-      // Persist history per selected entry
-      for (const it of pendingRegistry) {
-        const id = regId(it);
-        const prev = registryHistory[id] ?? { attempts: 0, rebootConfirmed: false, lastOptions: { force: false, ifeo: false, dor: false, purge: false, tasks: false, wmi: false } };
-        registryHistory[id] = {
-          attempts: prev.attempts + 1,
-          rebootConfirmed: prev.rebootConfirmed || registryUserRebooted,
-          lastOptions: {
-            force: registryForce,
-            ifeo: registryBlockIFEO,
-            dor: registryDeleteOnReboot,
-            purge: registryPurgeStartupApproved,
-            tasks: registryDeleteTasksByMatch,
-            wmi: registryRemoveWMIByMatch,
-          },
-        } as RegistryAttempt;
-      }
-      saveRegHistory();
+      // Persist history per selected entry, include strategy and verification flags
+      try {
+        const strategy = regPreset;
+        const images = Array.from(new Set(pendingRegistry.map((r) => extractExeFromCommand(r.command)).filter((x): x is string => !!x)));
+        const paths = Array.from(new Set(pendingRegistry.map((r) => extractExePathFromCommand(r.command)).filter((x): x is string => !!x)));
+        for (const it of pendingRegistry) {
+          const id = regId(it);
+          const prev = (registryHistory[id] ?? {
+            attempts: 0,
+            rebootConfirmed: false,
+            lastOptions: { force: false, ifeo: false, dor: false, purge: false, tasks: false, wmi: false },
+          }) as RegistryAttempt;
+          registryHistory[id] = {
+            attempts: (prev.attempts ?? 0) + 1,
+            rebootConfirmed: prev.rebootConfirmed || registryUserRebooted,
+            lastOptions: {
+              force: registryForce,
+              ifeo: registryBlockIFEO,
+              dor: registryDeleteOnReboot,
+              purge: registryPurgeStartupApproved,
+              tasks: registryDeleteTasksByMatch,
+              wmi: registryRemoveWMIByMatch,
+            },
+            lastStrategy: strategy,
+            fullCleanupUsed: strategy === 'full',
+            pendingVerification: strategy === 'full',
+            suspicious: prev.suspicious || false,
+            suspiciousReason: prev.suspiciousReason || '',
+            lastImages: images,
+            lastPaths: paths,
+            lastSeenAt: Date.now(),
+          } as RegistryAttempt;
+        }
+        saveRegHistory();
+      } catch {}
       pendingRegistry = [];
       registryForce = false;
       registryBlockIFEO = false;
@@ -391,6 +472,88 @@
       registryRemoveWMIByMatch = false;
       registryUserRebooted = false;
     }
+  }
+
+  async function runPostCleanupDiagnostics(
+    targets: StartupRegItem[],
+    opts: { images: string[]; paths: string[]; rebootRecommended?: boolean }
+  ): Promise<CleanupDiagnostics> {
+    const diag: CleanupDiagnostics = {
+      removedRegistry: { ok: [], stillPresent: [] },
+      runningImages: { running: [], stopped: [] },
+      taskMatches: { remaining: [] },
+      serviceMatches: { running: [], disabled: [] },
+      rebootRecommended: !!opts.rebootRecommended,
+    };
+
+    // 1) Verify registry removals
+    try {
+      const list = (await invoke('list_registry_run')) as StartupRegItem[];
+      const present = new Set(list.map(regId));
+      for (const t of targets) {
+        const id = regId(t);
+        if (present.has(id)) diag.removedRegistry.stillPresent.push(`${t.hive} \\ ${t.key} → ${t.name}`);
+        else diag.removedRegistry.ok.push(`${t.hive} \\ ${t.key} → ${t.name}`);
+      }
+    } catch (e) {
+      console.warn('diagnostics: list_registry_run failed', e);
+    }
+
+    // 2) Check if related process images are running
+    for (const img of opts.images) {
+      try {
+        const running = (await invoke('is_process_running', { image: img })) as boolean;
+        if (running) diag.runningImages.running.push(img);
+        else diag.runningImages.stopped.push(img);
+      } catch {}
+    }
+
+    // 3) Check for related scheduled tasks (by image or path substring)
+    try {
+      const tasks = (await invoke('list_scheduled_tasks')) as Array<{ name: string; task_to_run?: string }>;
+      const matches: string[] = [];
+      for (const t of tasks) {
+        let cmd = (t as any)?.task_to_run || '';
+        if (!cmd) {
+          try {
+            const details = (await invoke('get_task_details', { task_name: t.name })) as [string, string] | any;
+            cmd = Array.isArray(details) ? (details[0] ?? '') : (details?.task_to_run ?? '');
+          } catch {}
+        }
+        const lower = (cmd || '').toLowerCase();
+        if (!lower) continue;
+        const hit = opts.images.some((i) => lower.includes(i.toLowerCase())) ||
+          opts.paths.some((p) => lower.includes(p.toLowerCase()));
+        if (hit) matches.push(t.name);
+      }
+      diag.taskMatches.remaining = Array.from(new Set(matches));
+    } catch (e) {
+      console.warn('diagnostics: list_scheduled_tasks failed', e);
+    }
+
+    // 4) Check services that still reference the images/paths
+    try {
+      const services = (await invoke('list_services')) as Array<{
+        name: string; state: string; start_mode: string; path: string;
+      }>;
+      for (const s of services) {
+        const p = (s.path || '').toLowerCase();
+        if (!p) continue;
+        const hit = opts.images.some((i) => p.includes(i.toLowerCase())) ||
+          opts.paths.some((q) => p.includes(q.toLowerCase()));
+        if (!hit) continue;
+        const state = (s.state || '').toLowerCase();
+        const mode = (s.start_mode || '').toLowerCase();
+        if (state.includes('running') || mode === 'auto' || mode === 'automatic') diag.serviceMatches.running.push(s.name);
+        else diag.serviceMatches.disabled.push(s.name);
+      }
+      diag.serviceMatches.running = Array.from(new Set(diag.serviceMatches.running));
+      diag.serviceMatches.disabled = Array.from(new Set(diag.serviceMatches.disabled));
+    } catch (e) {
+      console.warn('diagnostics: list_services failed', e);
+    }
+
+    return diag;
   }
 
   function extractExeFromCommand(cmd: string): string | null {
@@ -470,6 +633,41 @@
       console.error(e);
     } finally {
       loadingRegistry = false;
+    }
+  }
+  // After registry items load and if a reboot was detected, mark reappeared entries as suspicious
+  async function scanSuspiciousAfterReboot() {
+    try {
+      if (!registryLoaded || !rebootDetected) return;
+      const present = new Set(startupRegItems.map(regId));
+      let updates = 0;
+      for (const [id, rec] of Object.entries(registryHistory)) {
+        if (!rec || typeof rec !== 'object') continue;
+        const wasFull = !!(rec as RegistryAttempt).fullCleanupUsed;
+        const pending = !!(rec as RegistryAttempt).pendingVerification;
+        if (wasFull && pending && present.has(id)) {
+          // Mark suspicious
+          const r = (registryHistory[id] as RegistryAttempt) || ({} as RegistryAttempt);
+          r.pendingVerification = false;
+          r.rebootConfirmed = true;
+          r.suspicious = true;
+          const hint: string[] = [];
+          if (r.lastOptions?.ifeo) hint.push('IFEO block var aktiv vid senaste åtgärd');
+          if (r.lastOptions?.dor) hint.push('Delete on reboot var aktiverat');
+          if (Array.isArray(r.lastImages) && r.lastImages.length) {
+            hint.push(`Processbild(er): ${r.lastImages.join(', ')}`);
+          }
+          r.suspiciousReason = `Posten dök upp igen efter Full cleanup och omstart. ${hint.join(' · ')}`.trim();
+          registryHistory[id] = r;
+          updates += 1;
+        }
+      }
+      if (updates > 0) {
+        saveRegHistory();
+        toast.warning(`Upptäckte ${updates} återkommande post(er) efter omstart. Markerade som misstänkta.`);
+      }
+    } catch (e) {
+      console.warn('scanSuspiciousAfterReboot failed', e);
     }
   }
   function toggleReg(it: StartupRegItem) {
@@ -738,6 +936,17 @@
       return it.name.toLowerCase().includes(q) || it.command.toLowerCase().includes(q) || it.key.toLowerCase().includes(q) || it.hive.toLowerCase().includes(q);
     })
   );
+  // Suspicious list derived from history
+  const suspectEntries = $derived(
+    Object.entries(registryHistory)
+      .filter(([, v]) => !!(v as any)?.suspicious)
+      .map(([id, v]) => {
+        const [hive, key, name] = id.split('|');
+        const reason = (v as any)?.suspiciousReason || 'Återkom efter rensning';
+        const lastStrategy = (v as any)?.lastStrategy || '';
+        return { id, hive, key, name, reason, lastStrategy };
+      })
+  );
   const allRegistrySelected = $derived(
     filteredRegistryItems.length > 0 && filteredRegistryItems.every((it) => selectedReg.has(regId(it)))
   );
@@ -755,6 +964,9 @@
     }
     if (registryStart > registryVisible) registryStart = 0;
   });
+
+  // Dialog for suspicious log
+  let showSuspectLog = $state(false);
 
   const filteredTasks = $derived(
     tasks.filter((t) => {
@@ -853,6 +1065,8 @@
 
   // Observe sections to load lazily
   onMount(() => {
+    // Detect reboot signature early
+    void initBootCheck();
     const io = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
@@ -866,9 +1080,16 @@
     if (tasksSentinel) io.observe(tasksSentinel);
     return () => io.disconnect();
   });
+
+  // When registry section is loaded and a reboot was detected, evaluate suspicious reappearance
+  $effect(() => {
+    if (registryLoaded) {
+      void scanSuspiciousAfterReboot();
+    }
+  });
 </script>
 
-<div class="container mx-auto p-4 space-y-6">
+<div class="space-y-6 text-foreground">
   <Card>
     <CardHeader>
       <CardTitle class="text-2xl">Optimize</CardTitle>
@@ -985,6 +1206,36 @@
           The app will attempt forced removal if needed (may prompt for admin).
         </AlertDialogDescription>
       </AlertDialogHeader>
+      {#if regPreset === 'full'}
+        <Alert class="mb-2">
+          <AlertDescription>
+            Full cleanup kör en aggressiv städning: tvingad borttagning, blockering via IFEO, radering vid omstart,
+            rensning av StartupApproved samt borttagning av schemalagda uppgifter och WMI‑prenumerationer
+            kopplade till posterna. Du kan få UAC‑frågor. Spara ditt arbete och stäng onödiga program innan du fortsätter.
+          </AlertDescription>
+        </Alert>
+      {:else if regPreset === 'aggressive'}
+        <Alert class="mb-2">
+          <AlertDescription>
+            Aggressive: försöker tvingad borttagning, blockera körning via IFEO (om exe‑bild hittas) och schemalägger radering vid omstart
+            när full sökväg finns. Rensar inte StartupApproved, schemalagda uppgifter eller WMI automatiskt.
+            Kan trigga UAC.
+          </AlertDescription>
+        </Alert>
+      {:else if regPreset === 'force'}
+        <Alert class="mb-2">
+          <AlertDescription>
+            Force only: tar ägarskap/behörigheter på nyckeln och tar bort värdet med elevation. Använder inte IFEO, Delete‑on‑reboot eller
+            kringåtgärder. Bra när en enkel borttagning nekas.
+          </AlertDescription>
+        </Alert>
+      {:else}
+        <Alert class="mb-2">
+          <AlertDescription>
+            Basic: försöker normal borttagning utan elevation. Snabbaste vägen när inget låser posten. Om det misslyckas, pröva Force eller Aggressive.
+          </AlertDescription>
+        </Alert>
+      {/if}
       <div class="space-y-4 text-sm">
         <div class="flex items-center justify-between gap-2 pr-2">
           <div>Selected: {pendingRegistry.length}</div>
@@ -1023,6 +1274,153 @@
     </AlertDialogContent>
   </AlertDialog>
 
+  <!-- Suspicious log dialog -->
+  <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
+    <DialogContent class="sm:max-w-xl">
+      <DialogHeader>
+        <DialogTitle>Misstänkta poster (Registry Startup)</DialogTitle>
+        <DialogDescription>Poster som återkom efter Full cleanup och omstart.</DialogDescription>
+      </DialogHeader>
+      {#if suspectEntries.length === 0}
+        <p class="text-sm text-muted-foreground">Inga misstänkta poster registrerade.</p>
+      {:else}
+        <div class="max-h-[50vh] overflow-y-auto space-y-3">
+          {#each suspectEntries as s}
+            <div class="rounded-md border p-3 bg-muted/10">
+              <div class="flex items-center gap-2">
+                <Badge variant="destructive">Suspicious</Badge>
+                <span class="font-medium">{s.name}</span>
+                {#if s.lastStrategy}
+                  <Badge variant="secondary" class="ml-auto">{s.lastStrategy}</Badge>
+                {/if}
+              </div>
+              <div class="mt-1 text-xs text-muted-foreground font-mono break-all">{s.hive}\{s.key}</div>
+              <p class="mt-2 text-sm">{s.reason}</p>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <DialogFooter>
+        <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Stäng</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Post-cleanup instructions & diagnostics -->
+  <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
+    <DialogContent class="sm:max-w-xl">
+      <DialogHeader>
+        <DialogTitle>Åtgärd klar</DialogTitle>
+        <DialogDescription>
+          Snabb kontroll av systemet och rekommenderade nästa steg.
+        </DialogDescription>
+      </DialogHeader>
+
+      {#if postDiagLoading}
+        <div class="text-sm text-muted-foreground">Kör systemkontroll…</div>
+      {:else if postDiag}
+        <div class="space-y-4 text-sm">
+          <div>
+            <p class="font-medium">Registerposter</p>
+            {#if postDiag.removedRegistry.stillPresent.length === 0}
+              <p class="text-emerald-600 dark:text-emerald-400">Alla valda poster verkar borttagna.</p>
+            {:else}
+              <p class="text-destructive">Vissa poster finns kvar:</p>
+              <ul class="list-disc pl-5 mt-1">
+                {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
+                  <li class="break-all">{r}</li>
+                {/each}
+                {#if postDiag.removedRegistry.stillPresent.length > 6}
+                  <li>…och {postDiag.removedRegistry.stillPresent.length - 6} till</li>
+                {/if}
+              </ul>
+            {/if}
+          </div>
+
+          <div>
+            <p class="font-medium">Processer</p>
+            {#if postDiag.runningImages.running.length === 0}
+              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade processer körs.</p>
+            {:else}
+              <p class="text-destructive">Processer körs fortfarande:</p>
+              <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
+            {/if}
+          </div>
+
+          <div>
+            <p class="font-medium">Schemalagda uppgifter</p>
+            {#if postDiag.taskMatches.remaining.length === 0}
+              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade uppgifter hittades.</p>
+            {:else}
+              <p class="text-destructive">Relaterade uppgifter kvar:</p>
+              <ul class="list-disc pl-5 mt-1">
+                {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
+                  <li class="break-all">{t}</li>
+                {/each}
+                {#if postDiag.taskMatches.remaining.length > 8}
+                  <li>…och {postDiag.taskMatches.remaining.length - 8} till</li>
+                {/if}
+              </ul>
+            {/if}
+          </div>
+
+          <div>
+            <p class="font-medium">Tjänster</p>
+            {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
+              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade tjänster hittades.</p>
+            {:else}
+              {#if postDiag.serviceMatches.running.length > 0}
+                <p class="text-destructive">Körande tjänster: {postDiag.serviceMatches.running.join(', ')}</p>
+              {/if}
+              {#if postDiag.serviceMatches.disabled.length > 0}
+                <p class="text-muted-foreground">Inaktiverade: {postDiag.serviceMatches.disabled.join(', ')}</p>
+              {/if}
+            {/if}
+          </div>
+
+          <div class="space-y-2">
+            <p class="font-medium">Rekommenderade nästa steg</p>
+            <ul class="list-disc pl-5">
+              {#if postDiag.rebootRecommended}
+                <li>Starta om datorn för att slutföra radering vid omstart.</li>
+              {/if}
+              {#if postDiag.runningImages.running.length > 0}
+                <li>Stäng eller avinstallera processerna som fortfarande körs: {postDiag.runningImages.running.join(', ')}.</li>
+              {/if}
+              {#if postDiag.taskMatches.remaining.length > 0}
+                <li>Öppna Aktivitetsschemaläggaren och ta bort kvarvarande uppgifter ovan.</li>
+              {/if}
+              {#if postDiag.serviceMatches.running.length > 0}
+                <li>Stoppa/Inaktivera relaterade tjänster och verifiera att inget återaktiverar dem.</li>
+              {/if}
+              <li>Kör en antivirus/AM‑skanning om posterna var skadliga.</li>
+            </ul>
+          </div>
+        </div>
+      {/if}
+
+      <DialogFooter class="flex flex-wrap gap-2">
+        {#if postDiag?.rebootRecommended}
+          <Button
+            onclick={async () => {
+              try {
+                await invoke('restart_system');
+              } catch (e) {
+                console.error(e);
+                toast.error('Kunde inte starta om systemet');
+              }
+            }}
+          >
+            Starta om
+          </Button>
+        {/if}
+        <Button variant="outline" onclick={() => (showPostCleanup = false)}>
+          Senare
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
     <!-- Registry Startup -->
     <Card class="gap-4 py-4">
       <CardHeader>
@@ -1039,6 +1437,12 @@
           <Button variant="ghost" size="icon" title="Disable Selected" aria-label="Disable Selected" onclick={requestRemoveSelectedRegistry} disabled={selectedReg.size === 0}>
             <Trash2 class="size-4" />
           </Button>
+          <!-- Suspicious log open -->
+          {#if Object.values(registryHistory).some((r: any) => r?.suspicious)}
+            <Button variant="ghost" size="icon" title="Show suspicious log" aria-label="Show suspicious log" onclick={() => (showSuspectLog = true)}>
+              <Flag class="size-4 text-destructive" />
+            </Button>
+          {/if}
         </div>
         <div class="flex items-center gap-2">
           <div class="relative flex-1">
@@ -1079,7 +1483,12 @@
                 <li class="px-2 py-2 space-y-1 rounded-sm hover:bg-muted/30 transition-colors">
                   <label class="flex items-center gap-3">
                     <Checkbox checked={selectedReg.has(regId(it))} onCheckedChange={() => toggleReg(it)} />
-                    <span class="font-semibold">{it.name}</span>
+                    <span class="font-semibold">
+                      {it.name}
+                      {#if (registryHistory[regId(it)] as any)?.suspicious}
+                        <Badge variant="destructive" class="ml-2">Suspicious</Badge>
+                      {/if}
+                    </span>
                   </label>
                   <div class="text-xs text-muted-foreground">{it.hive}\{it.key}</div>
                   <div class="flex items-center justify-between gap-3 text-xs text-muted-foreground">

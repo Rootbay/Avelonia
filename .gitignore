@@ -20,6 +20,7 @@ build/
 # Frontend
 node_modules/
 bun.lockb
+node_modules_bun/
 
 # SvelteKit
 .svelte-kit/
@@ -30,4 +31,3 @@ target/
 # Coverage
 .coverage*
 coverage/
-

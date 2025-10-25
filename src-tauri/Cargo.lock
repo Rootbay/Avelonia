@@ -263,6 +263,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "lnk",
+ "percent-encoding",
  "rand 0.8.5",
  "reqwest",
  "serde",

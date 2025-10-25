@@ -165,3 +165,29 @@ html, body {
   stroke: currentColor;
   stroke-width: 1.5;
 }
+
+/* Downloader table rows: disable default table row hover bg (from shadcn table-row) */
+[data-no-hover-bg]:hover td,
+[data-no-hover-bg]:hover th {
+  background-color: transparent !important;
+}
+/* Also cover Svelte's internal wrapper used by shadcn table-row */
+[data-no-hover-bg]:hover svelte-css-wrapper td,
+[data-no-hover-bg]:hover svelte-css-wrapper th {
+  background-color: transparent !important;
+}
+
+/* Provide a custom, subtle hover for rows that opt-in */
+[data-no-hover-bg][data-hover-soft]:hover td,
+[data-no-hover-bg][data-hover-soft]:hover th {
+  background-color: color-mix(in oklch, var(--accent) 12%, transparent) !important;
+}
+[data-no-hover-bg][data-hover-soft]:hover svelte-css-wrapper td,
+[data-no-hover-bg][data-hover-soft]:hover svelte-css-wrapper th {
+  background-color: color-mix(in oklch, var(--accent) 12%, transparent) !important;
+}
+
+/* Clickable-row affordance */
+[data-hover-soft] {
+  cursor: pointer;
+}

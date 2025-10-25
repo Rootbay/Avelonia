@@ -1,7 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  // events not used here to reduce log duplication
   import { downloads } from '$lib/downloads';
+  import { systemLogs as logStore, pushLog, type LogLevel } from '$lib/logStore';
   import type { Download } from '$lib/downloadManager';
 
   import {
@@ -31,14 +32,7 @@
   let totalDiskSpace = $state(0);
   let availableDiskSpace = $state(0);
 
-  interface LogEntry {
-    timestamp: string;
-    level: 'INFO' | 'WARN' | 'ERROR';
-    message: string;
-  }
-  let systemLogs = $state<LogEntry[]>([]);
-
-  const MAX_LOG_ENTRIES = 200;
+  // System logs and pushLog are provided via $lib/logStore
 
   const downloadStatusLabels: Record<Download['status'], string> = {
     available: 'Available',
@@ -65,14 +59,8 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  function pushLog(level: LogEntry['level'], message: string) {
-    systemLogs = [
-      ...systemLogs.slice(-MAX_LOG_ENTRIES + 1),
-      { timestamp: getTimestamp(), level, message },
-    ];
-  }
-
-  function levelBadgeClass(level: LogEntry['level']) {
+  function levelBadgeClass(level: LogLevel) {
+    if (level === 'SUCCESS') return 'border-green-500/20 text-green-700 bg-green-500/10';
     if (level === 'INFO') return 'border-blue-500/20 text-blue-700 bg-blue-500/10';
     if (level === 'WARN') return 'border-yellow-500/20 text-yellow-700 bg-yellow-500/10';
     return 'border-red-500/20 text-red-700 bg-red-500/10';
@@ -90,32 +78,19 @@
   function describeDownloadTransition(
     dl: Download,
     previousStatus: Download['status'] | undefined
-  ): { level: LogEntry['level']; message: string } | null {
+  ): { level: LogLevel; message: string } | null {
     switch (dl.status) {
+      // Suppress noisy transitions; these are logged centrally by the manager if needed
       case 'queued':
-        return { level: 'INFO', message: `Download ${dl.name} queued.` };
       case 'pending':
-        return { level: 'INFO', message: `Download ${dl.name} preparing...` };
       case 'downloading':
-        if (previousStatus === 'downloading') return null;
-        return { level: 'INFO', message: `Download ${dl.name} started.` };
-      case 'completed': {
-        const targetDetail = dl.targetPath ? ` -> Saved to ${dl.targetPath}` : '';
-        return { level: 'INFO', message: `Download ${dl.name} completed${targetDetail}.` };
-      }
+      case 'completed':
+      case 'available':
+        return null;
       case 'failed':
         return { level: 'ERROR', message: `Download ${dl.name} failed.` };
       case 'paused':
         return { level: 'WARN', message: `Download ${dl.name} paused.` };
-      case 'available':
-        if (!previousStatus || previousStatus === 'available') return null;
-        if (previousStatus === 'completed') {
-          return { level: 'INFO', message: `Download ${dl.name} ready to download again.` };
-        }
-        if (previousStatus === 'failed') {
-          return { level: 'WARN', message: `Download ${dl.name} reset after failure.` };
-        }
-        return { level: 'WARN', message: `Download ${dl.name} cancelled.` };
       default:
         return null;
     }
@@ -194,28 +169,8 @@
     }
   });
 
-  $effect(() => {
-    let unlisten: UnlistenFn | null = null;
-
-    void listen('scan_progress', (event) => {
-      const payload =
-        typeof event.payload === 'string' ? event.payload : JSON.stringify(event.payload);
-      pushLog('INFO', `Cleaner: ${payload}`);
-    })
-      .then((dispose) => {
-        unlisten = dispose;
-      })
-      .catch((error) => {
-        console.error('Failed to listen for scan progress events:', error);
-        pushLog('WARN', 'Unable to subscribe to cleaner progress updates.');
-      });
-
-    return () => {
-      if (unlisten) {
-        unlisten();
-      }
-    };
-  });
+  // Only show Cleaner scan progress here if desired; comment out to reduce noise
+  // Currently suppressed to keep logs focused on issues and errors.
 
   const activeDownloads = $derived(
     $downloads
@@ -353,14 +308,14 @@
               </TableRow>
             </TableHeader>
             <TableBody>
-              {#if systemLogs.length === 0}
+              {#if $logStore.length === 0}
                 <TableRow class="!border-0">
                   <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
                     No activity recorded yet.
                   </TableCell>
                 </TableRow>
               {:else}
-                {#each systemLogs as log, i (i)}
+                {#each $logStore as log, i (i)}
                   <TableRow class="!border-0 hover:bg-muted/30">
                     <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
                       >{log.timestamp}</TableCell
@@ -381,3 +336,9 @@
     </Card>
   </div>
 </div>
+
+
+
+
+
+
