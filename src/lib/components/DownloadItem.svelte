@@ -34,6 +34,8 @@
     switch (download.status) {
       case 'completed':
         return 'text-emerald-400';
+      case 'installed':
+        return 'text-emerald-400';
       case 'failed':
         return 'text-destructive';
       case 'downloading':

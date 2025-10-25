@@ -73,6 +73,7 @@
             <SelectItem value="downloading">Downloading</SelectItem>
             <SelectItem value="paused">Paused</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="installed">Installed</SelectItem>
             <SelectItem value="failed">Failed</SelectItem>
           </SelectContent>
         </Select>

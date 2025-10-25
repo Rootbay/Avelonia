@@ -18,7 +18,7 @@ export interface Download {
   tags?: string[];
   downloadLink: string;
   eta: string;
-  status: 'available' | 'pending' | 'downloading' | 'paused' | 'completed' | 'queued' | 'failed';
+  status: 'available' | 'pending' | 'downloading' | 'paused' | 'completed' | 'queued' | 'failed' | 'installed';
   progress: number;
   speed?: string;
   targetPath?: string;
@@ -45,6 +45,8 @@ const autoInstallTried = new Set<number>();
 // Serialize auto-install attempts to avoid overlapping installers (MSI is single-instance)
 const installQueue: number[] = [];
 let installBusy = false;
+const postCompleteTimers = new Map<number, number>();
+let installPresenceTimer: number | null = null;
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
@@ -111,10 +113,72 @@ async function processInstallQueue() {
           }
         }
       }
+
+      // Optional verification: check Uninstall registry for a new entry matching the app name
+      try {
+        if (downloader.verifyInstall) {
+          const result = (await invoke('verify_install', {
+            displayNameHint: snap.name,
+            timeoutMs: 30000,
+          })) as { verified: boolean; matched?: { display_name?: string; display_version?: string } };
+          if (result && (result as any).verified) {
+            const dn = (result as any)?.matched?.display_name || snap.name;
+            const dv = (result as any)?.matched?.display_version || '';
+            await appLog('SUCCESS', `Installed (verified): ${dn}${dv ? ' ' + dv : ''}`);
+            // Prevent integrity watcher from flipping status back to available when the installer file is removed.
+            // Once verified installed, we can drop the installer path reference.
+            updateDownloadById(id, (draft) => {
+              draft.status = 'installed';
+              draft.targetPath = undefined;
+            });
+          } else {
+            await appLog('WARN', `Install not verified for ${snap.name} (no uninstall entry detected)`);
+          }
+        }
+      } catch {
+        // ignore verification errors
+      }
     }
   } finally {
     installBusy = false;
   }
+}
+
+function isLikelyInstaller(dl: Download): boolean {
+  const ext = (dl.fileType || '').toLowerCase();
+  return ext === 'exe' || ext === 'msi';
+}
+
+async function checkAndMarkInstalled(id: number) {
+  try {
+    const s = get(settings);
+    const dl = getDownloadSnapshot(id);
+    if (!dl) return;
+    if (!isLikelyInstaller(dl)) return;
+    if (s.downloader.verifyInstall) {
+      const ok = (await invoke('is_installed', { displayNameHint: dl.name })) as boolean;
+      if (ok) {
+        updateDownloadById(id, (draft) => {
+          draft.status = 'installed';
+          draft.targetPath = undefined;
+        });
+        await appLog('SUCCESS', `Installed (verified): ${dl.name}`);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function schedulePostCompleteCheck(id: number, delayMs = 5000) {
+  try {
+    if (postCompleteTimers.has(id)) return;
+    const timer = setTimeout(() => {
+      postCompleteTimers.delete(id);
+      void checkAndMarkInstalled(id);
+    }, delayMs) as unknown as number;
+    postCompleteTimers.set(id, timer);
+  } catch {}
 }
 
 function seedUsedPaths() {
@@ -307,6 +371,8 @@ export function initDownloadListener() {
           );
           // Try auto-install if enabled
           void maybeAutoInstall(id);
+          // Schedule a post-complete check to mark as Installed when present
+          schedulePostCompleteCheck(id, 5000);
         }
       })();
       return;
@@ -371,6 +437,59 @@ export async function disposeDownloadListener() {
     /* noop */
   } finally {
     progressUnlisten = null;
+  }
+}
+
+export function startInstallPresenceWatch(intervalMs = 20000) {
+  stopInstallPresenceWatch();
+  installPresenceTimer = setInterval(async () => {
+    try {
+      const s = get(settings);
+      if (!s.downloader.verifyInstall) return;
+      const list = get(downloads);
+      for (const d of list) {
+        if (d.status === 'installed') {
+          try {
+            const ok = (await invoke('is_installed', { displayNameHint: d.name })) as boolean;
+            if (!ok) {
+              updateDownloadById(d.id, (draft) => {
+                draft.status = 'available';
+                draft.progress = 0;
+                draft.speed = '';
+                draft.eta = 'N/A';
+              });
+              await appLog('INFO', `Uninstalled detected: ${d.name}`);
+            }
+          } catch {}
+        } else if (d.status === 'completed' && isLikelyInstaller(d)) {
+          // If the installer file is gone, flip back to available (parallell stöd till integrity watch)
+          try {
+            const p = d.targetPath;
+            let exists = false;
+            if (typeof p === 'string' && p) {
+              exists = !!(await invoke('path_exists', { path: p }));
+            }
+            if (!exists) {
+              updateDownloadById(d.id, (draft) => {
+                draft.status = 'available';
+                draft.progress = 0;
+                draft.speed = '';
+                draft.eta = 'N/A';
+                draft.targetPath = undefined;
+              });
+              await appLog('INFO', `Installer file missing; reset to available: ${d.name}`);
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }, intervalMs) as unknown as number;
+}
+
+export function stopInstallPresenceWatch() {
+  if (installPresenceTimer !== null) {
+    clearInterval(installPresenceTimer as unknown as number);
+    installPresenceTimer = null;
   }
 }
 

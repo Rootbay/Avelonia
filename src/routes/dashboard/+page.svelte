@@ -40,6 +40,7 @@
     downloading: 'Downloading',
     paused: 'Paused',
     completed: 'Completed',
+    installed: 'Installed',
     queued: 'Queued',
     failed: 'Failed',
   };

@@ -341,7 +341,10 @@ pub fn run() {
             cleaner::quick_clear_prefetch,
             cleaner::quick_clear_recent,
             installer::silent_install,
-            installer::launch_installer
+            installer::launch_installer,
+            installer::list_uninstall_entries,
+            installer::verify_install,
+            installer::is_installed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

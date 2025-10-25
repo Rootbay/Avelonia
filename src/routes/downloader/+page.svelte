@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { downloads, addDownload, removeDownloadsByIds } from '$lib/downloads';
   import FilterPanel from '$lib/components/FilterPanel.svelte';
   import DownloadItem from '$lib/components/DownloadItem.svelte';
@@ -20,6 +20,7 @@
   import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+  import { Skeleton } from '$lib/components/ui/skeleton/index.js';
   import {
     Table,
     TableHeader,
@@ -104,10 +105,15 @@
   let announce = $state('');
   let showHelp = $state(false);
   let showInstallInfo = $state(false);
+  let showVerifyInfo = $state(false);
   let optionsOpen = $state(false);
   let returnToOptions = $state(false);
+  // Show a brief initial skeleton on page entry (similar to Optimize)
+  let initialLoading = $state(true);
   let lastSelectedIndex: number | null = null;
   let tableEl: HTMLTableElement | null = null;
+  let downloadsScrollEl: HTMLDivElement | null = null;
+  let downloadsSentinel: HTMLDivElement | null = null;
   let maxListHeight = $state(0);
   let addOpen = $state(false);
   let addUrl = $state('');
@@ -119,17 +125,20 @@
   let installMode = $state($settings.downloader.installMode);
   let elevateInstall = $state($settings.downloader.elevate);
   let fallbackOpen = $state($settings.downloader.fallbackOpen);
+  let verifyInstall = $state($settings.downloader.verifyInstall);
   $effect(() => {
     autoInstall = $settings.downloader.autoInstall;
     installMode = $settings.downloader.installMode;
     elevateInstall = $settings.downloader.elevate;
     fallbackOpen = $settings.downloader.fallbackOpen;
+    verifyInstall = $settings.downloader.verifyInstall;
   });
   $effect(() => {
-    updateDownloaderSettings({ autoInstall, installMode, elevate: elevateInstall, fallbackOpen });
+    updateDownloaderSettings({ autoInstall, installMode, elevate: elevateInstall, fallbackOpen, verifyInstall });
   });
+  // When closing info popups, reopen the Options sheet if we navigated from there
   $effect(() => {
-    if (!showInstallInfo && returnToOptions) {
+    if (!showInstallInfo && !showVerifyInfo && returnToOptions) {
       optionsOpen = true;
       returnToOptions = false;
     }
@@ -321,6 +330,11 @@
       window.removeEventListener('keydown', keyHandler);
     };
   });
+  // Turn off initial page skeleton after a short delay
+  onMount(() => {
+    const t = setTimeout(() => (initialLoading = false), 350);
+    return () => clearTimeout(t);
+  });
   $effect(() => {
     try {
       localStorage.setItem(
@@ -330,16 +344,21 @@
     } catch {}
   });
 
+  let minListHeight = $state(0);
   function recomputeMaxHeight() {
     try {
       const header = tableEl?.querySelector('thead') as HTMLElement | null;
       const firstRow = tableEl?.querySelector('tbody tr') as HTMLElement | null;
       const headerH = header ? header.getBoundingClientRect().height : 44;
-      const rowH = firstRow ? firstRow.getBoundingClientRect().height : 56;
-      const cap = Math.ceil(headerH + rowH * 10 + 6); // header + 10 rows + small buffer
-      maxListHeight = cap;
+      const measured = firstRow ? firstRow.getBoundingClientRect().height : 48;
+      const rowH = Math.max(36, Math.min(80, measured));
+      const capMax = Math.ceil(headerH + rowH * 10 + 6); // header + 10 rows + small buffer
+      const capMin = Math.ceil(headerH + rowH * 5 + 6); // header + 5 rows minimum
+      maxListHeight = capMax;
+      minListHeight = capMin;
     } catch {
       maxListHeight = 0;
+      minListHeight = 0;
     }
   }
 
@@ -355,7 +374,32 @@
     window.addEventListener('resize', onR);
     // initial calculation
     setTimeout(onR, 0);
-    return () => window.removeEventListener('resize', onR);
+
+    // IntersectionObserver to progressively append items when the sentinel enters view
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const prev = downloadsVisible;
+          const next = Math.min(prev + VIEW_CHUNK, filteredDownloads.length);
+          if (next > prev) {
+            markSkeletonRange(prev, next);
+            downloadsVisible = next;
+            if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
+              downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
+            }
+            lastVisible = next;
+          }
+        }
+      },
+      { root: downloadsScrollEl, rootMargin: '0px', threshold: 0.1 }
+    );
+    if (downloadsSentinel) io.observe(downloadsSentinel);
+
+    return () => {
+      window.removeEventListener('resize', onR);
+      io.disconnect();
+    };
   });
 
   function toBytes(val: string | number | undefined | null): number {
@@ -384,6 +428,7 @@
     downloading: 4,
     paused: 5,
     completed: 6,
+    installed: 6,
     failed: 7,
   };
 
@@ -472,7 +517,7 @@
             case 'available':
               return download.status === 'available';
             case 'completed':
-              return download.status === 'completed';
+              return download.status === 'completed' || download.status === 'installed';
             case 'failed':
               return download.status === 'failed';
             case 'active':
@@ -499,6 +544,78 @@
       })
       .sort(sortDownloads)
   );
+
+  // Virtualization/windowing for the downloads table (similar to Optimize lists)
+  const DOWNLOAD_ROW_PX = 56;
+  const DOWNLOAD_MAX_DOM = 600;
+  let downloadsStart = $state(0);
+  let downloadsVisible = $state(10);
+  const VIEW_CHUNK = 30;
+  // Trigger loading earlier and avoid huge "jump to all" bursts
+  const SCROLL_THRESHOLD_PX = 200;
+  let lastVisible = $state(0);
+  let skeletonIds = $state(new Set<number>());
+  let _downloadsScrollTick = false;
+
+  const windowedDownloads = $derived(
+    filteredDownloads.slice(downloadsStart, Math.min(downloadsVisible, filteredDownloads.length))
+  );
+  // We intentionally omit a bottom spacer to support true incremental loading as you scroll.
+
+  function markSkeletonRange(startIndex: number, endIndex: number) {
+    try {
+      const ids = filteredDownloads.slice(startIndex, endIndex).map((d) => d.id);
+      for (const id of ids) skeletonIds.add(id);
+      skeletonIds = new Set(skeletonIds);
+      setTimeout(() => {
+        for (const id of ids) skeletonIds.delete(id);
+        skeletonIds = new Set(skeletonIds);
+      }, 350);
+    } catch {}
+  }
+
+  function onDownloadsScroll(event: Event) {
+    if (_downloadsScrollTick) return;
+    _downloadsScrollTick = true;
+    const el = (event.currentTarget as HTMLElement) || downloadsScrollEl;
+    if (!el) {
+      _downloadsScrollTick = false;
+      return;
+    }
+    requestAnimationFrame(() => {
+      // Consider both an absolute pixel threshold and a ratio of total scrollable height
+      const nearBottomPx = el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_THRESHOLD_PX;
+      const progress = (el.scrollTop + el.clientHeight) / Math.max(1, el.scrollHeight);
+      const nearBottomRatio = progress >= 0.8; // ~last 20%
+
+      if (nearBottomPx || nearBottomRatio) {
+        const prev = downloadsVisible;
+        const next = Math.min(prev + VIEW_CHUNK, filteredDownloads.length);
+        if (next > prev) {
+          markSkeletonRange(prev, next);
+          downloadsVisible = next;
+          if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
+            downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
+          }
+          lastVisible = next;
+        }
+      }
+      _downloadsScrollTick = false;
+    });
+  }
+
+  // Keep DOM window bounded when data or filters change
+  $effect(() => {
+    const total = filteredDownloads.length;
+    if (downloadsVisible > total) downloadsVisible = total;
+    if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
+      downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
+    }
+    if (downloadsStart > downloadsVisible) downloadsStart = 0;
+    // Reset skeletons when data set changes significantly
+    skeletonIds = new Set();
+    lastVisible = downloadsVisible;
+  });
 
   const totalDownloads = $derived($downloads.length);
   const availableDownloads = $derived(filteredDownloads.length);
@@ -943,6 +1060,27 @@
       </DialogFooter>
     </DialogContent>
   </Dialog>
+  <Dialog bind:open={showVerifyInfo}>
+    <DialogContent class="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Installation verification (beta)</DialogTitle>
+      </DialogHeader>
+      <DialogDescription>
+        <ul class="list-disc pl-5 space-y-1">
+          <li>After install (silent or normal), we check for entries in Windows "Programs and Features".</li>
+          <li>We diff the Uninstall registry (HKLM/HKCU, 64/32-bit) for up to 30 seconds.</li>
+          <li>If a matching entry is found, the install is marked as verified in the log.</li>
+          <li>Some installers register later; verification can be missed even if the install succeeded.</li>
+        </ul>
+      </DialogDescription>
+      <DialogFooter>
+        <DialogClose>
+          <Button type="button" variant="default">Got it</Button>
+        </DialogClose>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
 
   <Dialog bind:open={addOpen}>
     <DialogContent>
@@ -974,7 +1112,7 @@
           </div>
           <div class="space-y-1">
             <div class="text-sm font-medium">Type</div>
-            <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || '—'}</div>
+            <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || 'â€”'}</div>
           </div>
         </div>
       </div>
@@ -1032,9 +1170,9 @@
                         <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel active</span>
                         {#if cancelableAll > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableAll}</span>{/if}
                       </Button>
-                    </div>
-                  </div>
-                  <Separator />
+                </div>
+              </div>
+              <Separator />
                   <div class="space-y-2">
                     <p class="text-xs uppercase tracking-wide text-muted-foreground">Current view</p>
                     <div class="grid gap-2">
@@ -1115,7 +1253,7 @@
               <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
                 <SheetHeader class="space-y-1 p-0">
                   <SheetTitle>Beta options</SheetTitle>
-                  <SheetDescription>Defaults for post‑download behavior.</SheetDescription>
+                  <SheetDescription>Defaults for postâ€‘download behavior.</SheetDescription>
                 </SheetHeader>
                 <div class="mt-3 space-y-6 text-sm">
                   <div class="space-y-2">
@@ -1146,8 +1284,18 @@
                       If silent fails, open installer normally
                     </label>
                   </div>
-                  <div>
-                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showInstallInfo = true; }}>What is this?</Button>
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showInstallInfo = true; }}>Silent install?</Button>
+                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showVerifyInfo = true; }}>Verify install?</Button>
+                  </div>
+
+                  <div class="space-y-2">
+                    <p class="font-medium">Verification</p>
+                    <label class="inline-flex items-center gap-2">
+                      <input type="checkbox" bind:checked={verifyInstall} class="h-4 w-4" />
+                      Verify installation via system registry (Windows)
+                    </label>
+                    <p class="text-xs text-muted-foreground">Checks Uninstall entries after installer exits; helps confirm success.</p>
                   </div>
                 </div>
               </SheetContent>
@@ -1199,7 +1347,7 @@
   <Card class="relative overflow-hidden border border-border/60">
 
     <CardContent class="p-0">
-      <div class="overflow-auto" style:max-height={`${maxListHeight || ''}px`}>
+      <div class="overflow-auto" style:max-height={`${maxListHeight || ''}px`} style:min-height={`${minListHeight || ''}px`} bind:this={downloadsScrollEl} onscroll={onDownloadsScroll}>
         <Table ref={tableEl} class="min-w-[960px]">
           <TableHeader>
             <TableRow>
@@ -1267,25 +1415,103 @@
             </TableRow>
           </TableHeader>
           <TableBody>
-            {#each filteredDownloads as download, i (download.id)}
-              <DownloadItem
-                {download}
-                {startDownload}
-                {cancelDownload}
-                selected={isSelected(download.id)}
-                onToggleSelect={(payload: { checked: boolean; shiftKey: boolean }) => 
-                  toggleSelectWithIndex(download.id, payload?.checked ?? false, i, !!payload?.shiftKey)}
-              />
-            {/each}
-            {#if filteredDownloads.length === 0}
-              <TableRow>
-                <TableCell colspan={7} class="py-12 text-center text-sm text-muted-foreground">
-                  No downloads match the current filters.
-                </TableCell>
-              </TableRow>
+            {#if initialLoading}
+              {#each Array.from({ length: 6 }) as _, ii}
+                <TableRow class="!border-0" aria-hidden="true">
+                  <TableCell class="w-[60px]">
+                    <div class="flex items-center gap-2">
+                      <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
+                      <Skeleton class="h-8 w-8 rounded-md" aria-hidden="true" />
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex flex-col gap-2">
+                      <Skeleton class="h-3 w-2/3" aria-hidden="true" />
+                      <Skeleton class="h-3 w-1/3" aria-hidden="true" />
+                    </div>
+                  </TableCell>
+                  <TableCell class="hidden md:table-cell">
+                    <Skeleton class="h-3 w-10" aria-hidden="true" />
+                  </TableCell>
+                  <TableCell class="hidden md:table-cell">
+                    <Skeleton class="h-3 w-12" aria-hidden="true" />
+                  </TableCell>
+                  <TableCell class="hidden md:table-cell">
+                    <Skeleton class="h-3 w-20" aria-hidden="true" />
+                  </TableCell>
+                  <TableCell class="hidden md:table-cell">
+                    <Skeleton class="h-3 w-12" aria-hidden="true" />
+                  </TableCell>
+                  <TableCell class="w-[180px] pl-6 sm:pl-8">
+                    <Skeleton class="h-3 w-16" aria-hidden="true" />
+                  </TableCell>
+                </TableRow>
+              {/each}
+            {:else}
+              {#if downloadsStart > 0}
+                <tr aria-hidden="true">
+                  <td colspan="7" style={`height:${downloadsStart * DOWNLOAD_ROW_PX}px; padding:0; border:0;`}></td>
+                </tr>
+              {/if}
+              {#each windowedDownloads as download, i (download.id)}
+                {#if skeletonIds.has(download.id)}
+                  <TableRow class="!border-0" aria-hidden="true">
+                    <TableCell class="w-[60px]">
+                      <div class="flex items-center gap-2">
+                        <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
+                        <Skeleton class="h-8 w-8 rounded-md" aria-hidden="true" />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div class="flex flex-col gap-2">
+                        <Skeleton class="h-3 w-2/3" aria-hidden="true" />
+                        <Skeleton class="h-3 w-1/3" aria-hidden="true" />
+                      </div>
+                    </TableCell>
+                    <TableCell class="hidden md:table-cell">
+                      <Skeleton class="h-3 w-10" aria-hidden="true" />
+                    </TableCell>
+                    <TableCell class="hidden md:table-cell">
+                      <Skeleton class="h-3 w-12" aria-hidden="true" />
+                    </TableCell>
+                    <TableCell class="hidden md:table-cell">
+                      <Skeleton class="h-3 w-20" aria-hidden="true" />
+                    </TableCell>
+                    <TableCell class="hidden md:table-cell">
+                      <Skeleton class="h-3 w-12" aria-hidden="true" />
+                    </TableCell>
+                    <TableCell class="w-[180px] pl-6 sm:pl-8">
+                      <Skeleton class="h-3 w-16" aria-hidden="true" />
+                    </TableCell>
+                  </TableRow>
+                {:else}
+                  <DownloadItem
+                    {download}
+                    {startDownload}
+                    {cancelDownload}
+                    selected={isSelected(download.id)}
+                    onToggleSelect={(payload: { checked: boolean; shiftKey: boolean }) =>
+                      toggleSelectWithIndex(
+                        download.id,
+                        payload?.checked ?? false,
+                        downloadsStart + i,
+                        !!payload?.shiftKey
+                      )}
+                  />
+                {/if}
+              {/each}
+              {#if filteredDownloads.length === 0}
+                <TableRow>
+                  <TableCell colspan={7} class="py-12 text-center text-sm text-muted-foreground">
+                    No downloads match the current filters.
+                  </TableCell>
+                </TableRow>
+              {/if}
             {/if}
           </TableBody>
-        </Table>
+      </Table>
+      <!-- Sentinel for IntersectionObserver-based incremental loading -->
+      <div bind:this={downloadsSentinel} class="h-0" aria-hidden="true"></div>
       </div>
 
       {#if selectedIds.size > 0}
@@ -1321,6 +1547,9 @@
     </DialogContent>
   </Dialog>
 </div>
+
+
+
 
 
 

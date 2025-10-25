@@ -5,6 +5,7 @@ export type DownloaderSettings = {
   installMode: 'silent' | 'normal';
   elevate: boolean;
   fallbackOpen: boolean;
+  verifyInstall: boolean; // verify installation via Uninstall registry (Windows)
   preferWinget: boolean; // reserved for future
 };
 
@@ -16,22 +17,23 @@ const STORAGE_KEY = 'avelonia_settings_v1';
 
 function load(): AppSettings {
   if (typeof window === 'undefined') {
-    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, preferWinget: false } };
+    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, preferWinget: false } };
+    if (!raw) return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
     const parsed = JSON.parse(raw);
     const d: DownloaderSettings = {
       autoInstall: !!parsed?.downloader?.autoInstall,
       installMode: parsed?.downloader?.installMode === 'normal' ? 'normal' : 'silent',
       elevate: parsed?.downloader?.elevate ?? true,
       fallbackOpen: parsed?.downloader?.fallbackOpen ?? true,
+      verifyInstall: parsed?.downloader?.verifyInstall ?? false,
       preferWinget: parsed?.downloader?.preferWinget ?? false,
     };
     return { downloader: d };
   } catch {
-    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, preferWinget: false } };
+    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
   }
 }
 

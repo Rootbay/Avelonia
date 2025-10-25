@@ -46,16 +46,19 @@
   import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { startDownloadIntegrityWatch, stopDownloadIntegrityWatch } from '$lib/downloadIntegrity';
+  import { startInstallPresenceWatch, stopInstallPresenceWatch } from '$lib/downloadManager';
 
   import '../app.css';
 
   onMount(() => {
     initDownloadListener();
     startDownloadIntegrityWatch(20000);
+    startInstallPresenceWatch(20000);
   });
   onDestroy(() => {
     disposeDownloadListener();
     stopDownloadIntegrityWatch();
+    stopInstallPresenceWatch();
   });
 
   let { children }: { children?: Snippet } = $props();
@@ -188,8 +191,8 @@
                   <a
                     {...restProps}
                     href={item.href}
-                    data-sveltekit-preload-data={item.href === '/optimize' ? 'off' : undefined}
-                    data-sveltekit-preload-code={item.href === '/optimize' ? 'off' : undefined}
+                    data-sveltekit-preload-data={['/optimize','/downloader'].includes(item.href) ? 'off' : undefined}
+                    data-sveltekit-preload-code={['/optimize','/downloader'].includes(item.href) ? 'off' : undefined}
                     aria-current={$page.url.pathname === item.href ? 'page' : undefined}
                     class={cn(
                       'flex items-center transition-colors',

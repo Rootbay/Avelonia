@@ -4,31 +4,25 @@ import type { Download } from './downloadManager';
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
 
 function loadDownloads(): Download[] {
-  // Start from persisted list only; no hardcoded default entries
-  if (typeof window !== 'undefined') {
-    const storedDownloads = localStorage.getItem(DOWNLOADS_STORAGE_KEY);
-    if (storedDownloads) {
-      try {
-        const parsed = JSON.parse(storedDownloads);
-        if (Array.isArray(parsed)) {
-          return parsed.map((storedDl: Download) => {
-            let newStatus = storedDl.status as Download['status'];
-            if (
-              storedDl.status === 'downloading' ||
-              storedDl.status === 'pending' ||
-              storedDl.status === 'queued'
-            ) {
-              newStatus = 'available';
-            }
-            return { ...storedDl, status: newStatus } as Download;
-          });
-        }
-      } catch (error) {
-        console.error('Error parsing downloads from localStorage', error);
+  // Start from persisted list only; no hardcoded defaults or test seeds
+  if (typeof window === 'undefined') return [];
+  const stored = localStorage.getItem(DOWNLOADS_STORAGE_KEY);
+  if (!stored) return [];
+  try {
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    // Normalize transient states back to available on load
+    return parsed.map((d: Download) => {
+      let status = d.status as Download['status'];
+      if (status === 'downloading' || status === 'pending' || status === 'queued') {
+        status = 'available';
       }
-    }
+      return { ...d, status } as Download;
+    });
+  } catch (e) {
+    console.error('Error parsing downloads from localStorage', e);
+    return [];
   }
-  return [];
 }
 
 export const downloads = writable<Download[]>(loadDownloads());

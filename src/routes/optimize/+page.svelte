@@ -652,19 +652,19 @@
           r.rebootConfirmed = true;
           r.suspicious = true;
           const hint: string[] = [];
-          if (r.lastOptions?.ifeo) hint.push('IFEO block var aktiv vid senaste åtgärd');
-          if (r.lastOptions?.dor) hint.push('Delete on reboot var aktiverat');
+          if (r.lastOptions?.ifeo) hint.push('IFEO block was active during the last action');
+          if (r.lastOptions?.dor) hint.push('Delete on reboot was active');
           if (Array.isArray(r.lastImages) && r.lastImages.length) {
-            hint.push(`Processbild(er): ${r.lastImages.join(', ')}`);
+            hint.push(`Process image(s): ${r.lastImages.join(', ')}`);
           }
-          r.suspiciousReason = `Posten dök upp igen efter Full cleanup och omstart. ${hint.join(' · ')}`.trim();
+          r.suspiciousReason = `Entry reappeared after Full cleanup and reboot. ${hint.join(' · ')}`.trim();
           registryHistory[id] = r;
           updates += 1;
         }
       }
       if (updates > 0) {
         saveRegHistory();
-        toast.warning(`Upptäckte ${updates} återkommande post(er) efter omstart. Markerade som misstänkta.`);
+        toast.warning(`Detected ${updates} recurring entries after reboot. Marked as suspicious.`);
       }
     } catch (e) {
       console.warn('scanSuspiciousAfterReboot failed', e);
@@ -942,7 +942,7 @@
       .filter(([, v]) => !!(v as any)?.suspicious)
       .map(([id, v]) => {
         const [hive, key, name] = id.split('|');
-        const reason = (v as any)?.suspiciousReason || 'Återkom efter rensning';
+        const reason = (v as any)?.suspiciousReason || 'Reappeared after cleanup';
         const lastStrategy = (v as any)?.lastStrategy || '';
         return { id, hive, key, name, reason, lastStrategy };
       })
@@ -1209,30 +1209,30 @@
       {#if regPreset === 'full'}
         <Alert class="mb-2">
           <AlertDescription>
-            Full cleanup kör en aggressiv städning: tvingad borttagning, blockering via IFEO, radering vid omstart,
-            rensning av StartupApproved samt borttagning av schemalagda uppgifter och WMI‑prenumerationer
-            kopplade till posterna. Du kan få UAC‑frågor. Spara ditt arbete och stäng onödiga program innan du fortsätter.
+            Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and delete-on-reboot,
+            purging StartupApproved and removing related Scheduled Tasks and WMI subscriptions
+            You may get UAC prompts. Save your work and close unnecessary apps before continuing.
           </AlertDescription>
         </Alert>
       {:else if regPreset === 'aggressive'}
         <Alert class="mb-2">
           <AlertDescription>
-            Aggressive: försöker tvingad borttagning, blockera körning via IFEO (om exe‑bild hittas) och schemalägger radering vid omstart
-            när full sökväg finns. Rensar inte StartupApproved, schemalagda uppgifter eller WMI automatiskt.
-            Kan trigga UAC.
+            Aggressive: tries forced removal, blocks execution via IFEO (if an exe image is found), and schedules delete-on-reboot
+            when a full path exists. Does not purge StartupApproved, Scheduled Tasks, or WMI automatically.
+            May prompt UAC.
           </AlertDescription>
         </Alert>
       {:else if regPreset === 'force'}
         <Alert class="mb-2">
           <AlertDescription>
-            Force only: tar ägarskap/behörigheter på nyckeln och tar bort värdet med elevation. Använder inte IFEO, Delete‑on‑reboot eller
-            kringåtgärder. Bra när en enkel borttagning nekas.
+            Force only: takes ownership/permissions on the key and removes the value with elevation. Does not use IFEO, delete-on-reboot or
+            workarounds. Good when a simple removal is denied.
           </AlertDescription>
         </Alert>
       {:else}
         <Alert class="mb-2">
           <AlertDescription>
-            Basic: försöker normal borttagning utan elevation. Snabbaste vägen när inget låser posten. Om det misslyckas, pröva Force eller Aggressive.
+            Basic: attempts normal removal without elevation. Fastest path when nothing is locking the entry. If it fails, try Force or Aggressive.
           </AlertDescription>
         </Alert>
       {/if}
@@ -1278,11 +1278,11 @@
   <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
     <DialogContent class="sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Misstänkta poster (Registry Startup)</DialogTitle>
-        <DialogDescription>Poster som återkom efter Full cleanup och omstart.</DialogDescription>
+        <DialogTitle>Suspicious Entries (Registry Startup)</DialogTitle>
+        <DialogDescription>Entries that reappeared after Full cleanup and reboot.</DialogDescription>
       </DialogHeader>
       {#if suspectEntries.length === 0}
-        <p class="text-sm text-muted-foreground">Inga misstänkta poster registrerade.</p>
+        <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
       {:else}
         <div class="max-h-[50vh] overflow-y-auto space-y-3">
           {#each suspectEntries as s}
@@ -1301,7 +1301,7 @@
         </div>
       {/if}
       <DialogFooter>
-        <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Stäng</Button>
+        <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Close</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>
@@ -1310,90 +1310,90 @@
   <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
     <DialogContent class="sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Åtgärd klar</DialogTitle>
+        <DialogTitle>Action Complete</DialogTitle>
         <DialogDescription>
-          Snabb kontroll av systemet och rekommenderade nästa steg.
+          Quick system check and recommended next steps.
         </DialogDescription>
       </DialogHeader>
 
       {#if postDiagLoading}
-        <div class="text-sm text-muted-foreground">Kör systemkontroll…</div>
+        <div class="text-sm text-muted-foreground">Running system check�</div>
       {:else if postDiag}
         <div class="space-y-4 text-sm">
           <div>
-            <p class="font-medium">Registerposter</p>
+            <p class="font-medium">Registry Entries</p>
             {#if postDiag.removedRegistry.stillPresent.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">Alla valda poster verkar borttagna.</p>
+              <p class="text-emerald-600 dark:text-emerald-400">All selected entries appear removed.</p>
             {:else}
-              <p class="text-destructive">Vissa poster finns kvar:</p>
+              <p class="text-destructive">Some entries remain:</p>
               <ul class="list-disc pl-5 mt-1">
                 {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
                   <li class="break-all">{r}</li>
                 {/each}
                 {#if postDiag.removedRegistry.stillPresent.length > 6}
-                  <li>…och {postDiag.removedRegistry.stillPresent.length - 6} till</li>
+                  <li>�and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
                 {/if}
               </ul>
             {/if}
           </div>
 
           <div>
-            <p class="font-medium">Processer</p>
+            <p class="font-medium">Processes</p>
             {#if postDiag.runningImages.running.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade processer körs.</p>
+              <p class="text-emerald-600 dark:text-emerald-400">No related processes are running.</p>
             {:else}
-              <p class="text-destructive">Processer körs fortfarande:</p>
+              <p class="text-destructive">Processes still running:</p>
               <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
             {/if}
           </div>
 
           <div>
-            <p class="font-medium">Schemalagda uppgifter</p>
+            <p class="font-medium">Scheduled Tasks</p>
             {#if postDiag.taskMatches.remaining.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade uppgifter hittades.</p>
+              <p class="text-emerald-600 dark:text-emerald-400">No related tasks found.</p>
             {:else}
-              <p class="text-destructive">Relaterade uppgifter kvar:</p>
+              <p class="text-destructive">Related tasks remaining:</p>
               <ul class="list-disc pl-5 mt-1">
                 {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
                   <li class="break-all">{t}</li>
                 {/each}
                 {#if postDiag.taskMatches.remaining.length > 8}
-                  <li>…och {postDiag.taskMatches.remaining.length - 8} till</li>
+                  <li>�and {postDiag.taskMatches.remaining.length - 8} more</li>
                 {/if}
               </ul>
             {/if}
           </div>
 
           <div>
-            <p class="font-medium">Tjänster</p>
+            <p class="font-medium">Services</p>
             {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">Inga relaterade tjänster hittades.</p>
+              <p class="text-emerald-600 dark:text-emerald-400">Inga related services hittades.</p>
             {:else}
               {#if postDiag.serviceMatches.running.length > 0}
-                <p class="text-destructive">Körande tjänster: {postDiag.serviceMatches.running.join(', ')}</p>
+                <p class="text-destructive">Running services: {postDiag.serviceMatches.running.join(', ')}</p>
               {/if}
               {#if postDiag.serviceMatches.disabled.length > 0}
-                <p class="text-muted-foreground">Inaktiverade: {postDiag.serviceMatches.disabled.join(', ')}</p>
+                <p class="text-muted-foreground">Disabled: {postDiag.serviceMatches.disabled.join(', ')}</p>
               {/if}
             {/if}
           </div>
 
           <div class="space-y-2">
-            <p class="font-medium">Rekommenderade nästa steg</p>
+            <p class="font-medium">Recommended Next Steps</p>
             <ul class="list-disc pl-5">
               {#if postDiag.rebootRecommended}
-                <li>Starta om datorn för att slutföra radering vid omstart.</li>
+                <li>Restart your computer to complete delete-on-reboot.</li>
               {/if}
               {#if postDiag.runningImages.running.length > 0}
-                <li>Stäng eller avinstallera processerna som fortfarande körs: {postDiag.runningImages.running.join(', ')}.</li>
+                <li>Close or uninstall the processes still running: {postDiag.runningImages.running.join(', ')}.</li>
               {/if}
               {#if postDiag.taskMatches.remaining.length > 0}
-                <li>Öppna Aktivitetsschemaläggaren och ta bort kvarvarande uppgifter ovan.</li>
+<li>Open Task Scheduler and remove the remaining tasks above.</li>
               {/if}
               {#if postDiag.serviceMatches.running.length > 0}
-                <li>Stoppa/Inaktivera relaterade tjänster och verifiera att inget återaktiverar dem.</li>
+                <li>Stop/Disable related services and verify nothing re-enables them.</li>
               {/if}
-              <li>Kör en antivirus/AM‑skanning om posterna var skadliga.</li>
+              <li>Run an antivirus/antimalware scan if the entries were malicious.</li>
             </ul>
           </div>
         </div>
@@ -1407,7 +1407,7 @@
                 await invoke('restart_system');
               } catch (e) {
                 console.error(e);
-                toast.error('Kunde inte starta om systemet');
+                toast.error('Could not restart the system');
               }
             }}
           >
@@ -1753,3 +1753,9 @@
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
+
+
+
+
+
+
