@@ -5,6 +5,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { downloadDir, join } from '@tauri-apps/api/path';
 import { candidateFileNames, normalizeExtension, sanitizeFileName } from './downloadPath';
 import { pushLog, type LogLevel } from '$lib/logStore';
+import { settings } from '$lib/settings';
+import { openPath } from '@tauri-apps/plugin-opener';
 
 export interface Download {
   id: number;
@@ -39,11 +41,79 @@ const reservedPaths = new Set<string>();
 const downloadPathReservations = new Map<number, string>();
 const usedPaths = new Set<string>();
 let usedPathsSeeded = false;
+const autoInstallTried = new Set<number>();
+// Serialize auto-install attempts to avoid overlapping installers (MSI is single-instance)
+const installQueue: number[] = [];
+let installBusy = false;
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
   } catch {
     // ignore logging errors
+  }
+}
+
+async function maybeAutoInstall(id: number) {
+  try {
+    const { downloader } = get(settings);
+    if (!downloader.autoInstall) return;
+    if (autoInstallTried.has(id)) return;
+    installQueue.push(id);
+    void processInstallQueue();
+  } catch {}
+}
+
+async function processInstallQueue() {
+  if (installBusy) return;
+  installBusy = true;
+  try {
+    // Drain queue sequentially. This avoids MSI single-instance conflicts and stacked UAC prompts.
+    while (installQueue.length > 0) {
+      const id = installQueue.shift() as number;
+      if (autoInstallTried.has(id)) continue;
+      const { downloader } = get(settings);
+      const snap = getDownloadSnapshot(id);
+      if (!snap || snap.status !== 'completed' || !snap.targetPath) {
+        continue;
+      }
+      const path = snap.targetPath;
+      const ext = (path.split('.').pop() || '').toLowerCase();
+      if (ext !== 'exe' && ext !== 'msi') {
+        autoInstallTried.add(id);
+        continue;
+      }
+      if (downloader.installMode === 'normal') {
+        await appLog('INFO', `Launching installer (interactive) for ${snap.name}${downloader.elevate ? ' [elevated]' : ''}`);
+        try {
+          await invoke('launch_installer', { path, elevate: !!downloader.elevate });
+          await appLog('SUCCESS', `Installer launched: ${snap.name}`);
+        } catch (e) {
+          await appLog('ERROR', `Failed to launch installer for ${snap.name}: ${String(e)}`);
+        } finally {
+          autoInstallTried.add(id);
+        }
+      } else {
+        await appLog('INFO', `Attempting silent install of ${snap.name} (${ext.toUpperCase()})${downloader.elevate ? ' [elevated]' : ''}`);
+        try {
+          await invoke('silent_install', { path, elevate: !!downloader.elevate });
+          await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
+          autoInstallTried.add(id);
+        } catch (e) {
+          await appLog('WARN', `Silent install failed for ${snap.name}: ${String(e)}`);
+          autoInstallTried.add(id);
+          if (downloader.fallbackOpen) {
+            try {
+              await appLog('INFO', `Opening installer normally for ${snap.name}`);
+              await openPath(path);
+            } catch (e2) {
+              await appLog('ERROR', `Failed to open installer for ${snap.name}: ${String(e2)}`);
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    installBusy = false;
   }
 }
 
@@ -235,6 +305,8 @@ export function initDownloadListener() {
             'SUCCESS',
             'Download completed: ' + snap.name + (snap.targetPath ? ' -> ' + snap.targetPath : '')
           );
+          // Try auto-install if enabled
+          void maybeAutoInstall(id);
         }
       })();
       return;
@@ -358,6 +430,9 @@ export function startDownload(id: number) {
   if (!snapshot || !snapshot.downloadLink) {
     return;
   }
+
+  // Reset auto-install attempt flag for this item so a fresh download can auto-install again.
+  autoInstallTried.delete(id);
 
   if (activeDownloads.has(id) || pendingQueue.includes(id)) {
     return;

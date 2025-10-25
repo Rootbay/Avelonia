@@ -13,6 +13,7 @@ mod cleaner;
 mod system_info;
 mod eraser;
 mod optimize;
+mod installer;
 
 #[derive(Default)]
 struct DownloadState(Arc<DashMap<u64, bool>>);
@@ -338,7 +339,9 @@ pub fn run() {
             cleaner::quick_clear_user_temp,
             cleaner::quick_clear_system_temp,
             cleaner::quick_clear_prefetch,
-            cleaner::quick_clear_recent
+            cleaner::quick_clear_recent,
+            installer::silent_install,
+            installer::launch_installer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

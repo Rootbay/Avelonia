@@ -43,6 +43,7 @@
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    DialogClose,
   } from '$lib/components/ui/dialog';
   import { toast } from '$lib/components/ui/sonner';
   import { ArrowUpDown, ListChecks, SlidersHorizontal, Keyboard } from '@lucide/svelte';
@@ -51,6 +52,7 @@
   import { prettifyDisplayName } from '$lib/name';
   import { tags as customTags, addTag, BUILT_IN_TAGS } from '$lib/tags';
   import { invoke } from '@tauri-apps/api/core';
+  import { settings, updateDownloaderSettings } from '$lib/settings';
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
@@ -101,6 +103,9 @@
   let selectAllCheckbox: HTMLInputElement | null = null;
   let announce = $state('');
   let showHelp = $state(false);
+  let showInstallInfo = $state(false);
+  let optionsOpen = $state(false);
+  let returnToOptions = $state(false);
   let lastSelectedIndex: number | null = null;
   let tableEl: HTMLTableElement | null = null;
   let maxListHeight = $state(0);
@@ -110,6 +115,25 @@
   let addName = $state('');
   let nameTouched = $state(false);
   const tagOptions = $derived([...new Set([...BUILT_IN_TAGS, ...$customTags])]);
+  let autoInstall = $state($settings.downloader.autoInstall);
+  let installMode = $state($settings.downloader.installMode);
+  let elevateInstall = $state($settings.downloader.elevate);
+  let fallbackOpen = $state($settings.downloader.fallbackOpen);
+  $effect(() => {
+    autoInstall = $settings.downloader.autoInstall;
+    installMode = $settings.downloader.installMode;
+    elevateInstall = $settings.downloader.elevate;
+    fallbackOpen = $settings.downloader.fallbackOpen;
+  });
+  $effect(() => {
+    updateDownloaderSettings({ autoInstall, installMode, elevate: elevateInstall, fallbackOpen });
+  });
+  $effect(() => {
+    if (!showInstallInfo && returnToOptions) {
+      optionsOpen = true;
+      returnToOptions = false;
+    }
+  });
   const guessed = $derived.by(() => guessFromUrl(addUrl));
   let probeName = $state('');
   let probeExt = $state('');
@@ -237,17 +261,8 @@
     selectedIds = new Set();
   }
 
-  // Uncheck items automatically when they complete
-  $effect(() => {
-    let changed = false;
-    for (const d of $downloads) {
-      if (d.status === 'completed' && selectedIds.has(d.id)) {
-        selectedIds.delete(d.id);
-        changed = true;
-      }
-    }
-    if (changed) selectedIds = new Set(selectedIds);
-  });
+  // Keep selection stable even for completed items so users can re-download.
+  // (Previously, completed items were auto-unselected which broke header/select-all UX.)
 
   // Utility to send app logs to Dashboard via Tauri event bus
   async function appLog(level: LogLevel, message: string) {
@@ -503,7 +518,11 @@
   const cancelableAll = $derived($downloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
   const startableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'available' && !!d.downloadLink).length);
   const cancelableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
-  const startableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'available' && !!d.downloadLink).length);
+  const startableSelected = $derived(
+    filteredDownloads.filter(
+      (d) => selectedIds.has(d.id) && (d.status === 'available' || d.status === 'completed') && !!d.downloadLink
+    ).length
+  );
   const cancelableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')).length);
   const failedFiltered = $derived(filteredDownloads.filter((d) => d.status === 'failed').length);
   const deletableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id)).length);
@@ -599,7 +618,11 @@
   function startSelected() {
     let queued = 0;
     for (const d of filteredDownloads) {
-      if (selectedIds.has(d.id) && d.status === 'available' && d.downloadLink) {
+      if (
+        selectedIds.has(d.id) &&
+        (d.status === 'available' || d.status === 'completed') &&
+        d.downloadLink
+      ) {
         startDownload(d.id);
         queued += 1;
       }
@@ -608,7 +631,7 @@
       toast.success(`Queued ${queued} selected download${queued === 1 ? '' : 's'}`);
       void appLog('INFO', `Queued ${queued} selected download(s)`);
     } else {
-      toast.info('Select an available download first');
+      toast.info('Select an available or completed download first');
     }
   }
   function cancelSelected() {
@@ -898,6 +921,29 @@
     </CardContent>
   </Card>
 
+  
+
+  <Dialog bind:open={showInstallInfo}>
+    <DialogContent class="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Silent install (beta)</DialogTitle>
+      </DialogHeader>
+      <DialogDescription>
+        <ul class="list-disc pl-5 space-y-1">
+          <li>Tries to install supported installers (.msi, .exe) silently using common flags.</li>
+          <li>SmartScreen and UAC prompts may still appear if required by Windows.</li>
+          <li>Not all vendors support silent mode; if enabled, you can allow fallback to open the installer normally.</li>
+          <li>Elevation (UAC) may be needed for machine-wide installs.</li>
+        </ul>
+      </DialogDescription>
+      <DialogFooter>
+        <DialogClose>
+          <Button type="button" variant="default">Got it</Button>
+        </DialogClose>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
   <Dialog bind:open={addOpen}>
     <DialogContent>
       <DialogHeader>
@@ -943,36 +989,30 @@
     <CardHeader class="gap-4 pb-2">
       <div class="flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-3">
-            <div class="flex min-w-[220px] flex-1 items-center gap-2">
-              <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} />
-              <Button
-                type="button"
-                variant="outline"
-                onclick={() => (filtersOpen = true)}
-              >
-                <SlidersHorizontal class="size-4" />
-                <span class="ml-2 hidden sm:inline">Filters</span>
-              </Button>
-              <Button type="button" variant="secondary" onclick={() => (addOpen = true)}>
+            <div class="flex min-w-[260px] flex-1">
+              <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} aria-label="Search downloads" />
+            </div>
+            <div class="flex items-center gap-2">
+              <Button type="button" size="sm" variant="outline" aria-label="Add download" onclick={() => (addOpen = true)}>
                 <span class="hidden sm:inline">Add</span>
                 <span class="sm:hidden">+</span>
               </Button>
-              {#snippet ActionsTrigger({ props }: ButtonSnippetContext)}
-                {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
-                {@const { class: propsClass, ...restWithoutClass } = rawProps}
-                {@const restProps = restWithoutClass as Record<string, unknown>}
-                <Button
-                  {...restProps}
-                  type="button"
-                  variant="secondary"
-                  class={propsClass}
-                >
-                  <ListChecks class="size-4" />
-                  <span class="ml-2 hidden sm:inline">Actions</span>
-                </Button>
-              {/snippet}
+              <Button type="button" size="sm" variant="outline" aria-label="Open filters" onclick={() => (filtersOpen = true)}>
+                <SlidersHorizontal class="size-4" />
+                <span class="ml-2 hidden sm:inline">Filters</span>
+              </Button>
+              <Button type="button" size="sm" variant="outline" aria-label="Bulk actions" onclick={() => (actionsOpen = true)}>
+                <ListChecks class="size-4" />
+                <span class="ml-2 hidden sm:inline">Actions</span>
+              </Button>
+              
+              <Button type="button" size="sm" variant="outline" aria-label="Open options" onclick={() => (optionsOpen = true)}>Options</Button>
+              <Button type="button" variant="ghost" size="icon" onclick={() => (showHelp = true)} aria-label="Keyboard shortcuts">
+                <Keyboard class="size-4" />
+                <span class="sr-only">Keyboard shortcuts</span>
+              </Button>
+            </div>
             <Sheet bind:open={actionsOpen}>
-              <SheetTrigger child={ActionsTrigger} />
               <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
                 <SheetHeader class="space-y-1 p-0">
                   <SheetTitle>Bulk actions</SheetTitle>
@@ -984,13 +1024,13 @@
                   <div class="space-y-2">
                     <p class="text-xs uppercase tracking-wide text-muted-foreground">All downloads</p>
                     <div class="grid gap-2">
-                      <Button type="button" class="justify-between" onclick={() => { startAll(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" onclick={() => { startAll(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
-                        {#if startableAll > 0}<Badge variant="secondary">{startableAll}</Badge>{/if}
+                        {#if startableAll > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableAll}</span>{/if}
                       </Button>
-                      <Button type="button" variant="destructive" class="justify-between" onclick={() => { cancelAllActive(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableAll === 0} onclick={() => { cancelAllActive(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel active</span>
-                        {#if cancelableAll > 0}<Badge variant="secondary">{cancelableAll}</Badge>{/if}
+                        {#if cancelableAll > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableAll}</span>{/if}
                       </Button>
                     </div>
                   </div>
@@ -1000,19 +1040,19 @@
                     <div class="grid gap-2">
                       <Button type="button" variant="outline" class="justify-between" disabled={startableFiltered === 0} onclick={() => { startAllFiltered(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><Play class="size-4" /> Start filtered</span>
-                        {#if startableFiltered > 0}<Badge variant="secondary">{startableFiltered}</Badge>{/if}
+                        {#if startableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableFiltered}</span>{/if}
                       </Button>
-                      <Button type="button" variant="destructive" class="justify-between" disabled={cancelableFiltered === 0} onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableFiltered === 0} onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel filtered</span>
-                        {#if cancelableFiltered > 0}<Badge variant="secondary">{cancelableFiltered}</Badge>{/if}
+                        {#if cancelableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableFiltered}</span>{/if}
                       </Button>
-                      <Button type="button" variant="destructive" class="justify-between" disabled={deletableFiltered === 0} onclick={() => { deleteFiltered(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={deletableFiltered === 0} onclick={() => { deleteFiltered(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete filtered</span>
-                        {#if deletableFiltered > 0}<Badge variant="secondary">{deletableFiltered}</Badge>{/if}
+                        {#if deletableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{deletableFiltered}</span>{/if}
                       </Button>
                       <Button type="button" variant="outline" class="justify-between" disabled={failedFiltered === 0} onclick={() => { retryFailedFiltered(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry failed (filtered)</span>
-                        {#if failedFiltered > 0}<Badge variant="secondary">{failedFiltered}</Badge>{/if}
+                        {#if failedFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{failedFiltered}</span>{/if}
                       </Button>
                       <Button type="button" variant="ghost" class="justify-between" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><FileDown class="size-4" /> Export CSV</span>
@@ -1023,17 +1063,17 @@
                   <div class="space-y-2">
                     <p class="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
                     <div class="grid gap-2">
-                      <Button type="button" class="justify-between" disabled={startableSelected === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={startableSelected === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><Play class="size-4" /> Start selected</span>
-                        {#if startableSelected > 0}<Badge variant="secondary">{startableSelected}</Badge>{/if}
+                        {#if startableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableSelected}</span>{/if}
                       </Button>
-                      <Button type="button" variant="destructive" class="justify-between" disabled={cancelableSelected === 0} onclick={() => { cancelSelected(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableSelected === 0} onclick={() => { cancelSelected(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel selected</span>
-                        {#if cancelableSelected > 0}<Badge variant="secondary">{cancelableSelected}</Badge>{/if}
+                        {#if cancelableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableSelected}</span>{/if}
                       </Button>
-                      <Button type="button" variant="destructive" class="justify-between" disabled={deletableSelected === 0} onclick={() => { deleteSelected(); actionsOpen = false; }}>
+                      <Button type="button" variant="outline" class="justify-between" disabled={deletableSelected === 0} onclick={() => { deleteSelected(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete selected</span>
-                        {#if deletableSelected > 0}<Badge variant="secondary">{deletableSelected}</Badge>{/if}
+                        {#if deletableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{deletableSelected}</span>{/if}
                       </Button>
                       <div class="grid grid-cols-2 gap-2">
                         <Button type="button" variant="outline" class="justify-center" disabled={selectedCompletedCount === 0} onclick={() => { openSelectedCompleted(); actionsOpen = false; }}>
@@ -1063,39 +1103,58 @@
                     <div class="grid gap-2">
                       <Button type="button" variant="outline" class="justify-between" disabled={failedCount === 0} onclick={() => { retryAllFailed(); actionsOpen = false; }}>
                         <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry all failed</span>
-                        {#if failedCount > 0}<Badge variant="secondary">{failedCount}</Badge>{/if}
+                        {#if failedCount > 0}<span class="text-xs text-muted-foreground tabular-nums">{failedCount}</span>{/if}
                       </Button>
                     </div>
                   </div>
                 </div>
               </SheetContent>
             </Sheet>
+            
+            <Sheet bind:open={optionsOpen}>
+              <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+                <SheetHeader class="space-y-1 p-0">
+                  <SheetTitle>Beta options</SheetTitle>
+                  <SheetDescription>Defaults for post‑download behavior.</SheetDescription>
+                </SheetHeader>
+                <div class="mt-3 space-y-6 text-sm">
+                  <div class="space-y-2">
+                    <p class="font-medium">Install after download</p>
+                    <label class="inline-flex items-center gap-2">
+                      <input type="checkbox" bind:checked={autoInstall} class="h-4 w-4" />
+                      Auto install after download
+                    </label>
+                  </div>
+                  <div class="space-y-2">
+                    <p class="font-medium">Install mode</p>
+                    <Select type="single" bind:value={installMode}>
+                      <SelectTrigger class="w-44" placeholder="Silent" />
+                      <SelectContent>
+                        <SelectItem value="silent">Silent</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div class="space-y-2">
+                    <p class="font-medium">Advanced</p>
+                    <label class="inline-flex items-center gap-2">
+                      <input type="checkbox" bind:checked={elevateInstall} class="h-4 w-4" />
+                      Run elevated (may prompt UAC)
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                      <input type="checkbox" bind:checked={fallbackOpen} class="h-4 w-4" />
+                      If silent fails, open installer normally
+                    </label>
+                  </div>
+                  <div>
+                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showInstallInfo = true; }}>What is this?</Button>
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
 
-          <div class="flex items-center gap-2">
-            <Select type="single" bind:value={sortBy}>
-              <SelectTrigger class="w-36" placeholder="Sort by" />
-              <SelectContent>
-                {#each sortOptions as option}
-                  <SelectItem value={option.value}>{option.label}</SelectItem>
-                {/each}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onclick={() => (sortDirection = sortDirection === 'asc' ? 'desc' : 'asc')}
-              aria-label={`Sort direction: ${sortDirection === 'asc' ? 'ascending' : 'descending'}`}
-            >
-              <ArrowUpDown class="size-4" />
-            </Button>
-            <Button type="button" variant="ghost" size="icon" onclick={() => (showHelp = true)}>
-              <Keyboard class="size-4" />
-              <span class="sr-only">Keyboard shortcuts</span>
-            </Button>
-          </div>
-        </div>
+          <!-- removed explicit sort controls; sorting available in table headers -->
 
         <div
           class="flex flex-wrap items-center gap-2"
@@ -1126,7 +1185,7 @@
       <div class="mt-4">
         <FilterPanel
           bind:searchTerm
-          filters={filters}
+          bind:filters
           showFilters={true}
           onClearFilters={() => {
             searchTerm = '';
