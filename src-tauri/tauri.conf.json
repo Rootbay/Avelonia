@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.rootbay.avelonia",
   "build": {
-    "beforeDevCommand": "bun dev",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm -s dev",
+    "devUrl": "http://localhost:5174",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../build"
   },

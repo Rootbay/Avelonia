@@ -343,34 +343,34 @@
         <CardDescription>Live application and system events.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ScrollArea class="h-64 rounded-md border">
+        <ScrollArea class="h-64 rounded-md bg-muted/10">
           <Table class="w-full">
-            <TableHeader class="sticky top-0 bg-card">
-              <TableRow>
-                <TableHead class="w-[80px]">Time</TableHead>
-                <TableHead class="w-[80px]">Level</TableHead>
-                <TableHead>Message</TableHead>
+            <TableHeader class="sticky top-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70">
+              <TableRow class="!border-0">
+                <TableHead class="w-[80px] text-xs text-muted-foreground">Time</TableHead>
+                <TableHead class="w-[80px] text-xs text-muted-foreground">Level</TableHead>
+                <TableHead class="text-xs text-muted-foreground">Message</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {#if systemLogs.length === 0}
-                <TableRow>
+                <TableRow class="!border-0">
                   <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
                     No activity recorded yet.
                   </TableCell>
                 </TableRow>
               {:else}
                 {#each systemLogs as log, i (i)}
-                  <TableRow>
-                    <TableCell class="font-mono text-xs text-muted-foreground"
+                  <TableRow class="!border-0 hover:bg-muted/30">
+                    <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
                       >{log.timestamp}</TableCell
                     >
-                    <TableCell>
-                      <Badge variant="outline" class={'text-xs ' + levelBadgeClass(log.level)}
+                    <TableCell class="pr-4">
+                      <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}
                         >{log.level}</Badge
                       >
                     </TableCell>
-                    <TableCell class="text-sm">{log.message}</TableCell>
+                    <TableCell class="text-sm leading-snug">{log.message}</TableCell>
                   </TableRow>
                 {/each}
               {/if}

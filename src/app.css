@@ -119,3 +119,49 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Prevent unintentional horizontal scrollbars */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Normalize lucide icon stroke thickness across the app */
+:where(svg.lucide) {
+  color: inherit;
+  stroke-width: 1;
+}
+
+/* Ensure sidebar nav anchors and their icons match the active text color */
+[data-slot="sidebar-menu-button"] {
+  color: inherit;
+}
+[data-slot="sidebar-menu-button"] svg {
+  color: currentColor;
+  stroke: currentColor;
+  stroke-opacity: 1;
+  opacity: 1;
+  transition: stroke-width 0.15s ease;
+}
+
+/* Default nav icon stroke (matches global 1) */
+[data-slot="sidebar-menu-button"] > svg {
+  stroke-width: 1;
+}
+
+/* Increase stroke slightly when selected/active */
+[data-slot="sidebar-menu-button"][data-active="true"] svg,
+[data-slot="sidebar-menu-button"][aria-current="page"] svg {
+  stroke-width: 1.5;
+}
+
+/* Collapsed sidebar: ensure active color applies uniformly to icon and text */
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][data-active="true"],
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][aria-current="page"] {
+  color: var(--sidebar-accent-foreground);
+}
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][data-active="true"] svg,
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][aria-current="page"] svg {
+  color: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}

@@ -13,43 +13,48 @@ export default defineConfig(({ command, mode }) => {
     sveltekit(),
     viteCompression({ algorithm: 'brotliCompress', ext: '.br' }),
     viteCompression({ algorithm: 'gzip', ext: '.gz' }),
-    VitePWA({
-      disable: false,
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.png'],
-      workbox: {
-        runtimeCaching: [
-          {
-            urlPattern: ({ request }) => request.destination === 'document',
-            handler: 'NetworkFirst',
-            options: { cacheName: 'html-cache', expiration: { maxEntries: 10 } },
-          },
-          {
-            urlPattern: ({ request }) =>
-              ['style', 'script', 'worker'].includes(request.destination),
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'assets-cache', expiration: { maxEntries: 60 } },
-          },
-          {
-            urlPattern: ({ request }) => request.destination === 'image',
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'images-cache', expiration: { maxEntries: 60 } },
-          },
-        ],
-      },
-      manifest: {
-        name: 'Avelonia',
-        short_name: 'Avelonia',
-        theme_color: '#0f1115',
-        background_color: '#0f1115',
-        display: 'standalone',
-        icons: [
-          { src: 'favicon.png', sizes: '192x192', type: 'image/png' },
-          { src: 'favicon.png', sizes: '512x512', type: 'image/png' },
-        ],
-      },
-    }),
   ];
+
+  if (command === 'build') {
+    plugins.push(
+      VitePWA({
+        disable: false,
+        registerType: 'autoUpdate',
+        includeAssets: ['favicon.png'],
+        workbox: {
+          runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.destination === 'document',
+              handler: 'NetworkFirst',
+              options: { cacheName: 'html-cache', expiration: { maxEntries: 10 } },
+            },
+            {
+              urlPattern: ({ request }) =>
+                ['style', 'script', 'worker'].includes(request.destination),
+              handler: 'StaleWhileRevalidate',
+              options: { cacheName: 'assets-cache', expiration: { maxEntries: 60 } },
+            },
+            {
+              urlPattern: ({ request }) => request.destination === 'image',
+              handler: 'StaleWhileRevalidate',
+              options: { cacheName: 'images-cache', expiration: { maxEntries: 60 } },
+            },
+          ],
+        },
+        manifest: {
+          name: 'Avelonia',
+          short_name: 'Avelonia',
+          theme_color: '#0f1115',
+          background_color: '#0f1115',
+          display: 'standalone',
+          icons: [
+            { src: 'favicon.png', sizes: '192x192', type: 'image/png' },
+            { src: 'favicon.png', sizes: '512x512', type: 'image/png' },
+          ],
+        },
+      })
+    );
+  }
 
   return {
     plugins,
@@ -58,14 +63,14 @@ export default defineConfig(({ command, mode }) => {
       exclude: ['@tauri-apps/api', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-dialog'],
     },
     server: {
-      port: 1420,
+      port: 5174,
       strictPort: true,
       host: host || false,
       hmr: host
         ? {
             protocol: 'ws',
             host,
-            port: 1421,
+            port: 5175,
           }
         : undefined,
       watch: {

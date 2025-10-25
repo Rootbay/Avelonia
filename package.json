@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:free-ports": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='SilentlyContinue'; function Kill-Port($port){ try{ $own = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach($pid in $own){ try{ Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue } catch {} try{ & cmd.exe /c taskkill /PID $pid /F /T 1>$null 2>$null } catch {} } } catch {} ; try{ $lines = & cmd.exe /c netstat -ano ^| findstr :$port; foreach($l in $lines){ $t=($l -replace '\\s+',' ').Trim().Split(' '); $pid=$t[$t.Length-1]; if($pid -match '^[0-9]+$'){ try{ Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue } catch {} try{ & cmd.exe /c taskkill /PID $pid /F /T 1>$null 2>$null } catch {} } } } catch {} }; Kill-Port 5174; Kill-Port 5175; Kill-Port 1430; Kill-Port 1420; Start-Sleep -Milliseconds 400; exit 0\"",
+    "dev:prepare": "pnpm -s dev:free-ports && pnpm -s dev",
     "build": "vite build && node scripts/precompress.mjs",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -13,7 +15,10 @@
     "lint": "eslint . --ext .ts,.svelte",
     "lint:fix": "eslint . --ext .ts,.svelte --fix",
     "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "diag": "node scripts/diagnose.mjs",
+    "fix:js": "eslint . --ext .ts,.svelte --fix && prettier . --write",
+    "fix:rs": "cd src-tauri && cargo fmt && cargo fix --allow-dirty --allow-staged"
   },
   "license": "MIT",
   "dependencies": {
