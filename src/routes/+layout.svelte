@@ -191,8 +191,8 @@
                   <a
                     {...restProps}
                     href={item.href}
-                    data-sveltekit-preload-data={['/optimize','/downloader'].includes(item.href) ? 'off' : undefined}
-                    data-sveltekit-preload-code={['/optimize','/downloader'].includes(item.href) ? 'off' : undefined}
+                    data-sveltekit-preload-data={['/optimize','/downloader','/cleaner'].includes(item.href) ? 'off' : undefined}
+                    data-sveltekit-preload-code={['/optimize','/downloader','/cleaner'].includes(item.href) ? 'off' : undefined}
                     aria-current={$page.url.pathname === item.href ? 'page' : undefined}
                     class={cn(
                       'flex items-center transition-colors',
