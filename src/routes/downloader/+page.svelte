@@ -1325,13 +1325,14 @@
   </Card>
 
   <Sheet bind:open={filtersOpen}>
-    <SheetContent side="right" class="sm:max-w-md">
-      <SheetHeader>
+    <SheetContent side="right" class="sm:max-w-md p-4 sm:p-6">
+      <SheetHeader class="p-0 gap-0">
         <SheetTitle>Filters</SheetTitle>
         <SheetDescription>Refine downloads list</SheetDescription>
       </SheetHeader>
       <div class="mt-4">
         <FilterPanel
+          bare={true}
           bind:searchTerm
           bind:filters
           showFilters={true}

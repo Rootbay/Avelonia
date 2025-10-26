@@ -21,7 +21,12 @@
 <ScrollAreaPrimitive.Root
   bind:ref
   data-slot="scroll-area"
-  class={cn('relative', className)}
+  class={cn(
+    'relative',
+    (orientation === 'vertical' || orientation === 'both') ? 'pr-2.5' : '',
+    (orientation === 'horizontal' || orientation === 'both') ? 'pb-2.5' : '',
+    className
+  )}
   {...restProps}
 >
   <ScrollAreaPrimitive.Viewport

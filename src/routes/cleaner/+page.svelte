@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
@@ -526,7 +526,7 @@
                 <Label for="select-all-temp" class="text-sm">Select All</Label>
               </div>
 
-              <ScrollArea class="h-48 mt-2 rounded border">
+              <ScrollArea orientation="both" class="h-48 mt-2 rounded border">
                 <ul class="text-sm">
                   {#each tempFiles as file (file.path)}
                     <li class="flex items-center gap-2 px-2 py-1">
@@ -615,7 +615,7 @@
                 <Label for="select-all-large" class="text-sm">Select All</Label>
               </div>
 
-              <ScrollArea class="h-48 mt-2 rounded border">
+              <ScrollArea orientation="both" class="h-48 mt-2 rounded border">
                 <ul class="text-sm">
                   {#each largeFiles as file (file.path)}
                     <li class="flex items-center justify-between gap-2 px-2 py-1">
@@ -676,7 +676,7 @@
                 <Label for="select-all-dup" class="text-sm">Select All</Label>
               </div>
 
-              <ScrollArea class="h-48 mt-2 rounded border">
+              <ScrollArea orientation="both" class="h-48 mt-2 rounded border">
                 <ul class="text-sm">
                   {#each duplicateFiles as file (file.path)}
                     <li class="flex items-center gap-2 px-2 py-1">
@@ -730,7 +730,7 @@
                 <Label for="select-all-empty" class="text-sm">Select All</Label>
               </div>
 
-              <ScrollArea class="h-48 mt-2 rounded border">
+              <ScrollArea orientation="both" class="h-48 mt-2 rounded border">
                 <ul class="text-sm">
                   {#each emptyFolders as folder (folder.path)}
                     <li class="flex items-center gap-2 px-2 py-1">
@@ -784,7 +784,7 @@
                 <Label for="select-all-shortcuts" class="text-sm">Select All</Label>
               </div>
 
-              <ScrollArea class="h-48 mt-2 rounded border">
+              <ScrollArea orientation="both" class="h-48 mt-2 rounded border">
                 <ul class="text-sm">
                   {#each brokenShortcuts as shortcut (shortcut.path)}
                     <li class="flex items-center gap-2 px-2 py-1">
@@ -858,7 +858,7 @@
           </div>
 
           {#if eraserSelectedFiles.length > 0}
-            <ScrollArea class="h-48 rounded border">
+            <ScrollArea orientation="both" class="h-48 rounded border">
               <ul class="text-sm p-2">
                 {#each eraserSelectedFiles as f (f)}
                   <li class="truncate py-1">{f}</li>
@@ -954,3 +954,4 @@
     </div>
   {/if}
 </div>
+

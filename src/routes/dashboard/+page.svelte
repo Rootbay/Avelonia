@@ -1,5 +1,6 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { onMount } from 'svelte';
   // events not used here to reduce log duplication
   import { downloads } from '$lib/downloads';
   import { systemLogs as logStore, pushLog, type LogLevel } from '$lib/logStore';
@@ -13,7 +14,7 @@
     CardContent,
   } from '$lib/components/ui/card';
   import { Separator } from '$lib/components/ui/separator';
-  import { ScrollArea } from '$lib/components/ui/scroll-area';
+  import { Skeleton } from '$lib/components/ui/skeleton';
   import { Badge } from '$lib/components/ui/badge';
   import { Progress } from '$lib/components/ui/progress';
   import {
@@ -184,6 +185,102 @@
         progressValue: getProgressValue(dl.progress),
       }))
   );
+
+  // System Logs: lazy loading + skeletons (similar to Downloader/Optimize)
+  const LOG_ROW_PX = 32;
+  const LOG_MAX_DOM = 600;
+  const LOG_VIEW_CHUNK = 100;
+  const LOG_SCROLL_THRESHOLD_PX = 120;
+  let logsStart = $state(0);
+  let logsVisible = $state(100);
+  let logsSkeleton = $state(new Set<number>());
+  let initialLogLoading = $state(true);
+  let logsScrollEl: HTMLDivElement | null = null;
+  let logsSentinel: HTMLDivElement | null = null;
+  let _logsTick = false;
+
+  const windowedLogs = $derived(
+    $logStore.slice(logsStart, Math.min(logsVisible, $logStore.length))
+  );
+  const logsAfter = $derived(
+    Math.max(0, $logStore.length - (logsStart + windowedLogs.length))
+  );
+
+  function markLogSkeletonRange(startIndex: number, endIndex: number) {
+    try {
+      for (let i = startIndex; i < endIndex; i++) logsSkeleton.add(i);
+      logsSkeleton = new Set(logsSkeleton);
+      setTimeout(() => {
+        for (let i = startIndex; i < endIndex; i++) logsSkeleton.delete(i);
+        logsSkeleton = new Set(logsSkeleton);
+      }, 350);
+    } catch {}
+  }
+
+  function onLogsScroll(event: Event) {
+    if (_logsTick) return;
+    _logsTick = true;
+    const el = (event.currentTarget as HTMLElement) || logsScrollEl;
+    if (!el) {
+      _logsTick = false;
+      return;
+    }
+    requestAnimationFrame(() => {
+      const nearBottomPx = el.scrollTop + el.clientHeight >= el.scrollHeight - LOG_SCROLL_THRESHOLD_PX;
+      const ratio = (el.scrollTop + el.clientHeight) / Math.max(1, el.scrollHeight);
+      const nearBottomRatio = ratio >= 0.8;
+      if (nearBottomPx || nearBottomRatio) {
+        const prev = logsVisible;
+        const next = Math.min(prev + LOG_VIEW_CHUNK, $logStore.length);
+        if (next > prev) {
+          markLogSkeletonRange(prev, next);
+          logsVisible = next;
+          if (logsVisible - logsStart > LOG_MAX_DOM) {
+            logsStart = Math.max(0, logsVisible - LOG_MAX_DOM);
+          }
+        }
+      }
+      _logsTick = false;
+    });
+  }
+
+  onMount(() => {
+    // Disable initial skeleton shortly after mount
+    const t = setTimeout(() => (initialLogLoading = false), 350);
+    return () => clearTimeout(t);
+  });
+
+  onMount(() => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const prev = logsVisible;
+          const next = Math.min(prev + LOG_VIEW_CHUNK, $logStore.length);
+          if (next > prev) {
+            markLogSkeletonRange(prev, next);
+            logsVisible = next;
+            if (logsVisible - logsStart > LOG_MAX_DOM) {
+              logsStart = Math.max(0, logsVisible - LOG_MAX_DOM);
+            }
+          }
+        }
+      },
+      { root: logsScrollEl, rootMargin: '0px', threshold: 0.1 }
+    );
+    if (logsSentinel) io.observe(logsSentinel);
+    return () => io.disconnect();
+  });
+
+  // Keep DOM window bounded when logs change
+  $effect(() => {
+    const total = $logStore.length;
+    if (logsVisible > total) logsVisible = total;
+    if (logsVisible - logsStart > LOG_MAX_DOM) {
+      logsStart = Math.max(0, logsVisible - LOG_MAX_DOM);
+    }
+    if (logsStart > logsVisible) logsStart = 0;
+  });
 </script>
 
 <div class="space-y-6 text-foreground">
@@ -299,7 +396,7 @@
         <CardDescription>Live application and system events.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ScrollArea class="h-64 rounded-md bg-muted/10">
+        <div class="h-64 rounded-md bg-muted/10 overflow-auto" bind:this={logsScrollEl} onscroll={onLogsScroll}>
           <Table class="w-full">
             <TableHeader class="sticky top-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70">
               <TableRow class="!border-0">
@@ -309,37 +406,49 @@
               </TableRow>
             </TableHeader>
             <TableBody>
-              {#if $logStore.length === 0}
+              {#if initialLogLoading}
+                {#each Array.from({ length: 6 }) as _, ii}
+                  <TableRow class="!border-0">
+                    <TableCell class="w-[80px]"><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell>
+                    <TableCell class="w-[80px]"><Skeleton class="h-3 w-12" aria-hidden="true" /></TableCell>
+                    <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
+                  </TableRow>
+                {/each}
+              {:else if $logStore.length === 0}
                 <TableRow class="!border-0">
                   <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
                     No activity recorded yet.
                   </TableCell>
                 </TableRow>
               {:else}
-                {#each $logStore as log, i (i)}
-                  <TableRow class="!border-0 hover:bg-muted/30">
-                    <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
-                      >{log.timestamp}</TableCell
-                    >
-                    <TableCell class="pr-4">
-                      <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}
-                        >{log.level}</Badge
-                      >
-                    </TableCell>
-                    <TableCell class="text-sm leading-snug">{log.message}</TableCell>
-                  </TableRow>
+                {#if logsStart > 0}
+                  <tr aria-hidden="true">
+                    <td colspan="3" style={`height:${logsStart * LOG_ROW_PX}px; padding:0; border:0;`}></td>
+                  </tr>
+                {/if}
+                {#each windowedLogs as log, i (logsStart + i)}
+                  {#if logsSkeleton.has(logsStart + i)}
+                    <TableRow class="!border-0" aria-hidden="true">
+                      <TableCell class="w-[80px]"><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell>
+                      <TableCell class="w-[80px]"><Skeleton class="h-3 w-12" aria-hidden="true" /></TableCell>
+                      <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
+                    </TableRow>
+                  {:else}
+                    <TableRow class="!border-0 hover:bg-muted/30">
+                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">{log.timestamp}</TableCell>
+                      <TableCell class="pr-4">
+                        <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}>{log.level}</Badge>
+                      </TableCell>
+                      <TableCell class="text-sm leading-snug">{log.message}</TableCell>
+                    </TableRow>
+                  {/if}
                 {/each}
               {/if}
             </TableBody>
           </Table>
-        </ScrollArea>
+          <div bind:this={logsSentinel} class="h-0" aria-hidden="true"></div>
+        </div>
       </CardContent>
     </Card>
   </div>
 </div>
-
-
-
-
-
-

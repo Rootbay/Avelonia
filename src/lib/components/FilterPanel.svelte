@@ -19,11 +19,13 @@
     showFilters = $bindable(),
     filters = $bindable(),
     onClearFilters,
+    bare = false,
   }: {
     searchTerm: string;
     showFilters: boolean;
     filters: Filters;
     onClearFilters?: () => void;
+    bare?: boolean;
   } = $props();
 
   function clearFilters() {
@@ -39,12 +41,12 @@
 </script>
 
 {#if showFilters}
-  <Card class="border border-border/60 bg-card/80 shadow-sm">
-    <CardHeader class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+  <Card class={bare ? 'bg-transparent border-0 shadow-none rounded-none p-0' : 'border border-border/60 bg-card/80 shadow-sm'}>
+    <CardHeader class={(bare ? 'px-0 pt-0' : '') + ' flex flex-col gap-2 md:flex-row md:items-center md:justify-between'}>
       <CardTitle class="text-base font-semibold">Refine downloads</CardTitle>
       <Button variant="ghost" size="sm" onclick={clearFilters}>Clear all</Button>
     </CardHeader>
-    <CardContent class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <CardContent class={(bare ? 'p-0' : '') + ' grid gap-4 md:grid-cols-2 xl:grid-cols-3'}>
       <div class="space-y-2">
         <Label for="filter-file-type">File type</Label>
         <Input id="filter-file-type" bind:value={filters.fileType} placeholder="e.g. exe" />
