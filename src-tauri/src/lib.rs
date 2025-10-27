@@ -1,4 +1,4 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+﻿// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use futures_util::StreamExt;
 use reqwest::{Client, Url};
 use serde::{Serialize};
@@ -14,6 +14,7 @@ mod system_info;
 mod eraser;
 mod optimize;
 mod installer;
+mod vt;
 
 #[derive(Default)]
 struct DownloadState(Arc<DashMap<u64, bool>>);
@@ -285,6 +286,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .manage(DownloadState::default())
+        .manage(vt::VtState::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -350,8 +352,17 @@ pub fn run() {
             installer::launch_installer,
             installer::list_uninstall_entries,
             installer::verify_install,
-            installer::is_installed
+            installer::is_installed,
+            // VT reputation & config
+            vt::vt_get_status,
+            vt::vt_set_api_key,
+            vt::vt_load_cache,
+            vt::vt_scan_startup,
+            vt::vt_scan_registry,
+            vt::vt_scan_all,
+            vt::vt_scan_needed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

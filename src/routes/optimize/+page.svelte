@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -74,6 +74,10 @@
   let startupStart = $state(0);
   let registryStart = $state(0);
   let tasksStart = $state(0);
+  // Scroll container refs for robust handlers (use $state to satisfy Svelte runes reactivity checks)
+  let startupScrollEl = $state<HTMLElement | null>(null);
+  let registryScrollEl = $state<HTMLElement | null>(null);
+  let tasksScrollEl = $state<HTMLElement | null>(null);
 
   // Debounced queries to reduce recomputation while typing
   let startupQueryDeb = $state('');
@@ -88,6 +92,7 @@
     try {
       const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
       startupItems = Array.isArray(items) ? items : [];
+      try { console.debug('[VT] startup items loaded:', startupItems.length, startupItems.map((i)=>i.name).slice(0,10)); } catch {}
       selectedStartup = new Set();
       startupLoaded = true;
       startupVisible = Math.min(startupItems.length, 50);
@@ -121,8 +126,10 @@
   function onStartupScroll(event: Event) {
     if (_startupScrollTick) return;
     _startupScrollTick = true;
+    const target = event.currentTarget as HTMLElement | null;
     requestAnimationFrame(() => {
-      const el = event.currentTarget as HTMLElement;
+      const el = (target as HTMLElement | null) || startupScrollEl;
+      if (!el) { _startupScrollTick = false; return; }
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
         startupVisible = Math.min(startupVisible + 100, filteredStartupItems.length);
         if (startupVisible - startupStart > STARTUP_MAX_DOM) {
@@ -492,8 +499,8 @@
       const present = new Set(list.map(regId));
       for (const t of targets) {
         const id = regId(t);
-        if (present.has(id)) diag.removedRegistry.stillPresent.push(`${t.hive} \\ ${t.key} → ${t.name}`);
-        else diag.removedRegistry.ok.push(`${t.hive} \\ ${t.key} → ${t.name}`);
+        if (present.has(id)) diag.removedRegistry.stillPresent.push(`${t.hive} \\ ${t.key} Ã¢â€ â€™ ${t.name}`);
+        else diag.removedRegistry.ok.push(`${t.hive} \\ ${t.key} Ã¢â€ â€™ ${t.name}`);
       }
     } catch (e) {
       console.warn('diagnostics: list_registry_run failed', e);
@@ -626,6 +633,7 @@
     try {
       const res = (await invoke('list_registry_run')) as StartupRegItem[];
       startupRegItems = Array.isArray(res) ? res : [];
+      try { console.debug('[VT] registry items loaded:', startupRegItems.length, startupRegItems.map((i)=>i.name).slice(0,10)); } catch {}
       selectedReg = new Set();
       registryLoaded = true;
       registryVisible = Math.min(startupRegItems.length, 50);
@@ -657,7 +665,7 @@
           if (Array.isArray(r.lastImages) && r.lastImages.length) {
             hint.push(`Process image(s): ${r.lastImages.join(', ')}`);
           }
-          r.suspiciousReason = `Entry reappeared after Full cleanup and reboot. ${hint.join(' · ')}`.trim();
+          r.suspiciousReason = `Entry reappeared after Full cleanup and reboot. ${hint.join(' Ã‚Â· ')}`.trim();
           registryHistory[id] = r;
           updates += 1;
         }
@@ -680,8 +688,10 @@
   function onRegistryScroll(event: Event) {
     if (_registryScrollTick) return;
     _registryScrollTick = true;
+    const target = event.currentTarget as HTMLElement | null;
     requestAnimationFrame(() => {
-      const el = event.currentTarget as HTMLElement;
+      const el = (target as HTMLElement | null) || registryScrollEl;
+      if (!el) { _registryScrollTick = false; return; }
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
         registryVisible = Math.min(registryVisible + 100, filteredRegistryItems.length);
         if (registryVisible - registryStart > REGISTRY_MAX_DOM) {
@@ -847,7 +857,7 @@
       let parts: string[] = [`${taskAction} affected ${success} task(s)`];
       if (elevated > 0) parts.push(`used elevation for ${elevated}`);
       if (stopped > 0) parts.push(`stopped ${stopped} before delete`);
-      message = parts.join(' · ');
+      message = parts.join(' Ã‚Â· ');
       const fails = (res as any)?.failures as Array<any> | undefined;
       if (Array.isArray(fails) && fails.length) {
         try {
@@ -896,7 +906,9 @@
     finally { loadingTasks = false; }
   }
   function onTasksScroll(event: Event) {
-    const el = event.currentTarget as HTMLElement;
+    const target = event.currentTarget as HTMLElement | null;
+    const el = (target as HTMLElement | null) || tasksScrollEl;
+    if (!el) return;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
       tasksVisible = Math.min(tasksVisible + 200, sortedTasks.length);
       queueEnrichVisibleTasks(8);
@@ -975,7 +987,7 @@
       const status = (t.status || '').toLowerCase();
       if (!includeDisabled && status.includes('disable')) return false;
       const next = (t.next_run_time || '').trim().toLowerCase();
-      const hasNext = next !== '' && next !== 'n/a' && next !== '—' && next !== '-';
+      const hasNext = next !== '' && next !== 'n/a' && next !== 'Ã¢â‚¬â€' && next !== '-';
       if (!includeNoNext && !hasNext) return false;
       if (q === '') return true;
       return (t.name || '').toLowerCase().includes(q) || (t.task_to_run || '').toLowerCase().includes(q) || status.includes(q) || (t.author || '').toLowerCase().includes(q);
@@ -991,7 +1003,7 @@
     } else if (taskSort === 'next') {
       const toTime = (s?: string) => {
         const v = (s || '').trim();
-        if (!v || v.toLowerCase() === 'n/a' || v === '—' || v === '-') return Number.POSITIVE_INFINITY;
+        if (!v || v.toLowerCase() === 'n/a' || v === 'Ã¢â‚¬â€' || v === '-') return Number.POSITIVE_INFINITY;
         const t = Date.parse(v);
         return isNaN(t) ? Number.POSITIVE_INFINITY : t;
       };
@@ -1146,7 +1158,7 @@
             </ul>
           </div>
         {:else if filteredStartupItems.length > 0}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" onscroll={onStartupScroll}>
+          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={startupScrollEl} data-vt-scope="startup-list" onscroll={onStartupScroll}>
             <ul class="divide-y divide-border/60">
               {#if startupStart > 0}
                 <li style={`height:${startupStart * STARTUP_ROW_PX}px`} aria-hidden="true"></li>
@@ -1258,11 +1270,11 @@
             {#each pendingRegistry.slice(0, 10) as it}
               <li class="truncate">
                 {it.name}
-                <span class="text-muted-foreground"> — {it.hive}\{it.key}</span>
+                <span class="text-muted-foreground"> Ã¢â‚¬â€ {it.hive}\{it.key}</span>
               </li>
             {/each}
             {#if pendingRegistry.length > 10}
-              <li class="text-muted-foreground">… and {pendingRegistry.length - 10} more</li>
+              <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingRegistry.length - 10} more</li>
             {/if}
           </ul>
         {/if}
@@ -1317,7 +1329,7 @@
       </DialogHeader>
 
       {#if postDiagLoading}
-        <div class="text-sm text-muted-foreground">Running system check�</div>
+        <div class="text-sm text-muted-foreground">Running system checkâ€¦</div>
       {:else if postDiag}
         <div class="space-y-4 text-sm">
           <div>
@@ -1331,7 +1343,7 @@
                   <li class="break-all">{r}</li>
                 {/each}
                 {#if postDiag.removedRegistry.stillPresent.length > 6}
-                  <li>�and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
+                  <li>â€¦and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
                 {/if}
               </ul>
             {/if}
@@ -1358,7 +1370,7 @@
                   <li class="break-all">{t}</li>
                 {/each}
                 {#if postDiag.taskMatches.remaining.length > 8}
-                  <li>�and {postDiag.taskMatches.remaining.length - 8} more</li>
+                  <li>â€¦and {postDiag.taskMatches.remaining.length - 8} more</li>
                 {/if}
               </ul>
             {/if}
@@ -1474,7 +1486,7 @@
             </ul>
           </div>
         {:else if filteredRegistryItems.length > 0}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" onscroll={onRegistryScroll}>
+          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={registryScrollEl} data-vt-scope="registry-list" onscroll={onRegistryScroll}>
             <ul class="divide-y divide-border/60">
               {#if registryStart > 0}
                 <li style={`height:${registryStart * REGISTRY_ROW_PX}px`} aria-hidden="true"></li>
@@ -1554,7 +1566,7 @@
                 <li class="truncate">{normalizeWinPath(p)}</li>
               {/each}
               {#if pendingStartup.length > 10}
-                <li class="text-muted-foreground">… and {pendingStartup.length - 10} more</li>
+                <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingStartup.length - 10} more</li>
               {/if}
             </ul>
           {/if}
@@ -1672,7 +1684,7 @@
             </ul>
           </div>
         {:else}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" onscroll={onTasksScroll}>
+          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={tasksScrollEl} onscroll={onTasksScroll}>
             <ul class="divide-y divide-border/60">
               {#if tasksStart > 0}
                 <li style={`height:${tasksStart * TASKS_ROW_PX}px`} aria-hidden="true"></li>
@@ -1692,8 +1704,8 @@
                       </div>
                     </div>
                     <div class="shrink-0 text-right">
-                      <div class="text-xs text-muted-foreground">{t.status || '—'}</div>
-                      <div class="text-[10px] text-muted-foreground">Next: {t.next_run_time || '—'}</div>
+                      <div class="text-xs text-muted-foreground">{t.status || 'Ã¢â‚¬â€'}</div>
+                      <div class="text-[10px] text-muted-foreground">Next: {t.next_run_time || 'Ã¢â‚¬â€'}</div>
                     </div>
                   </div>
                 </li>
@@ -1739,7 +1751,7 @@
             <li class="truncate">{p.base} <span class="text-muted-foreground">{p.folder}</span>{#if isLikelyProtected(nm)} <span class="ml-1 text-[10px] text-destructive">protected</span>{/if}</li>
           {/each}
           {#if pendingNames.length > 8}
-            <li class="text-muted-foreground">… and {pendingNames.length - 8} more</li>
+            <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingNames.length - 8} more</li>
           {/if}
         </ul>
       {/if}
@@ -1753,9 +1765,6 @@
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
-
-
-
 
 
 

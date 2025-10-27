@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import { initDownloadListener, disposeDownloadListener } from '$lib/downloadManager';
@@ -31,7 +31,11 @@
   import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
   import { Toaster } from '$lib/components/ui/sonner';
+  import { toast } from '$lib/components/ui/sonner';
+  import { pushLog } from '$lib/logStore';
   import { cn } from '$lib/utils.js';
   import {
     Dialog,
@@ -47,23 +51,130 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { startDownloadIntegrityWatch, stopDownloadIntegrityWatch } from '$lib/downloadIntegrity';
   import { startInstallPresenceWatch, stopInstallPresenceWatch } from '$lib/downloadManager';
+  import { listen } from '@tauri-apps/api/event';
+  import { invoke } from '@tauri-apps/api/core';
+  import { openUrl as openExternal } from '@tauri-apps/plugin-opener';
+  import { vtVerdicts, setVerdictFromReport, setVerdict, reasonFor } from '$lib/vtVerdicts';
+  import { MoreHorizontal } from '@lucide/svelte';
+  import { vtScan, beginScan, endScan, pushReport as pushScanReport } from '$lib/scanStatus';
 
   import '../app.css';
+  const scan = $derived($vtScan);
 
   onMount(() => {
     initDownloadListener();
     startDownloadIntegrityWatch(20000);
     startInstallPresenceWatch(20000);
+    // Initialize VirusTotal cache and optionally run a background scan if an API key is set.
+    (async () => {
+      try {
+        const loaded = (await invoke('vt_load_cache')) as number;
+        pushLog('INFO', `VT cache loaded: ${Number(loaded) || 0} entries`, 'Optimize');
+        const status = (await invoke('vt_get_status')) as { key_set?: boolean };
+        if (status && (status as any).key_set) {
+          // Stagger a bit to avoid contention with first paint
+          pushLog('INFO', 'VT key detected. Scheduling background scan (limit 50).', 'Optimize');
+          setTimeout(() => {
+            (async () => {
+              try {
+                const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
+                const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
+                const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
+                if ((ns + nr) === 0) {
+                  pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize');
+                  return;
+                }
+                pushLog('INFO', `VT scan starting (background): needed startup ${ns}, registry ${nr}.`, 'Optimize');
+                beginScan('background', { startup: ns, registry: nr });
+                toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+                const res = (await invoke('vt_scan_all', { limit: 50, force: false })) as [number, number];
+                endScan({ startup: res?.[0] ?? 0, registry: res?.[1] ?? 0 });
+                toast.success('VirusTotal scan completed', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+                pushLog('SUCCESS', `VT scan finished (background): startup ${res?.[0] ?? 0}, registry ${res?.[1] ?? 0}.`, 'Optimize');
+              } catch (e) {
+                pushLog('ERROR', `VT scan failed (background): ${String(e)}`, 'Optimize');
+              }
+            })();
+          }, 1500);
+        } else {
+          pushLog('INFO', 'VT key not set. Reputation scans disabled.', 'Optimize');
+        }
+      } catch {}
+    })();
+
+    // Security alert listener (VirusTotal findings)
+    const un = listen('vt-alert', (ev) => {
+      const p = ev.payload as { subject?: string; verdict?: string; positives?: number; permalink?: string; source?: string };
+      const name = p?.subject || 'Startup item';
+      const src = (p?.source || 'startup').toString();
+      const sev = (p?.verdict || '').toString().toUpperCase();
+      const msg = `${sev === 'MALICIOUS' ? 'Malicious' : 'Suspicious'} ${src === 'registry' ? 'registry item' : 'startup item'}: ${name}`;
+      toast.error(msg, {
+        action: p?.permalink
+          ? {
+              label: 'Open VirusTotal',
+              onClick: async () => {
+                try { await openExternal(p.permalink as string); } catch {}
+              },
+            }
+          : undefined,
+      });
+      // Also log in system logs with severity mapping
+      const lvl = sev === 'MALICIOUS' ? 'ERROR' : 'WARN';
+      const pos = typeof p?.positives === 'number' ? ` (${p?.positives} vendors)` : '';
+      pushLog(lvl as any, `VT detection: ${name}${pos}. ${p?.permalink ? 'Report available.' : ''}`, 'Optimize');
+      // Update verdict store so UI can show a tag
+      setVerdict(name, 'Sus');
+      // Apply badges immediately for visible Optimize lists
+      setTimeout(() => { try { applyVtBadges(); } catch {} }, 0);
+    });
+    // No need to await; unlisten automatically on destroy
+    unlistenFns.push(() => { un.then((f)=>f()).catch(()=>{}); });
+
+    // General report listener (for Safe / Clean verdicts too)
+    const unReport = listen('vt-report', (ev) => {
+      const rep = ev.payload as any;
+      try {
+        setVerdictFromReport(rep); try { pushScanReport(rep); } catch {}
+        const v = String(rep?.verdict || '').toUpperCase();
+        const pos = typeof rep?.positives === 'number' ? ` (${rep?.positives} vendors)` : '';
+        pushLog('INFO', `VT report: ${rep?.subject ?? 'item'} -> ${v}${pos}`, 'Optimize');
+        setTimeout(() => { try { applyVtBadges(); } catch {} }, 0);
+      } catch {}
+    });
+    unlistenFns.push(() => { unReport.then((f)=>f()).catch(()=>{}); });
   });
   onDestroy(() => {
     disposeDownloadListener();
     stopDownloadIntegrityWatch();
     stopInstallPresenceWatch();
+    // cleanup VT listener(s)
+    for (const fn of unlistenFns) { try { fn(); } catch {} }
   });
 
   let { children }: { children?: Snippet } = $props();
   let open = $state(true);
   const collapsed = $derived(!open);
+  let scanDialogOpen = $state(false);
+  // Expanded item details in VT dialog
+  let vtExpanded = $state(new Set<string>());
+  function vtKeyOf(it: { subject: string; source?: string }) { return `${(it?.source||'startup')}|${(it?.subject||'').toString().trim().toLowerCase()}`; }
+  function toggleVtDetails(it: { subject: string; source?: string }) {
+    const k = vtKeyOf(it);
+    if (vtExpanded.has(k)) vtExpanded.delete(k); else vtExpanded.add(k);
+    vtExpanded = new Set(vtExpanded);
+  }
+  const vtTotals = $derived(() => {
+    const items = (scan?.items ?? []) as Array<{ verdict?: string }>;
+    let clean = 0, detected = 0, notScanned = 0;
+    for (const it of items) {
+      const v = String(it?.verdict || '').toLowerCase();
+      if (v === 'clean') clean += 1;
+      else if (v === 'malicious' || v === 'suspicious') detected += 1;
+      else notScanned += 1;
+    }
+    return { clean, detected, notScanned, total: items.length };
+  });
 
   type MenuIcon = Component<IconProps>;
 
@@ -119,6 +230,171 @@
       ])
     ) as Record<string, PagePreference>
   );
+
+  // Local unlisten registry for VT alerts
+  const unlistenFns: Array<() => void> = [];
+
+  // VirusTotal settings (backend stores persisted key securely in app config folder)
+  let vtKey = $state('');
+  let vtPersist = $state(true);
+  let vtKeySet = $state(false);
+  let vtBusy = $state(false);
+  $effect(() => {
+    // Whenever dialog opens, refresh VT status
+    if (settingsOpen) {
+      (async () => { try { const st = (await invoke('vt_get_status')) as { key_set?: boolean }; vtKeySet = !!(st as any)?.key_set; } catch {} })();
+    }
+  });
+  async function saveVtKey() {
+    try {
+      vtBusy = true;
+      await invoke('vt_set_api_key', { key: vtKey || null, persist: vtPersist });
+      const st = (await invoke('vt_get_status')) as { key_set?: boolean };
+      vtKeySet = !!(st as any)?.key_set;
+      toast.success('VirusTotal key saved');
+      pushLog('SUCCESS', `VT key saved${vtPersist ? ' (persisted)' : ''}.`, 'Optimize');
+      vtKey = '';
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to save VirusTotal key');
+      pushLog('ERROR', `Saving VT key failed: ${String(e)}`, 'Optimize');
+    } finally { vtBusy = false; }
+  }
+
+  // Best-effort DOM badge injection for Optimize page without touching its markup.
+  function applyVtBadges() {
+    try {
+      if ($page.url.pathname !== '/optimize') return;
+      const verdicts = $vtVerdicts;
+      if (!(verdicts instanceof Map)) return;
+      const container = document.querySelector('main');
+      if (!container) return;
+      // Restrict to Startup/Registry lists only to avoid Scheduled Tasks and other sections
+      const nameEls = container.querySelectorAll('[data-vt-scope="startup-list"] li .font-semibold, [data-vt-scope="registry-list"] li .font-semibold');
+      try {
+        // Debug: print current verdict keys snapshot and matches count
+        const k = Array.from((($vtVerdicts as unknown as Map<string, string>) || new Map()).keys());
+        console.debug('[VT] applyVtBadges: verdict keys(n)=', k.length, 'sample=', k.slice(0, 10));
+        console.debug('[VT] applyVtBadges: candidates=', nameEls.length);
+      } catch {}
+      nameEls.forEach((el) => {
+        if (!(el instanceof HTMLElement)) return;
+        // Extract the first non-empty text node as the item name.
+        // This avoids including any existing badges or nested elements.
+        let name = '';
+        for (const n of Array.from(el.childNodes)) {
+          if (n.nodeType === Node.TEXT_NODE) {
+            const t = (n.nodeValue || '').trim();
+            if (t) { name = t; break; }
+          }
+        }
+        if (!name) {
+          // Fallback: join all text nodes only (ignore element children like badges)
+          name = Array.from(el.childNodes)
+            .filter((n) => n.nodeType === Node.TEXT_NODE)
+            .map((n) => String((n as Text).nodeValue || '').trim())
+            .filter(Boolean)
+            .join(' ');
+        }
+        if (!name) return;
+        const key = name.trim().toLowerCase();
+        const lab = verdicts.get(key) as string | undefined;
+        const parent = el;
+        const existing = parent.querySelector(':scope > .vt-badge') as HTMLElement | null;
+        if (!lab) { if (existing) existing.remove(); return; }
+        const reason = lab === 'Not' ? (reasonFor(name) || 'Not Scanned') : '';
+        const cls = lab === 'Safe'
+          ? 'text-[10px] border-green-500/30 text-green-600 bg-green-500/10'
+          : lab === 'Sus'
+            ? 'text-[10px] border-red-500/30 text-red-600 bg-red-500/10'
+            : 'text-[10px] border-yellow-500/30 text-yellow-700 bg-yellow-500/10';
+        if (!existing) {
+          const span = document.createElement('span');
+          span.className = `vt-badge inline-flex items-center rounded border px-1 ml-2 ${cls}`;
+          span.textContent = lab as any;
+          if (reason) span.title = reason;
+          parent.appendChild(span);
+        } else {
+          existing.className = `vt-badge inline-flex items-center rounded border px-1 ml-2 ${cls}`;
+          (existing as HTMLElement).textContent = lab as any;
+          if (reason) existing.title = reason; else existing.removeAttribute('title');
+        }
+      });
+    } catch {}
+  }
+
+  let vtApplyTimer: number | null = null;
+  let vtObserver: MutationObserver | null = null;
+  $effect(() => {
+    // Re-apply when verdicts or route changes
+    // Accessing $vtVerdicts makes this reactive
+    const _m = $vtVerdicts;
+    const p = $page.url.pathname;
+    if (p === '/optimize') {
+      if (vtApplyTimer !== null) clearTimeout(vtApplyTimer as unknown as number);
+      vtApplyTimer = setTimeout(() => applyVtBadges(), 120) as unknown as number;
+      // Setup a MutationObserver once to keep badges in sync as lists render
+      try {
+        const container = document.querySelector('main');
+        if (container && !vtObserver) {
+          vtObserver = new MutationObserver(() => {
+            // Debounce heavy DOM scans
+            if (vtApplyTimer !== null) clearTimeout(vtApplyTimer as unknown as number);
+            vtApplyTimer = setTimeout(() => applyVtBadges(), 100) as unknown as number;
+          });
+          vtObserver.observe(container, { childList: true, subtree: true });
+        }
+      } catch {}
+    } else {
+      if (vtObserver) { vtObserver.disconnect(); vtObserver = null; }
+    }
+  });
+
+  // When user navigates to Optimize, kick off a VT scan of Startup Apps and Registry (if key present)
+  $effect(() => {
+    const p = $page.url.pathname;
+    if (p !== '/optimize') return;
+    (async () => {
+      try {
+        const st = (await invoke('vt_get_status')) as { key_set?: boolean };
+        if ((st as any)?.key_set) {
+          // Avoid overlapping with manual/background runs
+          if (!vtBusy) {
+            vtBusy = true;
+            const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
+            const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
+            const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
+            if ((ns + nr) === 0) { pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize'); vtBusy = false; return; }
+            pushLog('INFO', `VT scan starting (optimize): needed startup ${ns}, registry ${nr}.`, 'Optimize');
+            beginScan('optimize', { startup: ns, registry: nr });
+            toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+            const res = (await invoke('vt_scan_all', { limit: 50, force: false })) as [number, number];
+            endScan({ startup: res?.[0], registry: res?.[1] });
+            toast.success('VirusTotal scan completed', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+            pushLog('SUCCESS', 'VT scan finished (optimize).', 'Optimize');
+          }
+        }
+      } catch {}
+      finally { vtBusy = false; }
+    })();
+  });
+
+  async function runVtScanNow() {
+    try {
+      vtBusy = true;
+      pushLog('INFO', 'VT scan starting (manual).', 'Optimize');
+      beginScan('manual');
+      toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+      const res = (await invoke('vt_scan_all', { limit: 50, force: true })) as [number, number];
+      endScan({ startup: res?.[0], registry: res?.[1] });
+      toast.success('VirusTotal scan completed', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
+      pushLog('SUCCESS', `VT scan finished (manual): startup ${res?.[0] ?? 0}, registry ${res?.[1] ?? 0}.`, 'Optimize');
+    } catch (e) {
+      console.error(e);
+      toast.error('VirusTotal scan failed (set API key?)');
+      pushLog('ERROR', `VT scan failed (manual): ${String(e)}`, 'Optimize');
+    } finally { vtBusy = false; }
+  }
 </script>
 
 <ModeWatcher />
@@ -376,6 +652,33 @@
                 {/each}
               </Tabs>
 
+              <!-- VirusTotal Security (optional) -->
+              <div class="mt-4 space-y-3 rounded-md border border-border/60 bg-muted/10 p-3">
+                <p class="text-sm font-medium">Startup Reputation (VirusTotal)</p>
+                <p class="text-xs text-muted-foreground">
+                  Checks Startup Apps and Registry (Run) executables against VirusTotal with a 2-day cache. Enter an API key to enable automatic background scans.
+                </p>
+                <div class="flex flex-wrap items-end gap-3">
+                  <div class="min-w-[16rem] flex-1">
+                    <Label class="text-xs text-muted-foreground">VirusTotal API key</Label>
+                    <Input placeholder="Paste your VT API key" bind:value={vtKey} type="password" />
+                  </div>
+                  <label class="flex items-center gap-2 text-sm">
+                    <Checkbox bind:checked={vtPersist} />
+                    <span>Persist on this device</span>
+                  </label>
+                  <Button onclick={saveVtKey} disabled={vtBusy}>{vtKeySet ? 'Update key' : 'Save key'}</Button>
+                  <Button variant="secondary" onclick={() => { void runVtScanNow(); }} disabled={!vtKeySet || vtBusy}>
+                    Run scan now
+                  </Button>
+                </div>
+                {#if vtKeySet}
+                  <p class="text-xs text-emerald-600 dark:text-emerald-400">API key detected. Background scans run on launch.</p>
+                {:else}
+                  <p class="text-xs text-muted-foreground">No key detected. Scanning is disabled until a key is set.</p>
+                {/if}
+              </div>
+
               <DialogFooter>
                 <DialogClose>
                   <Button variant="ghost">Cancel</Button>
@@ -396,4 +699,120 @@
   </main>
 </SidebarProvider>
 
+{#snippet VtDetailsTrigger({ props })}
+  {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
+  {@const { class: propsClass, ...restWithoutClass } = rawProps}
+  {@const restProps = restWithoutClass as Record<string, unknown>}
+  <span role="none" onclick={(e: MouseEvent) => e.stopPropagation()}>
+    <Button {...restProps} type="button" variant="ghost" size="sm" aria-label="Details" class={propsClass}>
+      <MoreHorizontal class="size-4" />
+    </Button>
+  </span>
+{/snippet}
+
+<!-- VT Scan Details Dialog -->
+<Dialog bind:open={scanDialogOpen}>
+  <DialogContent class="sm:max-w-2xl">
+    <DialogHeader>
+      <DialogTitle>VirusTotal Scan</DialogTitle>
+      <DialogDescription>
+        {#if (scan.phase === 'running')}
+          Scanning startup and registry items...
+        {:else if (scan.phase === 'done')}
+          Scan finished.
+        {:else}
+          Idle. Trigger a scan from Settings.
+        {/if}
+      </DialogDescription>
+    </DialogHeader>
+    <div class="space-y-2 text-sm">
+      <p class="text-xs text-muted-foreground">
+        {#if (scan.phase === 'running')}
+          Source: {scan.source ?? 'N/A'}
+        {:else}
+          {#if scan.startedAt}Started {new Date(scan.startedAt).toLocaleTimeString()}{/if}
+          {#if scan.finishedAt} • Finished {new Date(scan.finishedAt).toLocaleTimeString()}{/if}
+          • Processed {(scan.items?.length ?? 0)} items
+          {#if (scan.expectedStartup ?? undefined) !== undefined || (scan.expectedRegistry ?? undefined) !== undefined}
+            • Expected {(scan.expectedStartup ?? '?')}/{(scan.expectedRegistry ?? '?')}
+          {/if}
+        {/if}
+      </p>
+      <div class="mb-1 flex flex-wrap gap-2">
+        <Badge variant="secondary">Detected {vtTotals.detected}</Badge>
+        <Badge class="border-green-500/30 text-green-700 bg-green-500/10">Clean {vtTotals.clean}</Badge>
+        <Badge class="border-yellow-500/30 text-yellow-700 bg-yellow-500/10">Not Scanned {vtTotals.notScanned}</Badge>
+      </div>
+      <div class="max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/10">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70">
+            <tr>
+              <th class="text-left px-2 py-1">Subject</th>
+              <th class="text-left px-2 py-1">From</th>
+              <th class="text-left px-2 py-1">Verdict</th>
+              <th class="text-left px-2 py-1">Not detected</th>
+              <th class="text-left px-2 py-1">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each scan.items as it}
+              <tr>
+                <td class="px-2 py-1 truncate max-w-[40ch]">{it.subject}</td>
+                <td class="px-2 py-1">{it.source}</td>
+                <td class="px-2 py-1">{it.verdict || '-'}{#if it.reason && (!it.verdict || it.verdict.toLowerCase() === 'unknown')} <span class="text-muted-foreground">({it.reason})</span>{/if}</td>
+                <td class="px-2 py-1">
+                  {#if typeof it.total_vendors === 'number'}
+                    {Math.max(0, (it.total_vendors || 0) - (it.positives || 0))}
+                  {:else if typeof it.harmless === 'number' || typeof it.undetected === 'number'}
+                    {(it.harmless || 0) + (it.undetected || 0)}
+                  {:else}
+                    -
+                  {/if}
+                </td>
+                <td class="px-2 py-1">
+                  {@render VtDetailsTrigger({ props: { onclick: () => toggleVtDetails(it) } })}
+                </td>
+              </tr>
+              {#if vtExpanded.has(vtKeyOf(it))}
+                <tr>
+                  <td class="px-2 py-2 text-xs text-muted-foreground" colspan="5">
+                    <div class="grid grid-cols-2 gap-2">
+                      <div>Malicious: {typeof it.malicious === 'number' ? it.malicious : '-'}</div>
+                      <div>Suspicious: {typeof it.suspicious === 'number' ? it.suspicious : '-'}</div>
+                      <div>Harmless: {typeof it.harmless === 'number' ? it.harmless : '-'}</div>
+                      <div>Undetected: {typeof it.undetected === 'number' ? it.undetected : '-'}</div>
+                    </div>
+                    {#if it.reason}
+                      <div class="mt-1">Reason: {it.reason}</div>
+                    {/if}
+                    {#if it.permalink}
+                      <div class="mt-2">
+                        <button type="button" class="px-0 text-xs text-white hover:text-emerald-600 underline-offset-4 hover:underline" onclick={() => { try { void openExternal(it.permalink as string); } catch {} }}>
+                          Open on VirusTotal
+                        </button>
+                      </div>
+                    {/if}
+                  </td>
+                </tr>
+              {/if}
+            {/each}
+            {#if (scan.items?.length ?? 0) === 0}
+              <tr><td colspan="5" class="px-2 py-3 text-center text-muted-foreground">No items yet.</td></tr>
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <DialogFooter>
+      <DialogClose>
+        <Button>Close</Button>
+      </DialogClose>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+
 <Toaster richColors closeButton duration={4000} position="bottom-right" />
+
+
+
+
