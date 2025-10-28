@@ -73,32 +73,32 @@
         const status = (await invoke('vt_get_status')) as { key_set?: boolean };
         if (status && (status as any).key_set) {
           // Stagger a bit to avoid contention with first paint
-          // log suppressed: VT key detected. Scheduling background scan (limit 50).\n
-          setTimeout(() => {
-            (async () => {
-              try {
-                const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
-                const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
-                const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
-                if ((ns + nr) === 0) { pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize'); return; }
-                pushLog('INFO', `VT scan starting (background): needed startup ${ns}, registry ${nr}.`, 'Optimize');
-                beginScan('background', { startup: ns, registry: nr });
-                toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
-                const res = (await invoke('vt_scan_all', { limit: 50, force: false })) as [number, number];
-                endScan({ startup: res?.[0] ?? 0, registry: res?.[1] ?? 0 });
-                toast.success('VirusTotal scan completed', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
-                pushLog('SUCCESS', `VT scan finished (background): startup ${res?.[0] ?? 0}, registry ${res?.[1] ?? 0}.`, 'Optimize');
-              } catch (e) {
-                pushLog('ERROR', `VT scan failed (background): ${String(e)}`, 'Optimize');
-              }
-            })();
-          }, 1500);
+          // log suppressed: VT key detected. Scheduling background scan (limit 50).
+          try { await invoke('vt_auto_maybe_scan'); } catch {}
+          const iv = setInterval(() => { void (async () => { try { await invoke('vt_auto_maybe_scan'); } catch {} })(); }, 60_000);
+          unlistenFns.push(() => { try { clearInterval(iv as unknown as number); } catch {} });
         } else {
           pushLog('INFO', 'VT key not set. Reputation scans disabled.', 'Optimize');
         }
       } catch {}
     })();
 
+        // Auto-scan notifications (deduplicated)
+    const unAutoStart = listen('vt-autoscan-start', (ev) => {
+      toast.message('VirusTotal scan started (auto)', {
+        action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } }
+      });
+      pushLog('INFO', 'VT scan starting (auto): ' + (((ev as any)?.payload as any)?.reason || 'auto'), 'Optimize');
+    });
+    unlistenFns.push(() => { unAutoStart.then((f)=>f()).catch(()=>{}); });
+    const unAutoDone = listen('vt-autoscan-done', (ev) => {
+      const p = ev.payload as any;
+      toast.success('VirusTotal scan completed (auto)', {
+        action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } }
+      });
+      pushLog('SUCCESS', 'VT scan finished (auto): startup ' + (Number((p as any)?.startup) || 0) + ', registry ' + (Number((p as any)?.registry) || 0) + '.', 'Optimize');
+    });
+    unlistenFns.push(() => { unAutoDone.then((f)=>f()).catch(()=>{}); });
     // Security alert listener (VirusTotal findings)
     const un = listen('vt-alert', (ev) => {
       const p = ev.payload as { subject?: string; verdict?: string; positives?: number; permalink?: string; source?: string };
@@ -127,7 +127,6 @@
     });
     // No need to await; unlisten automatically on destroy
     unlistenFns.push(() => { un.then((f)=>f()).catch(()=>{}); });
-
     // General report listener (for Safe / Clean verdicts too)
     const unReport = listen('vt-report', (ev) => {
       const rep = ev.payload as any;
@@ -250,7 +249,6 @@
       vtKeySet = !!(st as any)?.key_set;
       toast.success('VirusTotal key saved');
       pushLog('SUCCESS', `VT key saved${vtPersist ? ' (persisted)' : ''}.`, 'Optimize');
-      vtKey = '';
     } catch (e) {
       console.error(e);
       toast.error('Failed to save VirusTotal key');
@@ -818,10 +816,5 @@
 </Dialog>
 
 <Toaster richColors closeButton duration={4000} position="bottom-right" />
-
-
-
-
-
 
 

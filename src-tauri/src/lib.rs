@@ -360,9 +360,9 @@ pub fn run() {
             vt::vt_scan_startup,
             vt::vt_scan_registry,
             vt::vt_scan_all,
-            vt::vt_scan_needed
+            vt::vt_scan_needed,
+            vt::vt_auto_maybe_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

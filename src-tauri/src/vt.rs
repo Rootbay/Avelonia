@@ -98,6 +98,7 @@ fn get_config_dir() -> PathBuf {
 
 fn cache_file_path() -> PathBuf { get_config_dir().join("vt_cache.json") }
 fn key_file_path() -> PathBuf { get_config_dir().join("vt_key.json") }
+fn snapshot_file_path() -> PathBuf { get_config_dir().join("vt_snapshot.json") }
 
 fn load_cache_from_disk() -> HashMap<String, CacheEntry> {
     let path = cache_file_path();
@@ -296,6 +297,58 @@ pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, String> {
     Ok(VtStatus { key_set, cached_items: state.cache.len() })
 }
 
+// ---------------- Auto-scan snapshot policy ----------------
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct VtSnapshot {
+    last_scan: u64,
+    startup: Vec<String>,
+    registry: Vec<String>,
+}
+
+fn load_snapshot() -> VtSnapshot {
+    if let Ok(bytes) = fs::read(snapshot_file_path()) {
+        if let Ok(s) = serde_json::from_slice::<VtSnapshot>(&bytes) { return s; }
+    }
+    VtSnapshot::default()
+}
+
+fn save_snapshot(s: &VtSnapshot) {
+    let _ = fs::create_dir_all(get_config_dir());
+    if let Ok(js) = serde_json::to_vec_pretty(s) { let _ = fs::write(snapshot_file_path(), js); }
+}
+
+#[cfg(target_os = "windows")]
+fn collect_startup_keys_for_snapshot() -> Vec<String> {
+    let mut out = Vec::new();
+    let items = resolve_startup_shortcut_targets();
+    for (_d, p) in items { out.push(p); }
+    out
+}
+#[cfg(not(target_os = "windows"))]
+fn collect_startup_keys_for_snapshot() -> Vec<String> { Vec::new() }
+
+#[cfg(target_os = "windows")]
+fn collect_registry_keys_for_snapshot() -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(items) = crate::optimize::list_registry_run() {
+        for it in items { out.push(format!("{}|{}|{}", it.hive, it.key, it.name)); }
+    }
+    out
+}
+#[cfg(not(target_os = "windows"))]
+fn collect_registry_keys_for_snapshot() -> Vec<String> { Vec::new() }
+
+fn build_current_snapshot(prev_last_scan: u64) -> VtSnapshot {
+    VtSnapshot { last_scan: prev_last_scan, startup: collect_startup_keys_for_snapshot(), registry: collect_registry_keys_for_snapshot() }
+}
+
+fn has_new(prev: &VtSnapshot, cur: &VtSnapshot) -> bool {
+    use std::collections::HashSet;
+    let ps: HashSet<_> = prev.startup.iter().collect();
+    let pr: HashSet<_> = prev.registry.iter().collect();
+    cur.startup.iter().any(|k| !ps.contains(k)) || cur.registry.iter().any(|k| !pr.contains(k))
+}
+
 #[tauri::command]
 pub fn vt_set_api_key(state: State<'_, VtState>, key: Option<String>, persist: Option<bool>) -> Result<(), String> {
     let mut guard = state.api_key.lock().unwrap();
@@ -486,7 +539,30 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
     let items = resolve_startup_shortcut_targets();
     let mut out: Vec<VtItemReport> = Vec::new();
     for (display, path) in items.into_iter().take(limit) {
-        let pb = PathBuf::from(&path);
+        let mut pb = PathBuf::from(&path);
+        if let Some(ext) = pb.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()) {
+            if ext == "url" {
+                let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
+                out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+            }
+            if ext == "lnk" {
+                if let Ok(link) = lnk::ShellLink::open(&pb, lnk::encoding::WINDOWS_1252) {
+                    if let Some(info) = link.link_info() {
+                        let tgt = PathBuf::from(info.common_path_suffix().to_string());
+                        if tgt.exists() { pb = tgt; } else {
+                            let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
+                            out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                        }
+                    } else {
+                        let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
+                        out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                    }
+                } else {
+                    let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
+                    out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                }
+            }
+        }
         if !pb.exists() || !pb.is_file() {
             // File missing: report as Unknown with reason
             let rep = VtItemReport {
@@ -733,6 +809,11 @@ pub async fn vt_scan_all(app: AppHandle, state: State<'_, VtState>, limit: Optio
     // returns (startup_scanned, registry_scanned)
     let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force).await?.len();
     let n2 = vt_scan_registry(app, state, limit, force).await?.len();
+    // update snapshot baseline
+    let prev = load_snapshot();
+    let mut cur = build_current_snapshot(prev.last_scan);
+    cur.last_scan = epoch_now();
+    save_snapshot(&cur);
     Ok((n1, n2))
 }
 
@@ -747,3 +828,23 @@ pub async fn vt_scan_registry(_app: AppHandle, _state: State<'_, VtState>, _limi
 #[cfg(not(target_os = "windows"))]
 pub async fn vt_scan_all(_app: AppHandle, _state: State<'_, VtState>, _limit: Option<u32>) -> Result<(usize, usize), String> { Ok((0,0)) }
 
+#[tauri::command]
+pub async fn vt_auto_maybe_scan(app: AppHandle, state: State<'_, VtState>) -> Result<Option<String>, String> {
+    let prev = load_snapshot();
+    let mut cur = build_current_snapshot(prev.last_scan);
+    let key_present = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
+    let now = epoch_now();
+    let reason = if has_new(&prev, &cur) { Some("new-items") } else if prev.last_scan == 0 || now.saturating_sub(prev.last_scan) >= DEFAULT_TTL_SECS { Some("ttl") } else { None };
+    if let Some(r) = reason {
+        if !key_present { let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": r})); return Ok(None); }
+        let _ = app.emit("vt-autoscan-start", &serde_json::json!({"reason": r}));
+        let (n1, n2) = vt_scan_all(app.clone(), state, Some(50), Some(false)).await?;
+        cur.last_scan = epoch_now();
+        save_snapshot(&cur);
+        let _ = app.emit("vt-autoscan-done", &serde_json::json!({"reason": r, "startup": n1, "registry": n2}));
+        return Ok(Some(r.to_string()));
+    }
+    // No change and TTL not reached: emit skip for visibility
+    let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": "no-change"}));
+    Ok(None)
+}

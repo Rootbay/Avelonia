@@ -61,9 +61,7 @@ pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
                     }
                     // Only surface typical startup shortcuts (.lnk, .url)
                     let mut allowed = false;
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url") { allowed = true; }
-                    }
+                    if let Some(ext) = p.extension() { if ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url") || ext.eq_ignore_ascii_case("exe") { allowed = true; } }
                     if !allowed { continue; }
 
                     let mut name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
@@ -95,9 +93,7 @@ pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
                         if fname.eq_ignore_ascii_case("desktop.ini") { continue; }
                     }
                     let mut allowed = false;
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url") { allowed = true; }
-                    }
+                    if let Some(ext) = p.extension() { if ext.eq_ignore_ascii_case("lnk") || ext.eq_ignore_ascii_case("url") || ext.eq_ignore_ascii_case("exe") { allowed = true; } }
                     if !allowed { continue; }
 
                     let mut name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
@@ -1407,3 +1403,4 @@ pub fn restart_system() -> Result<(), String> {
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub fn restart_system() -> Result<(), String> { Err("Only available on Windows".into()) }
+
