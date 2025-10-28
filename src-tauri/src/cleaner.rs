@@ -17,6 +17,8 @@ use walkdir::WalkDir;
 use lnk::{ShellLink};
 use lnk::encoding::WINDOWS_1252;
 use rayon::prelude::*;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{SHEmptyRecycleBinA, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND};
@@ -344,6 +346,62 @@ pub fn find_large_files_min(min_size_bytes: u64, app_handle: tauri::AppHandle) -
         .collect();
 
     Ok(results)
+}
+
+/// Return the top-K largest files from common user folders.
+/// Defaults: k=1000, min_size_bytes=100 MB. Emits `scan_progress` messages periodically.
+#[tauri::command]
+pub fn find_large_files_top(k: Option<usize>, min_size_bytes: Option<u64>, app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
+    let k = k.unwrap_or(1000).clamp(100, 10_000);
+    let min_size = min_size_bytes.unwrap_or(100 * 1024 * 1024);
+
+    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
+    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
+    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
+    let documents_path = PathBuf::from(&user_profile).join("Documents");
+    let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
+
+    // Enumerate file paths with a hard cap to avoid excessive memory usage
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut scanned_count = 0usize;
+    let enum_cap: usize = 300_000; // safety cap on number of entries traversed
+    for scan_path in paths_to_scan {
+        if scan_path.exists() && scan_path.is_dir() {
+            for entry in walkdir::WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()) {
+                if files.len() >= enum_cap { break; }
+                if entry.file_type().is_file() {
+                    files.push(entry.path().to_path_buf());
+                }
+                scanned_count += 1;
+                if scanned_count % 1000 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} entries...", scanned_count));
+                }
+            }
+        }
+    }
+
+    // Get sizes in parallel and filter by threshold
+    let sized: Vec<(u64, String)> = files
+        .par_iter()
+        .filter_map(|p| fs::metadata(p).ok().map(|m| (m.len(), p.display().to_string())))
+        .filter(|(len, _)| *len >= min_size)
+        .collect();
+
+    // Keep a min-heap of size k for top-K selection
+    let mut heap: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::with_capacity(k + 1);
+    for (len, path) in sized.into_iter() {
+        if heap.len() < k {
+            heap.push(Reverse((len, path)));
+        } else if let Some(mut smallest) = heap.peek_mut() {
+            if len > (smallest.0).0 {
+                *smallest = Reverse((len, path));
+            }
+        }
+    }
+    // Drain heap into vec and sort descending by size
+    let mut out: Vec<(String, u64)> = heap.into_iter().map(|Reverse((len, path))| (path, len)).collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(out)
 }
 
 #[tauri::command]

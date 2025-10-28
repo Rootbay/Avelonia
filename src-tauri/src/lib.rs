@@ -303,6 +303,7 @@ pub fn run() {
             cleaner::move_to_trash,
             cleaner::empty_recycle_bin,
             cleaner::find_large_files,
+            cleaner::find_large_files_top,
             cleaner::find_duplicate_files,
             cleaner::find_duplicate_groups,
             cleaner::find_empty_folders,
