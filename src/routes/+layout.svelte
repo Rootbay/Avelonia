@@ -16,6 +16,7 @@
     Moon as MoonIcon,
     Settings as SettingsIcon,
   } from '@lucide/svelte';
+  // old settings icons removed
   import { ModeWatcher, toggleMode } from 'mode-watcher';
 
   import {
@@ -47,8 +48,9 @@
     DialogClose,
     DialogTrigger,
   } from '$lib/components/ui/dialog';
-  import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
   import { Checkbox } from '$lib/components/ui/checkbox';
+  import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+  import { settings, updateDownloaderSettings } from '$lib/settings';
   import { startDownloadIntegrityWatch, stopDownloadIntegrityWatch } from '$lib/downloadIntegrity';
   import { startInstallPresenceWatch, stopInstallPresenceWatch } from '$lib/downloadManager';
   import { listen } from '@tauri-apps/api/event';
@@ -202,30 +204,9 @@
     return $page.url.pathname === path;
   }
 
-  type PagePreference = {
-    showInSidebar: boolean;
-    enableNotifications: boolean;
-  };
-
-  const settingsTabItems = menuItems.map((item) => ({
-    value: item.href.slice(1) || 'root',
-    label: item.label,
-    description: `Adjust preferences for the ${item.label} page.`,
-  }));
+  // (old PagePreference type removed as part of the simplified Settings UI)
 
   let settingsOpen = $state(false);
-  let activeSettingsTab = $state(settingsTabItems[0]?.value ?? 'dashboard');
-  let pagePreferences = $state<Record<string, PagePreference>>(
-    Object.fromEntries(
-      settingsTabItems.map((tab) => [
-        tab.value,
-        {
-          showInSidebar: true,
-          enableNotifications: tab.value === 'downloader',
-        },
-      ])
-    ) as Record<string, PagePreference>
-  );
 
   // Local unlisten registry for VT alerts
   const unlistenFns: Array<() => void> = [];
@@ -235,6 +216,32 @@
   let vtPersist = $state(true);
   let vtKeySet = $state(false);
   let vtBusy = $state(false);
+
+  // Downloader settings (simple, user-friendly bindings)
+  let autoInstall = $state($settings.downloader.autoInstall);
+  let installMode = $state($settings.downloader.installMode);
+  let elevateInstall = $state($settings.downloader.elevate);
+  let fallbackOpen = $state($settings.downloader.fallbackOpen);
+  let verifyInstall = $state($settings.downloader.verifyInstall);
+
+  // Keep local toggles in sync with global store
+  $effect(() => {
+    autoInstall = $settings.downloader.autoInstall;
+    installMode = $settings.downloader.installMode;
+    elevateInstall = $settings.downloader.elevate;
+    fallbackOpen = $settings.downloader.fallbackOpen;
+    verifyInstall = $settings.downloader.verifyInstall;
+  });
+  // Write-through on change
+  $effect(() => {
+    updateDownloaderSettings({
+      autoInstall,
+      installMode,
+      elevate: elevateInstall,
+      fallbackOpen,
+      verifyInstall,
+    });
+  });
   $effect(() => {
     // Whenever dialog opens, refresh VT status
     if (settingsOpen) {
@@ -597,100 +604,98 @@
               {/if}
             </div>
 
-            <DialogContent class="sm:max-w-xl">
+                        <DialogContent class="sm:max-w-xl">
+              <div class="flex flex-col">
               <DialogHeader>
                 <DialogTitle>Settings</DialogTitle>
-                <DialogDescription>Adjust preferences for each page.</DialogDescription>
+                <DialogDescription>Configure Avelonia preferences.</DialogDescription>
               </DialogHeader>
 
-              <Tabs value={activeSettingsTab} onValueChange={(value) => (activeSettingsTab = value)} class="flex flex-col gap-4">
-                <TabsList class="flex flex-wrap gap-1">
-                  {#each settingsTabItems as tab}
-                    <TabsTrigger value={tab.value}>{tab.label}</TabsTrigger>
-                  {/each}
-                </TabsList>
+              <div class="space-y-6">
+                <!-- Downloads -->
+                <section class="space-y-3">
+                  <p class="text-sm font-medium">Downloads</p>
+                  <div class="grid gap-3">
+                    <label class="flex items-center gap-2 text-sm">
+                      <Checkbox bind:checked={autoInstall} aria-controls="auto-install-advanced" aria-expanded={autoInstall} />
+                      <span>Auto-install downloaded installers</span>
+                    </label>
 
-                {#each settingsTabItems as tab}
-                  <TabsContent value={tab.value} class="space-y-4">
-                    <p class="text-sm text-muted-foreground">{tab.description}</p>
-                    <div class="space-y-3">
-                      <div
-                        class="flex items-start gap-3 rounded-md border border-border/60 bg-muted/20 p-3"
-                      >
-                        <Checkbox
-                          id={`${tab.value}-sidebar`}
-                          bind:checked={pagePreferences[tab.value].showInSidebar}
-                        />
-                        <div class="space-y-1">
-                          <p class="text-sm font-medium">Show in sidebar</p>
-                          <p class="text-xs text-muted-foreground">
-                            Keep the {tab.label} page accessible from the navigation.
-                          </p>
+                    {#if autoInstall}
+                      <div id="auto-install-advanced" class="rounded-md border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3 ml-0 sm:ml-4">
+                        <div class="flex flex-col gap-2">
+                          <Label class="text-xs text-muted-foreground">Install mode</Label>
+                          <div class="max-w-[220px]">
+                            <Select type="single" bind:value={installMode}>
+                              <SelectTrigger placeholder="Select mode" />
+                              <SelectContent>
+                                <SelectItem value="silent">Silent</SelectItem>
+                                <SelectItem value="normal">Normal</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
+                        <label class="flex items-center gap-2 text-sm">
+                          <Checkbox bind:checked={elevateInstall} />
+                          <span>Run installers elevated (UAC)</span>
+                        </label>
+                        <label class="flex items-center gap-2 text-sm">
+                          <Checkbox bind:checked={fallbackOpen} />
+                          <span>Open normally if silent install fails</span>
+                        </label>
                       </div>
-                      <div
-                        class="flex items-start gap-3 rounded-md border border-border/60 bg-muted/20 p-3"
-                      >
-                        <Checkbox
-                          id={`${tab.value}-notifications`}
-                          bind:checked={pagePreferences[tab.value].enableNotifications}
-                        />
-                        <div class="space-y-1">
-                          <p class="text-sm font-medium">Enable notifications</p>
-                          <p class="text-xs text-muted-foreground">
-                            Receive reminders for {tab.label.toLowerCase()} updates.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </TabsContent>
-                {/each}
-              </Tabs>
+                    {/if}
 
-              <!-- VirusTotal Security (optional) -->
-              <div class="mt-4 space-y-3 rounded-md border border-border/60 bg-muted/10 p-3">
-                <p class="text-sm font-medium">Startup Reputation (VirusTotal)</p>
-                <p class="text-xs text-muted-foreground">
-                  Checks Startup Apps and Registry (Run) executables against VirusTotal with a 2-day cache. Enter an API key to enable automatic background scans.
-                </p>
-                <div class="flex flex-wrap items-end gap-3">
-                  <div class="min-w-[16rem] flex-1">
-                    <Label class="text-xs text-muted-foreground">VirusTotal API key</Label>
-                    <Input placeholder="Paste your VT API key" bind:value={vtKey} type="password" />
+                    <label class="flex items-center gap-2 text-sm">
+                      <Checkbox bind:checked={verifyInstall} />
+                      <span>Verify installation in Uninstall registry</span>
+                    </label>
                   </div>
-                  <label class="flex items-center gap-2 text-sm">
-                    <Checkbox bind:checked={vtPersist} />
-                    <span>Persist on this device</span>
-                  </label>
-                  <Button onclick={saveVtKey} disabled={vtBusy}>{vtKeySet ? 'Update key' : 'Save key'}</Button>
-                  <Button variant="secondary" onclick={() => { void runVtScanNow(); }} disabled={!vtKeySet || vtBusy}>
-                    Run scan now
-                  </Button>
-                </div>
-                {#if vtKeySet}
-                  <p class="text-xs text-emerald-600 dark:text-emerald-400">API key detected. Background scans run on launch.</p>
-                {:else}
-                  <p class="text-xs text-muted-foreground">No key detected. Scanning is disabled until a key is set.</p>
-                {/if}
+                </section>
+
+                <!-- Security / VirusTotal -->
+                <section class="space-y-3">
+                  <p class="text-sm font-medium">Security / VirusTotal</p>
+                  <div class="space-y-2">
+                    <Label class="text-xs text-muted-foreground">API key</Label>
+                    <Input type="password" placeholder="Paste your VT API key" bind:value={vtKey} />
+                    <label class="flex items-center gap-2 text-sm">
+                      <Checkbox bind:checked={vtPersist} />
+                      <span>Save key on this device</span>
+                    </label>
+                    <div class="flex gap-2">
+                      <Button onclick={saveVtKey} disabled={vtBusy}>Save key</Button>
+                      <Button variant="secondary" onclick={() => { void runVtScanNow(); }} disabled={!vtKeySet || vtBusy}>Run scan now</Button>
+                    </div>
+                    {#if !vtKeySet}
+                      <p class="text-xs text-muted-foreground">Set an API key to enable reputation scans.</p>
+                    {/if}
+                  </div>
+                </section>
+
+                <!-- Privacy & Data -->
+                <section class="space-y-3">
+                  <p class="text-sm font-medium">Privacy & Data</p>
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <p class="text-sm">System logs</p>
+                      <p class="text-xs text-muted-foreground">Clear all logs stored locally.</p>
+                    </div>
+                    <Button variant="secondary" onclick={() => { try { clearLogs(); toast.success('Logs cleared'); } catch {} }}>Clear logs</Button>
+                  </div>
+                </section>
               </div>
 
-              <!-- System Logs -->
-              <div class="mt-4 space-y-3 rounded-md border border-border/60 bg-muted/10 p-3">
-                <p class="text-sm font-medium">System Logs</p>
-                <p class="text-xs text-muted-foreground">Clear all application logs stored on this device.</p>
-                <div>
-                  <Button variant="secondary" onclick={() => { try { clearLogs(); toast.success('Logs cleared'); } catch {} }}>Clear logs</Button>
-                </div>
-              </div>
 
-              <DialogFooter>
+              <DialogFooter class="mt-6">
                 <DialogClose>
-                  <Button variant="ghost">Cancel</Button>
+                  <Button variant="ghost">Close</Button>
                 </DialogClose>
                 <DialogClose>
                   <Button>Done</Button>
                 </DialogClose>
               </DialogFooter>
+              </div>
             </DialogContent>
           </Dialog>
         </SidebarGroupContent>
@@ -816,5 +821,4 @@
 </Dialog>
 
 <Toaster richColors closeButton duration={4000} position="bottom-right" />
-
 
