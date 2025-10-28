@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import { initDownloadListener, disposeDownloadListener } from '$lib/downloadManager';
@@ -35,7 +35,7 @@
   import { Label } from '$lib/components/ui/label';
   import { Toaster } from '$lib/components/ui/sonner';
   import { toast } from '$lib/components/ui/sonner';
-  import { pushLog } from '$lib/logStore';
+  import { pushLog, clearLogs } from '$lib/logStore';
   import { cn } from '$lib/utils.js';
   import {
     Dialog,
@@ -69,21 +69,18 @@
     (async () => {
       try {
         const loaded = (await invoke('vt_load_cache')) as number;
-        pushLog('INFO', `VT cache loaded: ${Number(loaded) || 0} entries`, 'Optimize');
+        // log suppressed: VT cache loaded
         const status = (await invoke('vt_get_status')) as { key_set?: boolean };
         if (status && (status as any).key_set) {
           // Stagger a bit to avoid contention with first paint
-          pushLog('INFO', 'VT key detected. Scheduling background scan (limit 50).', 'Optimize');
+          // log suppressed: VT key detected. Scheduling background scan (limit 50).\n
           setTimeout(() => {
             (async () => {
               try {
                 const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
                 const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
                 const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
-                if ((ns + nr) === 0) {
-                  pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize');
-                  return;
-                }
+                if ((ns + nr) === 0) { pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize'); return; }
                 pushLog('INFO', `VT scan starting (background): needed startup ${ns}, registry ${nr}.`, 'Optimize');
                 beginScan('background', { startup: ns, registry: nr });
                 toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
@@ -364,7 +361,7 @@
             const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
             const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
             const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
-            if ((ns + nr) === 0) { pushLog('INFO', 'VT scan skipped (up to date).', 'Optimize'); vtBusy = false; return; }
+            if ((ns + nr) === 0) { vtBusy = false; return; }
             pushLog('INFO', `VT scan starting (optimize): needed startup ${ns}, registry ${nr}.`, 'Optimize');
             beginScan('optimize', { startup: ns, registry: nr });
             toast.message('VirusTotal scan started', { action: { label: 'Open details', onClick: () => { try { scanDialogOpen = true; } catch {} } } });
@@ -679,6 +676,15 @@
                 {/if}
               </div>
 
+              <!-- System Logs -->
+              <div class="mt-4 space-y-3 rounded-md border border-border/60 bg-muted/10 p-3">
+                <p class="text-sm font-medium">System Logs</p>
+                <p class="text-xs text-muted-foreground">Clear all application logs stored on this device.</p>
+                <div>
+                  <Button variant="secondary" onclick={() => { try { clearLogs(); toast.success('Logs cleared'); } catch {} }}>Clear logs</Button>
+                </div>
+              </div>
+
               <DialogFooter>
                 <DialogClose>
                   <Button variant="ghost">Cancel</Button>
@@ -731,10 +737,10 @@
           Source: {scan.source ?? 'N/A'}
         {:else}
           {#if scan.startedAt}Started {new Date(scan.startedAt).toLocaleTimeString()}{/if}
-          {#if scan.finishedAt} • Finished {new Date(scan.finishedAt).toLocaleTimeString()}{/if}
-          • Processed {(scan.items?.length ?? 0)} items
+          {#if scan.finishedAt} ? Finished {new Date(scan.finishedAt).toLocaleTimeString()}{/if}
+          ? Processed {(scan.items?.length ?? 0)} items
           {#if (scan.expectedStartup ?? undefined) !== undefined || (scan.expectedRegistry ?? undefined) !== undefined}
-            • Expected {(scan.expectedStartup ?? '?')}/{(scan.expectedRegistry ?? '?')}
+            ? Expected {(scan.expectedStartup ?? '?')}/{(scan.expectedRegistry ?? '?')}
           {/if}
         {/if}
       </p>
@@ -812,6 +818,9 @@
 </Dialog>
 
 <Toaster richColors closeButton duration={4000} position="bottom-right" />
+
+
+
 
 
 

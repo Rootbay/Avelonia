@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   // events not used here to reduce log duplication
   import { downloads } from '$lib/downloads';
-  import { systemLogs as logStore, pushLog, type LogLevel } from '$lib/logStore';
+  import { systemLogs as logStore, pushLog, type LogLevel, type LogEntry } from '$lib/logStore';
   import type { Download } from '$lib/downloadManager';
 
   import {
@@ -25,7 +25,7 @@
     TableBody,
     TableCell,
   } from '$lib/components/ui/table';
-  import { Cpu, MemoryStick, HardDrive, DownloadIcon } from '@lucide/svelte';
+  import { Cpu, MemoryStick, HardDrive, DownloadIcon, ChevronRight, ChevronDown } from '@lucide/svelte';
 
   let cpuUsage = $state(0);
   let usedMemory = $state(0);
@@ -198,10 +198,153 @@
   let logsScrollEl: HTMLDivElement | null = null;
   let logsSentinel: HTMLDivElement | null = null;
   let _logsTick = false;
+  // Track previous length to adjust window when new logs arrive (newest-first)
+  let prevLogLen = $state(0);
 
   const windowedLogs = $derived(
     $logStore.slice(logsStart, Math.min(logsVisible, $logStore.length))
   );
+  // Group VirusTotal logs dynamically by scan sessions (start -> finished/failed/skipped)
+  // and by 5-minute time buckets when no explicit session is present.
+  function isVtLog(log: LogEntry): boolean {
+    if ((log.category || '') !== 'Optimize') return false;
+    const m = (log.message || '');
+    return m.startsWith('VT ') || /^VirusTotal\b/i.test(m) || /^Security alert:/i.test(m);
+  }
+  function isVtStart(log: LogEntry): boolean {
+    const m = (log.message || '');
+    return m.startsWith('VT scan starting') || /^VirusTotal scan started\.?/i.test(m);
+  }
+  function isVtEnd(log: LogEntry): boolean {
+    const m = (log.message || '');
+    return (
+      m.startsWith('VT scan finished') ||
+      m.startsWith('VT scan failed') ||
+      m.startsWith('VT scan skipped') ||
+      /^VirusTotal scan completed/i.test(m) ||
+      /^VirusTotal up to date — scan skipped\.?/i.test(m) ||
+      /^VirusTotal scan failed\.?/i.test(m)
+    );
+  }
+  function timeToSec(ts: string): number {
+    // ts format HH:MM:SS, fallback 0
+    const p = (ts || '').split(':').map((x) => parseInt(x, 10));
+    if (p.length !== 3 || p.some((n) => Number.isNaN(n))) return 0;
+    return p[0] * 3600 + p[1] * 60 + p[2];
+  }
+  type VtGroup = { header: number; indices: number[] };
+  const vtGroups = $derived.by(() => {
+    const list = windowedLogs as LogEntry[];
+    const used = new Set<number>();
+    const out: VtGroup[] = [];
+    const THRESH = 5 * 60; // 5 minutes window for fallback grouping
+    // Session-based grouping: newest-first list
+    let current: { header: number; indices: number[]; headerSec: number } | null = null;
+    for (let i = 0; i < list.length; i++) {
+      const log = list[i];
+      if (!isVtLog(log)) continue;
+      if (current) {
+        // extend session until we hit a start marker or time window exceeded
+        const sec = timeToSec(log.timestamp || '');
+        if (isVtStart(log)) {
+          // include the start marker and close the session group
+          const idx = current.indices.concat([i]);
+          if (idx.length >= 2) {
+            out.push({ header: current.header, indices: idx });
+            for (const k of idx) used.add(k);
+          }
+          current = null;
+        } else if (isVtEnd(log)) {
+          // Another end-like line indicates a different session.
+          // Finalize the current (only if it has at least 2 items), then start a new one.
+          if (current.indices.length >= 2) {
+            out.push({ header: current.header, indices: current.indices.slice() });
+            for (const k of current.indices) used.add(k);
+          }
+          current = { header: i, indices: [i], headerSec: timeToSec(log.timestamp || '') };
+          continue;
+        } else if (current.headerSec && sec > 0 && (current.headerSec - sec) > THRESH) {
+          // time window exceeded; finalize without including this row
+          if (current.indices.length >= 2) {
+            out.push({ header: current.header, indices: current.indices.slice() });
+            for (const k of current.indices) used.add(k);
+          }
+          current = null;
+        } else {
+          current.indices.push(i);
+        }
+        continue;
+      }
+      if (isVtEnd(log)) {
+        // start a new session group with this end/header
+        current = { header: i, indices: [i], headerSec: timeToSec(log.timestamp || '') };
+        continue;
+      }
+    }
+    if (current) {
+      if (current.indices.length >= 2) {
+        out.push({ header: current.header, indices: current.indices.slice() });
+        for (const k of current.indices) used.add(k);
+      }
+      current = null;
+    }
+    // Fallback time-based grouping for remaining VT logs not in a session
+    let i = 0;
+    while (i < list.length) {
+      if (used.has(i) || !isVtLog(list[i]) || isVtStart(list[i]) || isVtEnd(list[i])) { i++; continue; }
+      const head = i;
+      const headSec = timeToSec(list[i].timestamp || '');
+      const idx: number[] = [i];
+      let j = i + 1;
+      while (j < list.length && !used.has(j) && isVtLog(list[j]) && !isVtStart(list[j]) && !isVtEnd(list[j])) {
+        const sec = timeToSec(list[j].timestamp || '');
+        if (headSec > 0 && sec > 0 && (headSec - sec) <= THRESH) {
+          idx.push(j); j++;
+        } else break;
+      }
+      if (idx.length >= 2) {
+        out.push({ header: head, indices: idx });
+        for (const k of idx) used.add(k);
+      }
+      i = j;
+    }
+    return out;
+  });
+  const vtGroupIndexMap = $derived.by(() => {
+    const m = new Map<number, VtGroup>();
+    for (const g of vtGroups) { for (const k of g.indices) m.set(k, g); }
+    return m;
+  });
+  const vtHeaderSet = $derived(new Set(vtGroups.map((g) => g.header)));
+  let vtCollapsed = $state(new Set<number>());
+  // Track which headers we've seen to only auto-collapse new ones once
+  let vtKnownHeaders = $state(new Set<number>());
+  $effect(() => {
+    // Ensure new groups default to collapsed without causing reactive loops
+    const starts = new Set(vtGroups.map((g) => g.header));
+    let changedCollapsed = false;
+    let changedKnown = false;
+    // Auto-collapse only when header is newly seen
+    for (const s of starts) {
+      if (!vtKnownHeaders.has(s)) {
+        vtKnownHeaders.add(s); changedKnown = true;
+        if (!vtCollapsed.has(s)) { vtCollapsed.add(s); changedCollapsed = true; }
+      }
+    }
+    // Remove orphaned keys
+    for (const s of Array.from(vtCollapsed)) {
+      if (!starts.has(s)) { vtCollapsed.delete(s); changedCollapsed = true; }
+    }
+    for (const s of Array.from(vtKnownHeaders)) {
+      if (!starts.has(s)) { vtKnownHeaders.delete(s); changedKnown = true; }
+    }
+    if (changedCollapsed) vtCollapsed = new Set(vtCollapsed);
+    if (changedKnown) vtKnownHeaders = new Set(vtKnownHeaders);
+  });
+  function toggleVtGroup(headerIndex: number) {
+    if (vtCollapsed.has(headerIndex)) vtCollapsed.delete(headerIndex); else vtCollapsed.add(headerIndex);
+    vtCollapsed = new Set(vtCollapsed);
+  }
   const logsAfter = $derived(
     Math.max(0, $logStore.length - (logsStart + windowedLogs.length))
   );
@@ -275,6 +418,20 @@
   // Keep DOM window bounded when logs change
   $effect(() => {
     const total = $logStore.length;
+    // If new logs were prepended, keep the view anchored at the top and extend window
+    const delta = total - prevLogLen;
+    if (delta > 0) {
+      // Show both the existing and the new logs in the window
+      logsVisible = Math.min(total, Math.max(logsVisible + delta, 100));
+      logsStart = 0;
+      // If user is pinned to the top, keep them at top
+      try {
+        if (logsScrollEl && logsScrollEl.scrollTop <= 4) {
+          setTimeout(() => { try { if (logsScrollEl) logsScrollEl.scrollTop = 0; } catch {} }, 0);
+        }
+      } catch {}
+    }
+    prevLogLen = total;
     if (logsVisible > total) logsVisible = total;
     if (logsVisible - logsStart > LOG_MAX_DOM) {
       logsStart = Math.max(0, logsVisible - LOG_MAX_DOM);
@@ -434,13 +591,47 @@
                       <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
                     </TableRow>
                   {:else}
-                    <TableRow class="!border-0 hover:bg-muted/30">
-                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">{log.timestamp}</TableCell>
-                      <TableCell class="pr-4">
-                        <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}>{log.level}</Badge>
-                      </TableCell>
-                      <TableCell class="text-sm leading-snug">{log.message}</TableCell>
-                    </TableRow>
+                    {#if vtHeaderSet.has(i)}
+                      <!-- Group header row -->
+                      {@const g = vtGroupIndexMap.get(i) as VtGroup}
+                      <TableRow class="!border-0 bg-muted/20 hover:bg-muted/30 cursor-pointer" onclick={() => toggleVtGroup(i)} role="button" aria-expanded={!vtCollapsed.has(i)}>
+                        <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">{log.timestamp}</TableCell>
+                        <TableCell class="pr-4" colspan={2}>
+                          <div class="flex items-center gap-2">
+                            <Badge variant="secondary" class="text-[11px]">VirusTotal activity</Badge>
+                            <span class="text-xs text-muted-foreground">{g.indices.length} items</span>
+                            <span class="ml-auto inline-flex items-center">
+                              {#if vtCollapsed.has(i)}
+                                <ChevronRight class="size-4 text-muted-foreground" />
+                              {:else}
+                                <ChevronDown class="size-4 text-muted-foreground" />
+                              {/if}
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {#if !vtCollapsed.has(i)}
+                        {#each g.indices as gi}
+                          <TableRow class="!border-0 hover:bg-muted/30">
+                            <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">{windowedLogs[gi].timestamp}</TableCell>
+                            <TableCell class="pr-4">
+                              <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(windowedLogs[gi].level)}>{windowedLogs[gi].level}</Badge>
+                            </TableCell>
+                            <TableCell class="text-sm leading-snug">{windowedLogs[gi].message}</TableCell>
+                          </TableRow>
+                        {/each}
+                      {/if}
+                    {:else if vtGroupIndexMap.has(i)}
+                      <!-- Inside a group (collapsed or expanded): skip individual row; items render under header -->
+                      {:else}
+                      <TableRow class="!border-0 hover:bg-muted/30">
+                        <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">{log.timestamp}</TableCell>
+                        <TableCell class="pr-4">
+                          <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}>{log.level}</Badge>
+                        </TableCell>
+                        <TableCell class="text-sm leading-snug">{log.message}</TableCell>
+                      </TableRow>
+                    {/if}
                   {/if}
                 {/each}
               {/if}
