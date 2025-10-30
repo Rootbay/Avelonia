@@ -79,7 +79,7 @@
 
   let message = $state('');
   let progressMessage = $state('');
-  let isLoading = (false);
+  let isLoading = $state(false);
   let scanning = $state(false);
 
   let eraserSelectedFiles = $state<string[]>([]);
@@ -134,7 +134,7 @@
   }
   function removeExclusion(pattern: string) { exclusions = exclusions.filter((s)=>s!==pattern); saveExclusions(); }
 
-  // Debounced cache saves so streaming updates don’t spam storage
+  // Debounced cache saves so streaming updates donG??t spam storage
   let _cacheSaveTimer: number | null = null;
   function saveCacheSoon() {
     try { if (_cacheSaveTimer) clearTimeout(_cacheSaveTimer as unknown as number); } catch {}
@@ -166,26 +166,37 @@
   }
 
   type CleanerItem = { path: string; size?: number; kind: Kind; groupId?: string };
+  let unifiedCap = $state(3000);
+  const UNIFIED_BUILD_STEP = 2000;
   const allItems = $derived.by<CleanerItem[]>(() => {
+    const cap = Math.max(500, unifiedCap);
     const items: CleanerItem[] = [];
-    for (const f of tempFiles) items.push({ path: f.path, size: f.size, kind: 'temp' });
-    for (const f of largeFiles) items.push({ path: f.path, size: f.size, kind: 'large' });
-    for (const f of duplicateFiles) items.push({ path: f.path, size: f.size, kind: 'duplicate' });
-    for (const f of emptyFolders) items.push({ path: f.path, size: f.size, kind: 'empty' });
-    for (const f of brokenShortcuts) items.push({ path: f.path, size: f.size, kind: 'shortcut' });
-    // integrate groups if present (ensure duplicates existing list contains them)
+    const term = qDeb.trim().toLowerCase();
+    function tryPush(it: CleanerItem) {
+      if (matchesExclusion(it.path)) return;
+      if (filterKind !== 'all' && it.kind !== filterKind) return;
+      if (term && !it.path.toLowerCase().includes(term)) return;
+      items.push(it);
+    }
+    // Push per-category, stop early once cap reached
+    for (const f of tempFiles) { tryPush({ path: f.path, size: f.size, kind: 'temp' }); if (items.length >= cap) return items; }
+    for (const f of largeFiles) { tryPush({ path: f.path, size: f.size, kind: 'large' }); if (items.length >= cap) return items; }
+    for (const f of duplicateFiles) { tryPush({ path: f.path, size: f.size, kind: 'duplicate' }); if (items.length >= cap) return items; }
+    for (const f of emptyFolders) { tryPush({ path: f.path, size: f.size, kind: 'empty' }); if (items.length >= cap) return items; }
+    for (const f of brokenShortcuts) { tryPush({ path: f.path, size: f.size, kind: 'shortcut' }); if (items.length >= cap) return items; }
     if (dupGroups.length > 0) {
       for (const g of dupGroups) {
-        for (const p of g.files) items.push({ path: p, size: g.size, kind: 'duplicate', groupId: g.hash });
+        for (const p of g.files) { tryPush({ path: p, size: g.size, kind: 'duplicate', groupId: g.hash }); if (items.length >= cap) return items; }
       }
     }
-    const term = qDeb.trim().toLowerCase();
-    return items.filter((it) => {
-      if (matchesExclusion(it.path)) return false;
-      if (filterKind !== 'all' && it.kind !== filterKind) return false;
-      if (term && !it.path.toLowerCase().includes(term)) return false;
-      return true;
-    });
+    return items;
+  });
+
+  // Grow cap when user scrolls near bottom (only on downward scroll)
+  // Reset cap when filters/search/view change significantly
+  $effect(() => {
+    const _fk = filterKind; const _q = qDeb; const _exc = exclusions.length; const _v = view;
+    unifiedCap = 3000;
   });
 
   const selectedCount = $derived(selectedPaths.size);
@@ -200,24 +211,26 @@
   let tempQueue: string[] = [];
   let tempFlushRaf: number | null = null;
   const TEMP_FLUSH_IDLE_MS = 350; // wait for user to be idle before mutating the list
+  // Track temp-list user scroll activity to avoid fighting with the user
+  let _tempLastScrollTs = 0
   function scheduleTempFlush() {
     if (tempFlushRaf !== null) return;
     const run = () => {
       tempFlushRaf = null;
       if (tempQueue.length === 0) return;
       try {
-        // Defer flush while user is actively interacting with the unified list.
-        // This prevents the visible window from being invalidated mid-scroll and causing “teleports”.
         const now = Date.now();
-        const userActive = now - _unifiedLastScrollTs < TEMP_FLUSH_IDLE_MS;
         const inUnified = view === 'unified';
-        if (inUnified && userActive) {
+        const unifiedActive = now - _unifiedLastScrollTs < TEMP_FLUSH_IDLE_MS;
+        const unifiedUp = _unifiedLastDir === 'up' && unifiedActive;
+        const tempActive = now - _tempLastScrollTs < TEMP_FLUSH_IDLE_MS;
+        if ((inUnified && (unifiedActive || unifiedUp)) || (!inUnified && tempActive)) {
           tempFlushRaf = setTimeout(run, TEMP_FLUSH_IDLE_MS) as unknown as number;
           return;
         }
       } catch {}
 
-      const take = tempQueue.splice(0, Math.min(800, tempQueue.length));
+      const take = tempQueue.splice(0, Math.min(scanning ? 80 : 400, tempQueue.length));
       const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
       if (next.length) {
         const remaining = Math.max(0, MAX_TEMP_ITEMS - tempFiles.length);
@@ -232,20 +245,112 @@
       if (tempQueue.length > 0) scheduleTempFlush();
     };
     // Use a microtask to allow layout to settle, then run (or get delayed by idle gate above)
-    tempFlushRaf = setTimeout(run, 0) as unknown as number;
+    tempFlushRaf = (('requestIdleCallback' in window) ? (window as any).requestIdleCallback(run, { timeout: 120 }) : setTimeout(run, 0)) as unknown as number;
+  }
+
+  // Queues for other categories (throttled to avoid UI thrash)
+  type FilePair = [string, number];
+  let largeQueue: FilePair[] = [];
+  let largeFlushRaf: number | null = null;
+  function scheduleLargeFlush() {
+    if (largeFlushRaf !== null) return;
+    const run = () => {
+      largeFlushRaf = null;
+      if (largeQueue.length === 0) return;
+      // Pause while user scrollar upp i unified
+      try {
+        const now = Date.now();
+        const userActive = now - _unifiedLastScrollTs < 600;
+        const scrollingUp = _unifiedLastDir === 'up' && userActive;
+        if (view === 'unified' && scrollingUp) { largeFlushRaf = setTimeout(run, 300) as unknown as number; return; }
+      } catch {}
+      const take = largeQueue.splice(0, Math.min(800, largeQueue.length));
+      const next = take.map(([p, s]) => ({ path: p, size: s }));
+      if (next.length) largeFiles = [...largeFiles, ...next];
+      if (largeQueue.length > 0) scheduleLargeFlush();
+    };
+    largeFlushRaf = (('requestIdleCallback' in window) ? (window as any).requestIdleCallback(run, { timeout: 120 }) : setTimeout(run, 0)) as unknown as number;
+  }
+
+  let dupGroupsQueue: Array<{ hash: string; size: number; files: string[] }> = [];
+  let dupFlushRaf: number | null = null;
+  function scheduleDupFlush() {
+    if (dupFlushRaf !== null) return;
+    const run = () => {
+      dupFlushRaf = null;
+      if (dupGroupsQueue.length === 0) return;
+      try {
+        const now = Date.now();
+        const userActive = now - _unifiedLastScrollTs < 600;
+        const scrollingUp = _unifiedLastDir === 'up' && userActive;
+        if (view === 'unified' && scrollingUp) { dupFlushRaf = setTimeout(run, 300) as unknown as number; return; }
+      } catch {}
+      const take = dupGroupsQueue.splice(0, Math.min(60, dupGroupsQueue.length));
+      if (take.length) {
+        dupGroups = [...dupGroups, ...take];
+        const flat = take.flatMap((g) => (g.files || []).map((p) => ({ path: p as string, size: g.size })));
+        if (flat.length) duplicateFiles = [...duplicateFiles, ...flat];
+      }
+      if (dupGroupsQueue.length > 0) scheduleDupFlush();
+    };
+    dupFlushRaf = (('requestIdleCallback' in window) ? (window as any).requestIdleCallback(run, { timeout: 120 }) : setTimeout(run, 0)) as unknown as number;
+  }
+
+  let emptyQueue: string[] = [];
+  let emptyFlushRaf: number | null = null;
+  function scheduleEmptyFlush() {
+    if (emptyFlushRaf !== null) return;
+    const run = () => {
+      emptyFlushRaf = null;
+      if (emptyQueue.length === 0) return;
+      try {
+        const now = Date.now();
+        const userActive = now - _unifiedLastScrollTs < 600;
+        const scrollingUp = _unifiedLastDir === 'up' && userActive;
+        if (view === 'unified' && scrollingUp) { emptyFlushRaf = setTimeout(run, 300) as unknown as number; return; }
+      } catch {}
+      const take = emptyQueue.splice(0, Math.min(1200, emptyQueue.length));
+      const next = take.map((p) => ({ path: p }));
+      if (next.length) emptyFolders = [...emptyFolders, ...next];
+      if (emptyQueue.length > 0) scheduleEmptyFlush();
+    };
+    emptyFlushRaf = (('requestIdleCallback' in window) ? (window as any).requestIdleCallback(run, { timeout: 120 }) : setTimeout(run, 0)) as unknown as number;
+  }
+
+  let shortcutQueue: string[] = [];
+  let shortcutFlushRaf: number | null = null;
+  function scheduleShortcutFlush() {
+    if (shortcutFlushRaf !== null) return;
+    const run = () => {
+      shortcutFlushRaf = null;
+      if (shortcutQueue.length === 0) return;
+      try {
+        const now = Date.now();
+        const userActive = now - _unifiedLastScrollTs < 600;
+        const scrollingUp = _unifiedLastDir === 'up' && userActive;
+        if (view === 'unified' && scrollingUp) { shortcutFlushRaf = setTimeout(run, 300) as unknown as number; return; }
+      } catch {}
+      const take = shortcutQueue.splice(0, Math.min(1200, shortcutQueue.length));
+      const next = take.map((p) => ({ path: p }));
+      if (next.length) brokenShortcuts = [...brokenShortcuts, ...next];
+      if (shortcutQueue.length > 0) scheduleShortcutFlush();
+    };
+    shortcutFlushRaf = (('requestIdleCallback' in window) ? (window as any).requestIdleCallback(run, { timeout: 120 }) : setTimeout(run, 0)) as unknown as number;
   }
 
   // Virtualization for unified table (simple window without skeleton gating)
-  let unifiedContainer: HTMLDivElement | null = null;
+  let unifiedContainer = $state<HTMLDivElement | null>(null);
   // Track recent user scroll interaction to avoid fighting with anchoring
   let _unifiedLastScrollTs = 0;
   let _unifiedLastScrollTop = 0;
   let _unifiedLastDir: 'up' | 'down' | null = null;
-  const UNIFIED_ROW_PX = 40; // keep in sync with row class h-10 below
+  let UNIFIED_ROW_PX = $state(40); // measured row height for unified list
   const UNIFIED_MAX_DOM = 600;
   // Fallback: disable virtualization to avoid sticking/teleporting under extreme item counts
   // Set to true to restore virtualized windowing.
-  let unifiedVirtualize = $state(false);
+  let unifiedVirtualize = $state(true);
+  let unifiedAutoFallback = $state(false);
+  $effect(() => { unifiedVirtualize = (!unifiedAutoFallback) && (scanning || allItems.length > 1500); });
   let unifiedStart = $state(0);
   const unifiedRowsInView = $derived(() => {
     const h = unifiedContainer?.clientHeight ?? 480;
@@ -258,94 +363,75 @@
   });
   const unifiedTopPad = $derived(unifiedVirtualize ? (unifiedStart * UNIFIED_ROW_PX) : 0);
   const unifiedBottomPad = $derived(unifiedVirtualize ? Math.max(0, (allItems.length - (unifiedStart + unifiedDisplayed.length)) * UNIFIED_ROW_PX) : 0);
-  function onUnifiedScroll(event: Event) {
-    const el = event.currentTarget as HTMLElement;
-    const now = Date.now();
-    const top = el.scrollTop;
-    _unifiedLastDir = top < _unifiedLastScrollTop ? 'up' : top > _unifiedLastScrollTop ? 'down' : _unifiedLastDir;
-    _unifiedLastScrollTop = top;
-    _unifiedLastScrollTs = now;
-    if (unifiedVirtualize) {
-      const first = Math.floor(top / UNIFIED_ROW_PX) - 3; // small lookahead, avoid jumpiness
-      unifiedStart = Math.max(0, first);
-    }
-  }
-
-  // Anchor unified scroll during live scans so new items above don't "pull" the view
-  // Use non-reactive vars to avoid effect self-loops
-  let prevCounts: { temp: number; large: number; duplicate: number; empty: number; shortcut: number } = { temp: 0, large: 0, duplicate: 0, empty: 0, shortcut: 0 };
-  let anchorGuard = false;
-  // Do not follow the incoming stream by default. This avoids the scrollbar
-  // moving by itself when lots of items are appended to earlier blocks.
-  // If you want the old behavior, set this to true or wire it to a UI toggle.
-  let followStream = $state(false);
+  // Clamp virtual window when data size or viewport changes to avoid empty windows and stuck scrolling
   $effect(() => {
-    // Only anchor in unified view and when scanning; skip if filtered to a single type.
-    // Never anchor while the user is actively scrolling (esp. upwards), and prefer only near-bottom.
-    const now = Date.now();
-    const userActiveWin = 2500; // ms cooldown after a user scroll
-    const userActive = now - _unifiedLastScrollTs < userActiveWin;
-    const userScrollingUp = _unifiedLastDir === 'up' && userActive;
-    const nearBottom = (() => {
+    if (!unifiedVirtualize) { unifiedStart = 0; return; }
+    const maxStart = Math.max(0, allItems.length - Math.min(unifiedRowsInView, UNIFIED_MAX_DOM));
+    if (unifiedStart > maxStart) unifiedStart = maxStart;
+    if (unifiedStart < 0) unifiedStart = 0;
+  });
+  // Reset position on major context changes (view, filters, search, exclusions)
+  $effect(() => { void view; void filterKind; void qDeb; void exclusions.length; unifiedStart = 0; _unifiedLastScrollTop = 0; });
+  // Auto fallback: if content suggests more rows but container has no scroll range, disable virtualization
+  $effect(() => {
+    const _len = allItems.length; void _len; // track changes
+    setTimeout(() => {
       try {
         const el = unifiedContainer as HTMLElement | null;
-        if (!el) return false;
-        return el.scrollTop + el.clientHeight >= el.scrollHeight - 200;
-      } catch { return false; }
-    })();
-    const allowAnchor = view === 'unified' && scanning && filterKind === 'all' && followStream && !userActive && !userScrollingUp && nearBottom;
-    if (view !== 'unified') {
-      prevCounts = { temp: tempFiles.length, large: largeFiles.length, duplicate: duplicateFiles.length, empty: emptyFolders.length, shortcut: brokenShortcuts.length };
-      return;
-    }
-    if (!allowAnchor) {
-      prevCounts = { temp: tempFiles.length, large: largeFiles.length, duplicate: duplicateFiles.length, empty: emptyFolders.length, shortcut: brokenShortcuts.length };
-      return;
-    }
-    const deltas = {
-      temp: Math.max(0, tempFiles.length - prevCounts.temp),
-      large: Math.max(0, largeFiles.length - prevCounts.large),
-      duplicate: Math.max(0, duplicateFiles.length - prevCounts.duplicate),
-      empty: Math.max(0, emptyFolders.length - prevCounts.empty),
-      shortcut: Math.max(0, brokenShortcuts.length - prevCounts.shortcut),
-    } as const;
-    const blocks = [
-      { name: 'temp', len: prevCounts.temp },
-      { name: 'large', len: prevCounts.large },
-      { name: 'duplicate', len: prevCounts.duplicate },
-      { name: 'empty', len: prevCounts.empty },
-      { name: 'shortcut', len: prevCounts.shortcut },
-    ] as const;
-    // Find which block current start index was pointing at (based on previous lengths)
-    let before = 0;
-    for (let i = 0; i < blocks.length; i++) {
-      const b = blocks[i];
-      const end = before + b.len;
-      if (unifiedStart < end) {
-        // Add deltas of all blocks strictly before current one to keep anchor
-        let add = 0;
-        for (let j = 0; j < i; j++) {
-          const n = blocks[j].name as keyof typeof deltas;
-          add += deltas[n];
+        if (!el || unifiedAutoFallback) return;
+        const rowsVis = Math.ceil((el.clientHeight || 0) / UNIFIED_ROW_PX) + 5;
+        if (_len > rowsVis && el.scrollHeight <= el.clientHeight + 1) {
+          unifiedAutoFallback = true;
         }
-        if (add > 0 && !anchorGuard) {
-          anchorGuard = true;
-          setTimeout(() => {
-            try {
-              const maxStart = Math.max(0, allItems.length - 1);
-              unifiedStart = Math.min(unifiedStart + add, maxStart);
-            } finally {
-              anchorGuard = false;
-            }
-          }, 0);
-        }
-        break;
-      }
-      before = end;
-    }
-    // Update snapshot
-    prevCounts = { temp: tempFiles.length, large: largeFiles.length, duplicate: duplicateFiles.length, empty: emptyFolders.length, shortcut: brokenShortcuts.length };
+      } catch {}
+    }, 0);
   });
+  // Measure actual row height to avoid drift due to CSS differences
+  function measureUnifiedRowHeight() {
+    try {
+      const el = unifiedContainer as HTMLElement | null;
+      if (!el) return;
+      const row = el.querySelector('tbody tr.border-t') as HTMLElement | null;
+      const h = Math.round((row?.getBoundingClientRect()?.height ?? 0));
+      if (h && isFinite(h) && h > 8 && h < 200) {
+        UNIFIED_ROW_PX = h;
+      }
+    } catch {}
+  }
+  onMount(() => {
+    setTimeout(measureUnifiedRowHeight, 0);
+  });
+  $effect(() => { void unifiedDisplayed.length; setTimeout(measureUnifiedRowHeight, 0); });
+  let _unifiedScrollTick = false;
+  function onUnifiedScroll(_event: Event) {
+    if (_unifiedScrollTick) return;
+    _unifiedScrollTick = true;
+    requestAnimationFrame(() => {
+      const el = (unifiedContainer as HTMLElement | null);
+      if (!el) { _unifiedScrollTick = false; return; }
+      const now = Date.now();
+      const top = el.scrollTop;
+      _unifiedLastDir = top < _unifiedLastScrollTop ? 'up' : top > _unifiedLastScrollTop ? 'down' : _unifiedLastDir;
+      _unifiedLastScrollTop = top;
+      _unifiedLastScrollTs = now;
+      if (unifiedVirtualize) {
+        const first = Math.floor(top / UNIFIED_ROW_PX) - 3; // small lookahead, avoid jumpiness
+        unifiedStart = Math.max(0, first);
+      }
+      // If virtualization is enabled and user is moving down near bottom, increase cap to allow more items to be built.
+      if (unifiedVirtualize) {
+        try {
+          const movingDown = _unifiedLastDir === 'down';
+          if (movingDown && el.scrollTop + el.clientHeight >= el.scrollHeight - 400) {
+            unifiedCap = Math.min(unifiedCap + UNIFIED_BUILD_STEP, unifiedCap + 20000);
+          }
+        } catch {}
+      }
+      _unifiedScrollTick = false;
+    });
+  }
+
+  // Note: no automatic anchoring of unifiedStart. We only update unifiedStart from user scroll.
 
   // Tabs view: make the tab selection controlled so clicking the triggers actually switches content
   type CleanerTab = 'quick' | 'temp' | 'large' | 'dup' | 'empty' | 'shortcuts' | 'erase' | 'disk';
@@ -356,7 +442,7 @@
   // Temp
   let tempViewport: HTMLElement | null = null;
   let tempStart = $state(0);
-  let tempLoaded = $state(200);
+  let tempLoaded = $state(80);
   let tempLoadingMore = $state(false);
   const tempRowsInView = $derived(() => Math.ceil(((tempViewport?.clientHeight ?? 256) / LIST_ROW_PX)) + 8);
   const tempLen = $derived(tempFiles.length);
@@ -369,17 +455,23 @@
     for (let i=start;i<end;i++){ if (i < tempLoaded) out.push({ skel:false, file: tempFiles[i] }); else out.push({ skel:true }); }
     return out;
   });
+  let _tempTick = false;
   function onTempScroll(e: Event){
-    const el = (e.currentTarget as HTMLElement) ?? tempViewport; if (!el) return;
-    const first = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2); tempStart = first;
-    if (!tempLoadingMore && tempLoaded < tempLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
-      tempLoadingMore = true; setTimeout(()=>{ tempLoaded = Math.min(tempLoaded + 400, tempLen); tempLoadingMore = false; }, 220);
-    }
+    if (_tempTick) return; _tempTick = true;
+    requestAnimationFrame(()=>{
+    _tempLastScrollTs = Date.now();
+      const el = (e.currentTarget as HTMLElement) ?? tempViewport; if (!el) { _tempTick = false; return; }
+      const first = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2); tempStart = first;
+      if (!tempLoadingMore && tempLoaded < tempLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
+        tempLoadingMore = true; setTimeout(()=>{ tempLoaded = Math.min(tempLoaded + 200, tempLen); tempLoadingMore = false; }, 220);
+      }
+      _tempTick = false;
+    });
   }
   // Large
   let largeViewportEl: HTMLElement | null = null;
   let largeStart = $state(0);
-  let largeLoaded = $state(200);
+  let largeLoaded = $state(80);
   let largeLoadingMore = $state(false);
   const largeRowsInView = $derived(() => Math.ceil(((largeViewportEl?.clientHeight ?? 256) / LIST_ROW_PX)) + 8);
   const largeLen = $derived(largeFiles.length);
@@ -392,17 +484,22 @@
     for (let i=start;i<end;i++){ if (i < largeLoaded) out.push({ skel:false, file: largeFiles[i] }); else out.push({ skel:true }); }
     return out;
   });
+  let _largeTick = false;
   function onLargeScroll(e: Event){
-    const el = (e.currentTarget as HTMLElement) ?? largeViewportEl; if (!el) return;
-    largeStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
-    if (!largeLoadingMore && largeLoaded < largeLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
-      largeLoadingMore = true; setTimeout(()=>{ largeLoaded = Math.min(largeLoaded + 400, largeLen); largeLoadingMore = false; }, 220);
-    }
+    if (_largeTick) return; _largeTick = true;
+    requestAnimationFrame(()=>{
+      const el = (e.currentTarget as HTMLElement) ?? largeViewportEl; if (!el) { _largeTick = false; return; }
+      largeStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
+      if (!largeLoadingMore && largeLoaded < largeLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
+        largeLoadingMore = true; setTimeout(()=>{ largeLoaded = Math.min(largeLoaded + 200, largeLen); largeLoadingMore = false; }, 220);
+      }
+      _largeTick = false;
+    });
   }
   // Duplicates
   let dupViewportEl: HTMLElement | null = null;
   let dupStart = $state(0);
-  let dupLoaded = $state(200);
+  let dupLoaded = $state(80);
   let dupLoadingMore = $state(false);
   const dupRowsInView = $derived(() => Math.ceil(((dupViewportEl?.clientHeight ?? 256) / LIST_ROW_PX)) + 8);
   const dupLen = $derived(duplicateFiles.length);
@@ -415,17 +512,22 @@
     for (let i=start;i<end;i++){ if (i < dupLoaded) out.push({ skel:false, file: duplicateFiles[i] }); else out.push({ skel:true }); }
     return out;
   });
+  let _dupTick = false;
   function onDupScroll(e: Event){
-    const el = (e.currentTarget as HTMLElement) ?? dupViewportEl; if (!el) return;
-    dupStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
-    if (!dupLoadingMore && dupLoaded < dupLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
-      dupLoadingMore = true; setTimeout(()=>{ dupLoaded = Math.min(dupLoaded + 400, dupLen); dupLoadingMore = false; }, 220);
-    }
+    if (_dupTick) return; _dupTick = true;
+    requestAnimationFrame(()=>{
+      const el = (e.currentTarget as HTMLElement) ?? dupViewportEl; if (!el) { _dupTick = false; return; }
+      dupStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
+      if (!dupLoadingMore && dupLoaded < dupLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
+        dupLoadingMore = true; setTimeout(()=>{ dupLoaded = Math.min(dupLoaded + 200, dupLen); dupLoadingMore = false; }, 220);
+      }
+      _dupTick = false;
+    });
   }
   // Empty folders
   let emptyViewportEl: HTMLElement | null = null;
   let emptyStart = $state(0);
-  let emptyLoaded = $state(200);
+  let emptyLoaded = $state(80);
   let emptyLoadingMore = $state(false);
   const emptyRowsInView = $derived(() => Math.ceil(((emptyViewportEl?.clientHeight ?? 256) / LIST_ROW_PX)) + 8);
   const emptyLen = $derived(emptyFolders.length);
@@ -438,17 +540,22 @@
     for (let i=start;i<end;i++){ if (i < emptyLoaded) out.push({ skel:false, file: emptyFolders[i] }); else out.push({ skel:true }); }
     return out;
   });
+  let _emptyTick = false;
   function onEmptyScroll(e: Event){
-    const el = (e.currentTarget as HTMLElement) ?? emptyViewportEl; if (!el) return;
-    emptyStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
-    if (!emptyLoadingMore && emptyLoaded < emptyLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
-      emptyLoadingMore = true; setTimeout(()=>{ emptyLoaded = Math.min(emptyLoaded + 400, emptyLen); emptyLoadingMore = false; }, 220);
-    }
+    if (_emptyTick) return; _emptyTick = true;
+    requestAnimationFrame(()=>{
+      const el = (e.currentTarget as HTMLElement) ?? emptyViewportEl; if (!el) { _emptyTick = false; return; }
+      emptyStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
+      if (!emptyLoadingMore && emptyLoaded < emptyLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
+        emptyLoadingMore = true; setTimeout(()=>{ emptyLoaded = Math.min(emptyLoaded + 200, emptyLen); emptyLoadingMore = false; }, 220);
+      }
+      _emptyTick = false;
+    });
   }
   // Broken shortcuts
   let shortcutViewportEl: HTMLElement | null = null;
   let shortcutStart = $state(0);
-  let shortcutLoaded = $state(200);
+  let shortcutLoaded = $state(80);
   let shortcutLoadingMore = $state(false);
   const shortcutRowsInView = $derived(() => Math.ceil(((shortcutViewportEl?.clientHeight ?? 256) / LIST_ROW_PX)) + 8);
   const shortcutLen = $derived(brokenShortcuts.length);
@@ -461,12 +568,17 @@
     for (let i=start;i<end;i++){ if (i < shortcutLoaded) out.push({ skel:false, file: brokenShortcuts[i] }); else out.push({ skel:true }); }
     return out;
   });
+  let _shortcutTick = false;
   function onShortcutScroll(e: Event){
-    const el = (e.currentTarget as HTMLElement) ?? shortcutViewportEl; if (!el) return;
-    shortcutStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
-    if (!shortcutLoadingMore && shortcutLoaded < shortcutLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
-      shortcutLoadingMore = true; setTimeout(()=>{ shortcutLoaded = Math.min(shortcutLoaded + 400, shortcutLen); shortcutLoadingMore = false; }, 220);
-    }
+    if (_shortcutTick) return; _shortcutTick = true;
+    requestAnimationFrame(()=>{
+      const el = (e.currentTarget as HTMLElement) ?? shortcutViewportEl; if (!el) { _shortcutTick = false; return; }
+      shortcutStart = Math.max(0, Math.floor(el.scrollTop / LIST_ROW_PX) - 2);
+      if (!shortcutLoadingMore && shortcutLoaded < shortcutLen && el.scrollTop + el.clientHeight >= el.scrollHeight - 160){
+        shortcutLoadingMore = true; setTimeout(()=>{ shortcutLoaded = Math.min(shortcutLoaded + 200, shortcutLen); shortcutLoadingMore = false; }, 220);
+      }
+      _shortcutTick = false;
+    });
   }
 
   async function statTempSizes() {
@@ -481,53 +593,17 @@
 
   async function scanAll() {
     if (scanning || isLoading) return;
+    // reset results
+    tempFiles = []; largeFiles = []; duplicateFiles = []; emptyFolders = []; brokenShortcuts = []; dupGroups = [];
+    selectedPaths = new Set(); selectedTempFiles = []; selectedLargeFiles = []; selectedDuplicateFiles = []; selectedEmptyFolders = []; selectedBrokenShortcuts = [];
+    tempQueue = []; tempTruncated = false; tempReportedTotal = 0;
     scanning = true; progressMessage = ''; message = '';
     try {
-      // Run sequentially to avoid event storms and UI freeze
       const minBytes = Math.max(1, largeMinMB) * 1024 * 1024;
-
-      // Temp (streamed)
-      try {
-        tempFiles = []; selectedTempFiles = [];
-        message = 'Scanning temporary files...';
-        await invoke('get_temp_files_stream', { batch_size: 250, max: MAX_TEMP_ITEMS });
-        await statTempSizes();
-      } catch (e) { console.error(e); }
-
-      // Large
-      try {
-        message = 'Scanning large files...';
-        const r = (await invoke('find_large_files_min', { min_size_bytes: minBytes })) as [string, number][];
-        largeFiles = r.map(([p, s]) => ({ path: p, size: s }));
-      } catch (e) { console.error(e); }
-
-      // Duplicates (groups)
-      try {
-        message = 'Scanning duplicates...';
-        const g = (await invoke('find_duplicate_groups')) as Array<{ hash: string; size: number; files: string[] }>;
-        dupGroups = g; duplicateFiles = [];
-      } catch (e) { console.error(e); }
-
-      // Empty folders
-      try {
-        message = 'Scanning empty folders...';
-        const r = (await invoke('find_empty_folders')) as string[];
-        emptyFolders = r.map((p) => ({ path: p }));
-      } catch (e) { console.error(e); }
-
-      // Broken shortcuts
-      try {
-        message = 'Scanning broken shortcuts...';
-        const r = (await invoke('find_broken_shortcuts')) as string[];
-        brokenShortcuts = r.map((p) => ({ path: p }));
-      } catch (e) { console.error(e); }
-
-      toast.success('Scan complete');
-      if (view === 'unified') filterKind = 'all';
+      // Fire and forget: backend spawns threads and emits incremental events
+      void invoke('start_cleaner_scan', { min_size_bytes: minBytes, max_temp: MAX_TEMP_ITEMS });
     } catch (e) {
-      console.error(e); toast.error('Scan failed');
-    } finally {
-      scanning = false; progressMessage = '';
+      console.error(e); toast.error('Scan failed to start'); scanning = false;
     }
   }
 
@@ -624,7 +700,10 @@
           }
         }
       }
-      void statTempSizes();
+      // Avoid heavy synchronous size-stat on very large lists; do it only for small sets
+      if (tempFiles.length > 0 && tempFiles.length <= 2000) {
+        void statTempSizes();
+      }
       scanning = false;
       if (tempTruncated) {
         toast.warning(`Showing first ${tempFiles.length} items (truncated). Refine filters.`);
@@ -632,6 +711,61 @@
         toast.success(`Found ${tempReportedTotal || tempFiles.length} temporary files.`);
       }
     }).then((fn) => unsubs.push(fn)).catch(() => {});
+
+    // Large files (chunked)
+    listen('cleaner-large-batch', (event) => {
+      try {
+        const arr = (event.payload as [string, number][]) || [];
+        if (Array.isArray(arr) && arr.length) {
+          for (const it of arr) largeQueue.push([String(it[0]), Number(it[1])]);
+          scheduleLargeFlush();
+        }
+      } catch {}
+    }).then((fn) => unsubs.push(fn)).catch(() => {});
+
+    // Duplicate groups (chunked)
+    listen('cleaner-dup-groups-batch', (event) => {
+      try {
+        const groups = (event.payload as Array<{ hash: string; size: number; files: string[] }>) || [];
+        if (Array.isArray(groups) && groups.length) {
+          for (const g of groups) dupGroupsQueue.push(g);
+          scheduleDupFlush();
+        }
+      } catch {}
+    }).then((fn) => unsubs.push(fn)).catch(() => {});
+
+    // Empty folders
+    listen('cleaner-empty-batch', (event) => {
+      try {
+        const arr = (event.payload as string[]) || [];
+        if (Array.isArray(arr) && arr.length) {
+          for (const p of arr) emptyQueue.push(String(p));
+          scheduleEmptyFlush();
+        }
+      } catch {}
+    }).then((fn) => unsubs.push(fn)).catch(() => {});
+
+    // Broken shortcuts
+    listen('cleaner-shortcut-batch', (event) => {
+      try {
+        const arr = (event.payload as string[]) || [];
+        if (Array.isArray(arr) && arr.length) {
+          for (const p of arr) shortcutQueue.push(String(p));
+          scheduleShortcutFlush();
+        }
+      } catch {}
+    }).then((fn) => unsubs.push(fn)).catch(() => {});
+
+    // Done/Stopped per-scope → update loading flags
+    listen('cleaner-done', (event) => {
+      try {
+        const scope = (event.payload as any)?.scope as string | undefined;
+        if (!scope || scope === 'all') { scanning = false; isLoading = false; }
+        else { isLoading = false; }
+      } catch {}
+    }).then((fn) => unsubs.push(fn)).catch(() => {});
+    listen('cleaner-stopped', () => { scanning = false; isLoading = false; }).then((fn) => unsubs.push(fn)).catch(() => {});
+    listen('cleaner-error', (ev) => { try { toast.error(String(ev.payload||'Scan error')); } catch {} }).then((fn) => unsubs.push(fn)).catch(() => {});
 
     getDiskInfo();
 
@@ -697,7 +831,7 @@
       selectedTempFiles = [];
       tempQueue = []; tempTruncated = false; tempReportedTotal = 0;
       message = 'Scanning for temporary files...';
-      await invoke('get_temp_files_stream', { batch_size: 250, max: MAX_TEMP_ITEMS });
+      await invoke('get_temp_files_stream', { batch_size: 100, max: MAX_TEMP_ITEMS });
     } catch (error) {
       message = `Error scanning temporary files: ${error}`;
       console.error(error);
@@ -711,10 +845,11 @@
   async function stopScan() {
     try {
       await invoke('cancel_temp_scan');
-      scanning = false;
-      tempQueue = [];
-      toast.warning('Scan cancelled');
+      await invoke('cancel_cleaner_scan');
     } catch {}
+    scanning = false;
+    tempQueue = [];
+    toast.warning('Scan cancelled');
   }
 
   async function deleteSelectedTempFiles() {
@@ -746,25 +881,16 @@
 
   async function findLargeFiles() {
     isLoading = true;
-    message = '';
+    message = 'Scanning for large files...';
     progressMessage = '';
+    largeFiles = [];
     try {
-      message = 'Scanning for large files...';
-      const result: [string, number][] = await invoke('find_large_files');
-      largeFiles = result.map(([path, size]) => ({ path, size }));
-      message = `Found ${largeFiles.length} large files.`;
-      toast.success(message);
-      // If user is in unified view, switch filter to show large results immediately
-      if (view === 'unified') {
-        filterKind = 'large';
-      }
+      void invoke('start_large_scan');
     } catch (error) {
-      message = `Error finding large files: ${error}`;
+      message = `Error starting large files scan: ${error}`;
       console.error(error);
       toast.error(message);
-    } finally {
       isLoading = false;
-      progressMessage = '';
     }
   }
 
@@ -775,22 +901,17 @@
 
   async function findDuplicateFiles() {
     isLoading = true;
-    message = '';
+    message = 'Scanning for duplicate files...';
     progressMessage = '';
+    duplicateFiles = []; dupGroups = [];
+    dupStart = 0; dupLoaded = 80; dupLoadingMore = false;
     try {
-      dupStart = 0; dupLoaded = 200; dupLoadingMore = false;
-      message = 'Scanning for duplicate files...';
-      const result: [string, number][] = await invoke('find_duplicate_files');
-      duplicateFiles = result.map(([path, size]) => ({ path, size }));
-      message = `Found ${duplicateFiles.length} sets of duplicate files.`;
-      toast.success(message);
+      void invoke('start_duplicate_groups_scan');
     } catch (error) {
-      message = `Error finding duplicate files: ${error}`;
+      message = `Error starting duplicate scan: ${error}`;
       console.error(error);
       toast.error(message);
-    } finally {
       isLoading = false;
-      progressMessage = '';
     }
   }
 
@@ -801,22 +922,17 @@
 
   async function findEmptyFolders() {
     isLoading = true;
-    message = '';
+    message = 'Scanning for empty folders...';
     progressMessage = '';
+    emptyFolders = [];
+    emptyStart = 0; emptyLoaded = 80; emptyLoadingMore = false;
     try {
-      emptyStart = 0; emptyLoaded = 200; emptyLoadingMore = false;
-      message = 'Scanning for empty folders...';
-      const result: string[] = await invoke('find_empty_folders');
-      emptyFolders = result.map((path) => ({ path }));
-      message = `Found ${emptyFolders.length} empty folders.`;
-      toast.success(message);
+      void invoke('start_empty_scan');
     } catch (error) {
-      message = `Error finding empty folders: ${error}`;
+      message = `Error starting empty folders scan: ${error}`;
       console.error(error);
       toast.error(message);
-    } finally {
       isLoading = false;
-      progressMessage = '';
     }
   }
 
@@ -827,22 +943,17 @@
 
   async function findBrokenShortcuts() {
     isLoading = true;
-    message = '';
+    message = 'Scanning for broken shortcuts...';
     progressMessage = '';
+    brokenShortcuts = [];
+    shortcutStart = 0; shortcutLoaded = 80; shortcutLoadingMore = false;
     try {
-      shortcutStart = 0; shortcutLoaded = 200; shortcutLoadingMore = false;
-      message = 'Scanning for broken shortcuts...';
-      const result: string[] = await invoke('find_broken_shortcuts');
-      brokenShortcuts = result.map((path) => ({ path }));
-      message = `Found ${brokenShortcuts.length} broken shortcuts.`;
-      toast.success(message);
+      void invoke('start_shortcut_scan');
     } catch (error) {
-      message = `Error finding broken shortcuts: ${error}`;
+      message = `Error starting broken shortcuts scan: ${error}`;
       console.error(error);
       toast.error(message);
-    } finally {
       isLoading = false;
-      progressMessage = '';
     }
   }
 
@@ -1075,7 +1186,7 @@
           </div>
 
           <!-- close actions row, then table container -->
-          <div class="rounded-md border h-[60vh] overflow-auto" style="overflow-anchor: none; overscroll-behavior: contain;" bind:this={unifiedContainer} onscroll={onUnifiedScroll}>
+          <div class="rounded-md border h-[60vh] overflow-auto" style="overflow-anchor: none;" bind:this={unifiedContainer} onscroll={onUnifiedScroll}>
             <table class="w-full text-sm text-foreground">
               <thead class="bg-muted/40 text-xs">
                 <tr>
@@ -1103,7 +1214,7 @@
                   {/if}
                 {:else}
                   {#if unifiedVirtualize && unifiedTopPad > 0}
-                    <tr><td colspan="5" style={`height:${unifiedTopPad}px`}></td></tr>
+                    <tr><td colspan="5" style={`height:${unifiedTopPad}px; overflow-anchor: none;`}></td></tr>
                   {/if}
                   {#each (unifiedDisplayed.length > 0 ? unifiedDisplayed : allItems.slice(0, Math.min(allItems.length, UNIFIED_MAX_DOM))) as it (it.path)}
                     <tr class="border-t h-10 align-middle">
@@ -1127,7 +1238,7 @@
                     </tr>
                   {/each}
                   {#if unifiedVirtualize && unifiedBottomPad > 0}
-                    <tr><td colspan="5" style={`height:${unifiedBottomPad}px`}></td></tr>
+                    <tr><td colspan="5" style={`height:${unifiedBottomPad}px; overflow-anchor: none;`}></td></tr>
                   {/if}
                 {/if}
               </tbody>
@@ -1176,52 +1287,32 @@
           </div>
         </TabsContent>
 
-        <TabsContent value="temp" class="mt-4 space-y-3">
-          <div class="flex items-center gap-2">
-            <Button onclick={getTempFiles} disabled={isLoading}>
-              <Scan class="h-4 w-4" />
-              Scan
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger>
-                <Button variant="outline" size="icon" aria-label="More">
-                  <MoreHorizontal class="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Temp files</DropdownMenuLabel>
-                <DropdownMenuItem onclick={() => getTempFiles()}>Rescan</DropdownMenuItem>
-                <DropdownMenuItem onclick={() => toggleSelectAll('temp')}>
-                  {selectedTempFiles.length === tempFiles.length && tempFiles.length > 0
-                    ? 'Unselect all'
-                    : 'Select all'}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem disabled={selectedTempFiles.length === 0 || isLoading} onclick={deleteSelectedTempFiles}>
-                  Delete selected ({selectedTempFiles.length})
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          {#if tempFiles.length > 0}
-            <ScrollArea orientation="both" class="h-64 rounded border">
-              <ul class="text-sm">
-                {#each tempFiles as file (file.path)}
+<TabsContent value="temp" class="mt-4 space-y-3">
+          <div class="h-64 rounded border overflow-auto" style="overscroll-behavior: contain; overflow-anchor: none;" bind:this={tempViewport} onscroll={onTempScroll}>
+            <ul class="text-sm">
+              {#if tempTopPad > 0}
+                <li style={`height:${tempTopPad}px`} aria-hidden="true"></li>
+              {/if}
+              {#each tempWindow as row, i (row.file ? row.file.path : `skel-${tempStart + i}`)}
+                {#if row.skel}
+                  <li class="px-2 py-1"><Skeleton class="h-4 w-5/6" aria-hidden="true" /></li>
+                {:else}
                   <li class="flex items-center gap-2 px-2 py-1">
                     <Checkbox
-                      checked={selectedTempFiles.includes(file.path)}
-                      onCheckedChange={() => handleFileSelection(file.path, 'temp')}
+                      checked={selectedTempFiles.includes(row.file!.path)}
+                      onCheckedChange={() => handleFileSelection(row.file!.path, 'temp')}
                     />
-                    <span class="truncate">{file.path}</span>
+                    <span class="truncate">{row.file!.path}</span>
                   </li>
-                {/each}
-              </ul>
-            </ScrollArea>
-          {:else}
-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
-          {/if}
-        </TabsContent>
+                {/if}
+              {/each}
+              {#if tempBottomPad > 0}
+                <li style={`height:${tempBottomPad}px`} aria-hidden="true"></li>
+              {/if}
+            </ul>
+          </div>
 
+        </TabsContent>
         <TabsContent value="large" class="mt-4 space-y-3">
           <div class="flex items-center gap-2">
             <Button onclick={findLargeFiles} disabled={isLoading}>
@@ -1249,28 +1340,34 @@
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {#if largeFiles.length > 0}
-            <ScrollArea orientation="both" class="h-64 rounded border">
-              <ul class="text-sm">
-                {#each largeFiles as file (file.path)}
+          <div class="h-64 rounded border overflow-auto" style="overscroll-behavior: contain; overflow-anchor: none;" bind:this={largeViewportEl} onscroll={onLargeScroll}>
+            <ul class="text-sm">
+              {#if largeTopPad > 0}
+                <li style={`height:${largeTopPad}px`} aria-hidden="true"></li>
+              {/if}
+              {#each largeWindow as row, i (row.file ? row.file.path : `skel-large-${largeStart + i}`)}
+                {#if row.skel}
+                  <li class="px-2 py-1"><Skeleton class="h-4 w-3/4" aria-hidden="true" /></li>
+                {:else}
                   <li class="flex items-center justify-between gap-2 px-2 py-1">
                     <div class="flex items-center gap-2">
                       <Checkbox
-                        checked={selectedLargeFiles.includes(file.path)}
-                        onCheckedChange={() => handleFileSelection(file.path, 'large')}
+                        checked={selectedLargeFiles.includes(row.file!.path)}
+                        onCheckedChange={() => handleFileSelection(row.file!.path, 'large')}
                       />
-                      <span class="truncate">{file.path}</span>
+                      <span class="truncate">{row.file!.path}</span>
                     </div>
-                    {#if file.size}
-                      <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(file.size)}</span>
+                    {#if row.file?.size}
+                      <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(row.file!.size!)}</span>
                     {/if}
                   </li>
-                {/each}
-              </ul>
-            </ScrollArea>
-          {:else}
-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
-          {/if}
+                {/if}
+              {/each}
+              {#if largeBottomPad > 0}
+                <li style={`height:${largeBottomPad}px`} aria-hidden="true"></li>
+              {/if}
+            </ul>
+          </div>
         </TabsContent>
 
         <TabsContent value="dup" class="mt-4 space-y-3">
@@ -1300,23 +1397,29 @@
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {#if duplicateFiles.length > 0}
-            <ScrollArea orientation="both" class="h-64 rounded border">
-              <ul class="text-sm">
-                {#each duplicateFiles as file (file.path)}
+          <div class="h-64 rounded border overflow-auto" style="overscroll-behavior: contain; overflow-anchor: none;" bind:this={dupViewportEl} onscroll={onDupScroll}>
+            <ul class="text-sm">
+              {#if dupTopPad > 0}
+                <li style={`height:${dupTopPad}px`} aria-hidden="true"></li>
+              {/if}
+              {#each dupWindow as row, i (row.file ? row.file.path : `skel-dup-${dupStart + i}`)}
+                {#if row.skel}
+                  <li class="px-2 py-1"><Skeleton class="h-4 w-5/6" aria-hidden="true" /></li>
+                {:else}
                   <li class="flex items-center gap-2 px-2 py-1">
                     <Checkbox
-                      checked={selectedDuplicateFiles.includes(file.path)}
-                      onCheckedChange={() => handleFileSelection(file.path, 'duplicate')}
+                      checked={selectedDuplicateFiles.includes(row.file!.path)}
+                      onCheckedChange={() => handleFileSelection(row.file!.path, 'duplicate')}
                     />
-                    <span class="truncate">{file.path}</span>
+                    <span class="truncate">{row.file!.path}</span>
                   </li>
-                {/each}
-              </ul>
-            </ScrollArea>
-          {:else}
-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
-          {/if}
+                {/if}
+              {/each}
+              {#if dupBottomPad > 0}
+                <li style={`height:${dupBottomPad}px`} aria-hidden="true"></li>
+              {/if}
+            </ul>
+          </div>
         </TabsContent>
 
         <TabsContent value="empty" class="mt-4 space-y-3">
@@ -1346,23 +1449,29 @@
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {#if emptyFolders.length > 0}
-            <ScrollArea orientation="both" class="h-64 rounded border">
-              <ul class="text-sm">
-                {#each emptyFolders as folder (folder.path)}
+          <div class="h-64 rounded border overflow-auto" style="overscroll-behavior: contain; overflow-anchor: none;" bind:this={emptyViewportEl} onscroll={onEmptyScroll}>
+            <ul class="text-sm">
+              {#if emptyTopPad > 0}
+                <li style={`height:${emptyTopPad}px`} aria-hidden="true"></li>
+              {/if}
+              {#each emptyWindow as row, i (row.file ? row.file.path : `skel-empty-${emptyStart + i}`)}
+                {#if row.skel}
+                  <li class="px-2 py-1"><Skeleton class="h-4 w-5/6" aria-hidden="true" /></li>
+                {:else}
                   <li class="flex items-center gap-2 px-2 py-1">
                     <Checkbox
-                      checked={selectedEmptyFolders.includes(folder.path)}
-                      onCheckedChange={() => handleFileSelection(folder.path, 'empty')}
+                      checked={selectedEmptyFolders.includes(row.file!.path)}
+                      onCheckedChange={() => handleFileSelection(row.file!.path, 'empty')}
                     />
-                    <span class="truncate">{folder.path}</span>
+                    <span class="truncate">{row.file!.path}</span>
                   </li>
-                {/each}
-              </ul>
-            </ScrollArea>
-          {:else}
-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
-          {/if}
+                {/if}
+              {/each}
+              {#if emptyBottomPad > 0}
+                <li style={`height:${emptyBottomPad}px`} aria-hidden="true"></li>
+              {/if}
+            </ul>
+          </div>
         </TabsContent>
 
         <TabsContent value="shortcuts" class="mt-4 space-y-3">
@@ -1392,23 +1501,29 @@
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {#if brokenShortcuts.length > 0}
-            <ScrollArea orientation="both" class="h-64 rounded border">
-              <ul class="text-sm">
-                {#each brokenShortcuts as shortcut (shortcut.path)}
+          <div class="h-64 rounded border overflow-auto" style="overscroll-behavior: contain; overflow-anchor: none;" bind:this={shortcutViewportEl} onscroll={onShortcutScroll}>
+            <ul class="text-sm">
+              {#if shortcutTopPad > 0}
+                <li style={`height:${shortcutTopPad}px`} aria-hidden="true"></li>
+              {/if}
+              {#each shortcutWindow as row, i (row.file ? row.file.path : `skel-short-${shortcutStart + i}`)}
+                {#if row.skel}
+                  <li class="px-2 py-1"><Skeleton class="h-4 w-5/6" aria-hidden="true" /></li>
+                {:else}
                   <li class="flex items-center gap-2 px-2 py-1">
                     <Checkbox
-                      checked={selectedBrokenShortcuts.includes(shortcut.path)}
-                      onCheckedChange={() => handleFileSelection(shortcut.path, 'broken_shortcut')}
+                      checked={selectedBrokenShortcuts.includes(row.file!.path)}
+                      onCheckedChange={() => handleFileSelection(row.file!.path, 'broken_shortcut')}
                     />
-                    <span class="truncate">{shortcut.path}</span>
+                    <span class="truncate">{row.file!.path}</span>
                   </li>
-                {/each}
-              </ul>
-            </ScrollArea>
-          {:else}
-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
-          {/if}
+                {/if}
+              {/each}
+              {#if shortcutBottomPad > 0}
+                <li style={`height:${shortcutBottomPad}px`} aria-hidden="true"></li>
+              {/if}
+            </ul>
+          </div>
         </TabsContent>
 
         <TabsContent value="erase" class="mt-4 space-y-3">
@@ -1562,3 +1677,15 @@
     </div>
   </div>
 {/if}
+
+
+
+
+
+
+
+
+
+
+
+

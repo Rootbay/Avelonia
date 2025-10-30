@@ -298,6 +298,12 @@ pub fn run() {
             cleaner::get_temp_files,
             cleaner::get_temp_files_stream,
             cleaner::cancel_temp_scan,
+            cleaner::start_cleaner_scan,
+            cleaner::cancel_cleaner_scan,
+            cleaner::start_large_scan,
+            cleaner::start_duplicate_groups_scan,
+            cleaner::start_empty_scan,
+            cleaner::start_shortcut_scan,
             cleaner::clean_temp_files,
             cleaner::delete_files, // New command
             cleaner::move_to_trash,

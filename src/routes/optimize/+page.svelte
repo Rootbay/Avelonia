@@ -12,6 +12,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton/index.js';
   import { Alert, AlertDescription } from '$lib/components/ui/alert';
   import { toast } from '$lib/components/ui/sonner';
+  import { pushLog } from '$lib/logStore';
   import {
     Dialog,
     DialogContent,
@@ -103,6 +104,38 @@
     }
   }
 
+  async function reloadStartupItems() {
+    startupLoaded = false;
+    await loadStartupItems();
+  }
+
+  // Live update (polling) for Startup list
+  let _startupPollTimer: number | null = null;
+  let _startupPollBusy = false;
+  async function pollStartupOnce() {
+    if (!startupLoaded || _startupPollBusy) return;
+    _startupPollBusy = true;
+    try {
+      const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
+      const next = Array.isArray(items) ? items : [];
+      // Compare by path set
+      const curSet = new Set(startupItems.map((i) => i.path));
+      const nextSet = new Set(next.map((i) => i.path));
+      let changed = curSet.size !== nextSet.size;
+      if (!changed) {
+        for (const p of nextSet) { if (!curSet.has(p)) { changed = true; break; } }
+      }
+      if (changed) {
+        const keep = new Set(selectedStartup);
+        startupItems = next;
+        // Preserve selection where possible
+        selectedStartup = new Set(Array.from(keep).filter((p) => nextSet.has(p)));
+        startupVisible = Math.min(Math.max(50, startupVisible), startupItems.length);
+      }
+    } catch {}
+    finally { _startupPollBusy = false; }
+  }
+
   function normalizeWinPath(p: string) {
     try {
       return p.replace(/\//g, '\\');
@@ -152,11 +185,20 @@
     try {
       const removed: number = await invoke('remove_startup_shortcuts', { files: pendingStartup });
       message = `Removed ${removed} startup shortcut${removed === 1 ? '' : 's'}.`;
+      if (removed > 0) {
+        toast.success(message);
+        pushLog('SUCCESS', message, 'Optimize');
+      } else {
+        toast.info('No startup shortcuts removed');
+        pushLog('INFO', 'No startup shortcuts removed', 'Optimize');
+      }
       selectedStartup = new Set();
-      await loadStartupItems();
+      await reloadStartupItems();
     } catch (e) {
       console.error(e);
       message = `Failed to remove startup items: ${e}`;
+      toast.error('Failed to remove startup items');
+      pushLog('ERROR', `Failed to remove startup items: ${String(e)}`, 'Optimize');
     } finally {
       pendingStartup = [];
     }
@@ -347,11 +389,13 @@
       message = `Removed ${removed} registry startup entr${removed === 1 ? 'y' : 'ies'}.`;
       if (removed > 0) {
         toast.success(message);
+        pushLog('SUCCESS', message + (strategyUsed ? ` (preset: ${strategyUsed})` : ''), 'Optimize');
       } else {
         toast.info('No entries removed');
+        pushLog('INFO', 'No registry entries removed', 'Optimize');
       }
       selectedReg = new Set();
-      await loadRegistryItems();
+      await reloadRegistryItems();
       // Watchdog monitor: poll for reappearance or process restart
       monitorRegistryWatchdog([...pendingRegistry]);
 
@@ -643,6 +687,35 @@
       loadingRegistry = false;
     }
   }
+  async function reloadRegistryItems() {
+    registryLoaded = false;
+    await loadRegistryItems();
+  }
+
+  // Live update (polling) for Registry list
+  let _registryPollTimer: number | null = null;
+  let _registryPollBusy = false;
+  async function pollRegistryOnce() {
+    if (!registryLoaded || _registryPollBusy) return;
+    _registryPollBusy = true;
+    try {
+      const res = (await invoke('list_registry_run')) as StartupRegItem[];
+      const next = Array.isArray(res) ? res : [];
+      const id = (it: StartupRegItem) => `${it.hive}|${it.key}|${it.name}`;
+      const curSet = new Set(startupRegItems.map(id));
+      const nextSet = new Set(next.map(id));
+      let changed = curSet.size !== nextSet.size;
+      if (!changed) { for (const k of nextSet) { if (!curSet.has(k)) { changed = true; break; } } }
+      if (changed) {
+        startupRegItems = next;
+        const keep = new Set(selectedReg);
+        // preserve selection ids present in next
+        selectedReg = new Set(Array.from(keep).filter((k) => nextSet.has(k)));
+        registryVisible = Math.min(Math.max(50, registryVisible), startupRegItems.length);
+      }
+    } catch {}
+    finally { _registryPollBusy = false; }
+  }
   // After registry items load and if a reboot was detected, mark reappeared entries as suspicious
   async function scanSuspiciousAfterReboot() {
     try {
@@ -706,7 +779,9 @@
     if (entries.length === 0) return;
     try {
       await invoke('remove_registry_run', { entries });
-      await loadRegistryItems();
+      pushLog('SUCCESS', `Removed ${entries.length} registry startup entr${entries.length===1?'y':'ies'}`, 'Optimize');
+      toast.success(`Removed ${entries.length} registry entr${entries.length===1?'y':'ies'}`);
+      await reloadRegistryItems();
     } catch (e) { console.error(e); }
   }
 
@@ -1090,7 +1165,15 @@
     if (startupSentinel) io.observe(startupSentinel);
     if (registrySentinel) io.observe(registrySentinel);
     if (tasksSentinel) io.observe(tasksSentinel);
-    return () => io.disconnect();
+    // Start lightweight polling while Optimize is mounted
+    try { _startupPollTimer = setInterval(pollStartupOnce, 5000) as unknown as number; } catch {}
+    try { _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number; } catch {}
+    return () => {
+      io.disconnect();
+      try { if (_startupPollTimer) clearInterval(_startupPollTimer as unknown as number); } catch {}
+      try { if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number); } catch {}
+      _startupPollTimer = null; _registryPollTimer = null;
+    };
   });
 
   // When registry section is loaded and a reboot was detected, evaluate suspicious reappearance
@@ -1120,7 +1203,7 @@
       </CardHeader>
       <CardContent class="space-y-2">
         <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={loadStartupItems}>
+          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={reloadStartupItems}>
             <RefreshCw class="size-4" />
           </Button>
           <Button variant="ghost" size="icon" title="Open Startup Folders" aria-label="Open Startup Folders" onclick={openStartupFolders}>
@@ -1443,7 +1526,7 @@
       </CardHeader>
       <CardContent class="space-y-2">
         <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={loadRegistryItems}>
+          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={reloadRegistryItems}>
             <RefreshCw class="size-4" />
           </Button>
           <Button variant="ghost" size="icon" title="Disable Selected" aria-label="Disable Selected" onclick={requestRemoveSelectedRegistry} disabled={selectedReg.size === 0}>
@@ -1765,6 +1848,3 @@
     </AlertDialogFooter>
   </AlertDialogContent>
 </AlertDialog>
-
-
-

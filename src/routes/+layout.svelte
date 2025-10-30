@@ -59,6 +59,7 @@
   import { vtVerdicts, setVerdictFromReport, setVerdict, reasonFor } from '$lib/vtVerdicts';
   import { MoreHorizontal } from '@lucide/svelte';
   import { vtScan, beginScan, endScan, pushReport as pushScanReport } from '$lib/scanStatus';
+  import { cleanerScan, beginCleanerScan, incCleanerFound, setCleanerMessage, endCleanerScan } from '$lib/cleanerScan';
 
   import '../app.css';
   const scan = $derived($vtScan);
@@ -141,6 +142,60 @@
       } catch {}
     });
     unlistenFns.push(() => { unReport.then((f)=>f()).catch(()=>{}); });
+
+    // Cleaner temp scan: global live notification and counts
+    let cleanerToastShown = false;
+    const cleanerToastId = 'cleaner-scan';
+    const unScanProg = listen('scan_progress', (ev) => {
+      try {
+        const msg = String((ev as any)?.payload || '');
+        setCleanerMessage(msg);
+        if (cleanerToastShown) {
+          toast.message(`${msg}`, { id: cleanerToastId, duration: Infinity });
+        }
+      } catch {}
+    });
+    unlistenFns.push(() => { unScanProg.then((f)=>f()).catch(()=>{}); });
+    const unTempBatch = listen('cleaner-temp-batch', (ev) => {
+      try {
+        const arr = (ev as any)?.payload as unknown as string[];
+        const n = Array.isArray(arr) ? arr.length : 0;
+        if (n > 0) {
+          beginCleanerScan();
+          incCleanerFound(n);
+          if (!cleanerToastShown) {
+            cleanerToastShown = true;
+            toast.message('Scanning temporary files…', {
+              id: cleanerToastId,
+              duration: Infinity,
+              action: {
+                label: 'Stop',
+                onClick: async () => { try { await invoke('cancel_temp_scan'); } catch {} },
+              },
+            });
+          }
+          // Update live count display
+          cleanerScan.subscribe((s) => {
+            if (s.phase === 'running') {
+              const label = s.message && s.message.length > 0 ? s.message : 'Scanning temporary files…';
+              toast.message(`${label} (${s.found.toLocaleString()} found)`, { id: cleanerToastId, duration: Infinity });
+            }
+          })();
+        }
+      } catch {}
+    });
+    unlistenFns.push(() => { unTempBatch.then((f)=>f()).catch(()=>{}); });
+    const unTempDone = listen('cleaner-temp-done', (ev) => {
+      try {
+        const total = Number(((ev as any)?.payload as any)?.total || 0);
+        endCleanerScan(total);
+        toast.success(`Temp scan complete • ${Number.isFinite(total) ? total.toLocaleString() : '0'} files`);
+        cleanerToastShown = false;
+        // Dismiss the persistent toast if the lib supports id updates
+        try { (toast as any)?.dismiss?.(cleanerToastId); } catch {}
+      } catch {}
+    });
+    unlistenFns.push(() => { unTempDone.then((f)=>f()).catch(()=>{}); });
   });
   onDestroy(() => {
     disposeDownloadListener();

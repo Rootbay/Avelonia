@@ -16,7 +16,8 @@ const STORAGE_KEY = 'avelonia_cleaner_cache_v1';
 export function loadCleanerCache(): CleanerCache | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    // Use sessionStorage so data survives page navigations but resets on app restart
+    const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     // Basic shape validation
@@ -39,7 +40,7 @@ export function loadCleanerCache(): CleanerCache | null {
 export function saveCleanerCache(cache: CleanerCache): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+    // Session-scoped persistence only
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
   } catch {}
 }
-

@@ -1,0 +1,177 @@
+*** Begin Patch
+*** Update File: src/routes/cleaner/+page.svelte
+@@
+-          {#if largeFiles.length > 0}
+-            <ScrollArea orientation="both" class="h-64 rounded border">
+-              <ul class="text-sm">
+-                {#each largeFiles as file (file.path)}
+-                  <li class="flex items-center justify-between gap-2 px-2 py-1">
+-                    <div class="flex items-center gap-2">
+-                      <Checkbox
+-                        checked={selectedLargeFiles.includes(file.path)}
+-                        onCheckedChange={() => handleFileSelection(file.path, 'large')}
+-                      />
+-                      <span class="truncate">{file.path}</span>
+-                    </div>
+-                    {#if file.size}
+-                      <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(file.size)}</span>
+-                    {/if}
+-                  </li>
+-                {/each}
+-              </ul>
+-            </ScrollArea>
+-          {:else}
+-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
+-          {/if}
++          <div class="h-64 rounded border overflow-auto" bind:this={largeViewportEl} onscroll={onLargeScroll}>
++            <ul class="text-sm">
++              {#if largeTopPad > 0}
++                <li style={`height:${largeTopPad}px`} aria-hidden="true"></li>
++              {/if}
++              {#each largeWindow as row, i (row.file ? row.file.path : `skel-large-${largeStart + i}`)}
++                {#if row.skel}
++                  <li class="px-2 py-1"><Skeleton class="h-4 w-3/4" aria-hidden="true" /></li>
++                {:else}
++                  <li class="flex items-center justify-between gap-2 px-2 py-1">
++                    <div class="flex items-center gap-2">
++                      <Checkbox
++                        checked={selectedLargeFiles.includes(row.file!.path)}
++                        onCheckedChange={() => handleFileSelection(row.file!.path, 'large')}
++                      />
++                      <span class="truncate">{row.file!.path}</span>
++                    </div>
++                    {#if row.file?.size}
++                      <span class="text-xs opacity-70 whitespace-nowrap">{formatBytes(row.file!.size!)}</span>
++                    {/if}
++                  </li>
++                {/if}
++              {/each}
++              {#if largeBottomPad > 0}
++                <li style={`height:${largeBottomPad}px`} aria-hidden="true"></li>
++              {/if}
++            </ul>
++          </div>
+@@
+-          {#if duplicateFiles.length > 0}
+-            <ScrollArea orientation="both" class="h-64 rounded border">
+-              <ul class="text-sm">
+-                {#each duplicateFiles as file (file.path)}
+-                  <li class="flex items-center gap-2 px-2 py-1">
+-                    <Checkbox
+-                      checked={selectedDuplicateFiles.includes(file.path)}
+-                      onCheckedChange={() => handleFileSelection(file.path, 'duplicate')}
+-                    />
+-                    <span class="truncate">{file.path}</span>
+-                  </li>
+-                {/each}
+-              </ul>
+-            </ScrollArea>
+-          {:else}
+-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
+-          {/if}
++          <div class="h-64 rounded border overflow-auto" bind:this={dupViewportEl} onscroll={onDupScroll}>
++            <ul class="text-sm">
++              {#if dupTopPad > 0}
++                <li style={`height:${dupTopPad}px`} aria-hidden="true"></li>
++              {/if}
++              {#each dupWindow as row, i (row.file ? row.file.path : `skel-dup-${dupStart + i}`)}
++                {#if row.skel}
++                  <li class="px-2 py-1"><Skeleton class="h-4 w-2/3" aria-hidden="true" /></li>
++                {:else}
++                  <li class="flex items-center gap-2 px-2 py-1">
++                    <Checkbox
++                      checked={selectedDuplicateFiles.includes(row.file!.path)}
++                      onCheckedChange={() => handleFileSelection(row.file!.path, 'duplicate')}
++                    />
++                    <span class="truncate">{row.file!.path}</span>
++                  </li>
++                {/if}
++              {/each}
++              {#if dupBottomPad > 0}
++                <li style={`height:${dupBottomPad}px`} aria-hidden="true"></li>
++              {/if}
++            </ul>
++          </div>
+@@
+-          {#if emptyFolders.length > 0}
+-            <ScrollArea orientation="both" class="h-64 rounded border">
+-              <ul class="text-sm">
+-                {#each emptyFolders as folder (folder.path)}
+-                  <li class="flex items-center gap-2 px-2 py-1">
+-                    <Checkbox
+-                      checked={selectedEmptyFolders.includes(folder.path)}
+-                      onCheckedChange={() => handleFileSelection(folder.path, 'empty')}
+-                    />
+-                    <span class="truncate">{folder.path}</span>
+-                  </li>
+-                {/each}
+-              </ul>
+-            </ScrollArea>
+-          {:else}
+-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
+-          {/if}
++          <div class="h-64 rounded border overflow-auto" bind:this={emptyViewportEl} onscroll={onEmptyScroll}>
++            <ul class="text-sm">
++              {#if emptyTopPad > 0}
++                <li style={`height:${emptyTopPad}px`} aria-hidden="true"></li>
++              {/if}
++              {#each emptyWindow as row, i (row.file ? row.file.path : `skel-empty-${emptyStart + i}`)}
++                {#if row.skel}
++                  <li class="px-2 py-1"><Skeleton class="h-4 w-1/2" aria-hidden="true" /></li>
++                {:else}
++                  <li class="flex items-center gap-2 px-2 py-1">
++                    <Checkbox
++                      checked={selectedEmptyFolders.includes(row.file!.path)}
++                      onCheckedChange={() => handleFileSelection(row.file!.path, 'empty')}
++                    />
++                    <span class="truncate">{row.file!.path}</span>
++                  </li>
++                {/if}
++              {/each}
++              {#if emptyBottomPad > 0}
++                <li style={`height:${emptyBottomPad}px`} aria-hidden="true"></li>
++              {/if}
++            </ul>
++          </div>
+@@
+-          {#if brokenShortcuts.length > 0}
+-            <ScrollArea orientation="both" class="h-64 rounded border">
+-              <ul class="text-sm">
+-                {#each brokenShortcuts as shortcut (shortcut.path)}
+-                  <li class="flex items-center gap-2 px-2 py-1">
+-                    <Checkbox
+-                      checked={selectedBrokenShortcuts.includes(shortcut.path)}
+-                      onCheckedChange={() => handleFileSelection(shortcut.path, 'broken_shortcut')}
+-                    />
+-                    <span class="truncate">{shortcut.path}</span>
+-                  </li>
+-                {/each}
+-              </ul>
+-            </ScrollArea>
+-          {:else}
+-            <p class="text-sm text-muted-foreground">No results. Click Scan to search.</p>
+-          {/if}
++          <div class="h-64 rounded border overflow-auto" bind:this={shortcutViewportEl} onscroll={onShortcutScroll}>
++            <ul class="text-sm">
++              {#if shortcutTopPad > 0}
++                <li style={`height:${shortcutTopPad}px`} aria-hidden="true"></li>
++              {/if}
++              {#each shortcutWindow as row, i (row.file ? row.file.path : `skel-short-${shortcutStart + i}`)}
++                {#if row.skel}
++                  <li class="px-2 py-1"><Skeleton class="h-4 w-2/3" aria-hidden="true" /></li>
++                {:else}
++                  <li class="flex items-center gap-2 px-2 py-1">
++                    <Checkbox
++                      checked={selectedBrokenShortcuts.includes(row.file!.path)}
++                      onCheckedChange={() => handleFileSelection(row.file!.path, 'broken_shortcut')}
++                    />
++                    <span class="truncate">{row.file!.path}</span>
++                  </li>
++                {/if}
++              {/each}
++              {#if shortcutBottomPad > 0}
++                <li style={`height:${shortcutBottomPad}px`} aria-hidden="true"></li>
++              {/if}
++            </ul>
++          </div>
+*** End Patch

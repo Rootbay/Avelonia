@@ -141,10 +141,11 @@ pub fn get_temp_files_stream(app_handle: AppHandle, batch_size: Option<usize>, m
         total += 1;
         if total >= limit { TEMP_CANCEL.store(true, Ordering::Relaxed); }
         batch.push(p);
-        if batch.len() >= bs {
+            if batch.len() >= bs {
             let _ = app_handle.emit("cleaner-temp-batch", batch.clone());
             batch.clear();
-        }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            }
         if total >= limit { break; }
     }
     if !batch.is_empty() {
@@ -158,6 +159,195 @@ pub fn get_temp_files_stream(app_handle: AppHandle, batch_size: Option<usize>, m
 #[tauri::command]
 pub fn cancel_temp_scan() -> Result<(), String> {
     TEMP_CANCEL.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+// ---------------- Background scanning orchestrators (non-blocking) ----------------
+
+fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chunk: usize) {
+    if items.is_empty() { return; }
+    let mut start = 0usize;
+    let n = items.len();
+    while start < n {
+        let end = std::cmp::min(start + chunk, n);
+        let slice: Vec<(String, u64)> = items[start..end].to_vec();
+        let _ = app.emit(event, slice);
+        // small yield to avoid flooding the IPC/event queue and freezing UI
+        std::thread::sleep(std::time::Duration::from_millis(8));
+        start = end;
+        if TEMP_CANCEL.load(Ordering::Relaxed) { break; }
+    }
+}
+
+fn emit_chunked_strings(app: &AppHandle, event: &str, items: &[String], chunk: usize) {
+    if items.is_empty() { return; }
+    let mut start = 0usize;
+    let n = items.len();
+    while start < n {
+        let end = std::cmp::min(start + chunk, n);
+        let slice: Vec<String> = items[start..end].to_vec();
+        let _ = app.emit(event, slice);
+        std::thread::sleep(std::time::Duration::from_millis(8));
+        start = end;
+        if TEMP_CANCEL.load(Ordering::Relaxed) { break; }
+    }
+}
+
+#[tauri::command]
+pub fn start_cleaner_scan(app_handle: AppHandle, min_size_bytes: Option<u64>, max_temp: Option<usize>) -> Result<(), String> {
+    // Spawn a detached thread so the command returns immediately.
+    let app = app_handle.clone();
+    TEMP_CANCEL.store(false, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let _ = app.emit("cleaner-progress", "Starting scan...");
+        // 1) Temp (streamed by existing function)
+        let _ = app.emit("cleaner-progress", "Scanning temporary files...");
+        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(20_000)));
+
+        if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"temp"})); return; }
+
+        // 2) Large files
+        let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
+        let _ = app.emit("cleaner-progress", "Scanning large files...");
+        match find_large_files_min(min, app.clone()) {
+            Ok(list) => {
+                emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"large"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("large: {}", e)); }
+        }
+
+        if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"large"})); return; }
+
+        // 3) Duplicate groups
+        let _ = app.emit("cleaner-progress", "Scanning duplicates...");
+        match find_duplicate_groups(app.clone()) {
+            Ok(groups) => {
+                // chunk groups to avoid huge IPC messages
+                let mut start = 0usize;
+                let chunk = 60usize;
+                while start < groups.len() {
+                    let end = std::cmp::min(start + chunk, groups.len());
+                    let slice = &groups[start..end];
+                    let _ = app.emit("cleaner-dup-groups-batch", slice);
+                    start = end;
+                    if TEMP_CANCEL.load(Ordering::Relaxed) { break; }
+                }
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"duplicate"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("duplicate: {}", e)); }
+        }
+
+        if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"duplicate"})); return; }
+
+        // 4) Empty folders
+        let _ = app.emit("cleaner-progress", "Scanning empty folders...");
+        match find_empty_folders(app.clone()) {
+            Ok(list) => {
+                emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"empty"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("empty: {}", e)); }
+        }
+
+        if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"empty"})); return; }
+
+        // 5) Broken shortcuts
+        let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
+        match find_broken_shortcuts(app.clone()) {
+            Ok(list) => {
+                emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"shortcuts"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("shortcuts: {}", e)); }
+        }
+
+        let _ = app.emit("cleaner-done", serde_json::json!({"scope":"all"}));
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_cleaner_scan() -> Result<(), String> {
+    TEMP_CANCEL.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+// Category-specific background starters (optional helpers for UI buttons)
+#[tauri::command]
+pub fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> Result<(), String> {
+    let app = app_handle.clone();
+    TEMP_CANCEL.store(false, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
+        let _ = app.emit("cleaner-progress", "Scanning large files...");
+        match find_large_files_min(min, app.clone()) {
+            Ok(list) => {
+                emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"large"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("large: {}", e)); }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), String> {
+    let app = app_handle.clone();
+    TEMP_CANCEL.store(false, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let _ = app.emit("cleaner-progress", "Scanning duplicates...");
+        match find_duplicate_groups(app.clone()) {
+            Ok(groups) => {
+                let mut start = 0usize;
+                let chunk = 60usize;
+                while start < groups.len() {
+                    let end = std::cmp::min(start + chunk, groups.len());
+                    let slice = &groups[start..end];
+                    let _ = app.emit("cleaner-dup-groups-batch", slice);
+                    start = end;
+                    if TEMP_CANCEL.load(Ordering::Relaxed) { break; }
+                }
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"duplicate"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("duplicate: {}", e)); }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn start_empty_scan(app_handle: AppHandle) -> Result<(), String> {
+    let app = app_handle.clone();
+    TEMP_CANCEL.store(false, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let _ = app.emit("cleaner-progress", "Scanning empty folders...");
+        match find_empty_folders(app.clone()) {
+            Ok(list) => {
+                emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"empty"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("empty: {}", e)); }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn start_shortcut_scan(app_handle: AppHandle) -> Result<(), String> {
+    let app = app_handle.clone();
+    TEMP_CANCEL.store(false, Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
+        match find_broken_shortcuts(app.clone()) {
+            Ok(list) => {
+                emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
+                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"shortcuts"}));
+            }
+            Err(e) => { let _ = app.emit("cleaner-error", format!("shortcuts: {}", e)); }
+        }
+    });
     Ok(())
 }
 
