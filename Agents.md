@@ -171,3 +171,39 @@ TailwindCSS v4 docs: \[https://tailwindcss.com/docs/v4](https://tailwindcss.com/
 shadcn-svelte docs: \[https://shadcn-svelte.com](https://shadcn-svelte.com)
 
 lucide icons: \[https://lucide.dev](https://lucide.dev)
+
+\# Cleaner Unified List (Svelte)  Virtualization + Scroll
+
+- Symptom: In the Cleaner unified table, users could only scroll 13 rows before content appeared to stick while the scrollbar thumb moved.
+- Root causes:
+  - Table-based virtualization using spacer `<tr>` rows is fragile across environments; table layout can collapse heights and fight scrolling.
+  - Top padding was computed in row-sized steps (`start * rowHeight`), causing bounce at row boundaries.
+  - Some containers used `onscroll` instead of Sveltes `on:scroll` directive.
+
+- Fixes implemented (file: `src/routes/cleaner/+page.svelte`):
+  - De-duplicate `allItems` by `path` to avoid Svelte `each_key_duplicate` in keyed `{#each}`.
+  - Use `on:scroll={...}` for all scroll handlers.
+  - Pixel-based top/bottom padding:
+    - Introduced `UNIFIED_PREBUFFER = 3` and `unifiedPadPx` tied to `scrollTop`.
+    - Top pad follows actual pixels, not just `start * rowHeight`.
+    - Bottom pad derives from total height minus top pad minus rendered window height.
+  - Virtualization fallback: disabled by default for stability.
+    - `let unifiedAutoFallback = true;`
+    - `unifiedVirtualize = (!unifiedAutoFallback) && (scanning || allItems.length > 1500)`.
+
+- Re-enable virtualization (optional):
+  - Set `unifiedAutoFallback = false` and test with large lists.
+  - Tune threshold `(allItems.length > 1500)` and `UNIFIED_PREBUFFER`.
+  - Ensure `UNIFIED_ROW_PX` measures stably and container uses `overscroll-behavior: contain`.
+
+- Recommendation (long-term):
+  - Prefer a div-based virtualizer over a table:
+    - Scroll container (`overflow: auto`) with a fixed-height spacer representing total height.
+    - Absolutely position visible rows within the spacer (or offset wrapper).
+    - Avoid spacer `<tr>` in `<table>` for virtualization.
+
+- Debug tips:
+  - Ensure no effects reset `unifiedStart` during scroll; only update it from user scroll.
+  - Streaming flush gates should respect user activity to limit layout thrash.
+  - Log `scrollTop`, `unifiedStart`, `unifiedPadPx`, `UNIFIED_ROW_PX` when diagnosing.
+  - Keep `overscroll-behavior: contain` on the scroll container.
