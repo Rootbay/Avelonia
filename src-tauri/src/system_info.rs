@@ -27,6 +27,5 @@ pub fn get_total_memory() -> Result<u64, String> {
 
 #[tauri::command]
 pub fn get_boot_time() -> Result<u64, String> {
-    // In this sysinfo version, boot_time is an associated function
     Ok(System::boot_time())
 }

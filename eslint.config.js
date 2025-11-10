@@ -26,6 +26,18 @@ export default [
       },
     },
   },
+  {
+    files: ['**/*.svelte.ts'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      parser: tsParser,
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+    },
+  },
   js.configs.recommended,
   ...tseslint.configs['flat/recommended'],
   ...svelte.configs['flat/recommended'],
@@ -44,12 +56,22 @@ export default [
     rules: {
       'svelte/no-at-html-tags': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'svelte/prefer-svelte-reactivity': 'warn',
+      'svelte/require-each-key': 'warn',
+      'svelte/no-navigation-without-resolve': 'warn',
+      'svelte/prefer-writable-derived': 'warn',
     },
   },
   {
     files: ['**/*.{js,ts}'],
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
   prettierConfig,

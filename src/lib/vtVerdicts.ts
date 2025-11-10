@@ -8,14 +8,13 @@ export type VtReport = {
   verdict: 'Clean' | 'Suspicious' | 'Malicious' | 'Unknown';
   positives?: number;
   permalink?: string;
-  source?: string; // startup | registry
-  // extended stats
+  source?: string;
   malicious?: number;
   suspicious?: number;
   harmless?: number;
   undetected?: number;
   total_vendors?: number;
-  reason?: string; // e.g., no-api-key, file-missing, no-executable, rate-limited, vt-unknown, hashing-failed, http-error, network-error
+  reason?: string;
 };
 
 function normalizeKey(s: string): string {
@@ -52,7 +51,7 @@ function persist(map: Map<string, VerdictLabel>) {
     const obj: Record<string, VerdictLabel> = {};
     for (const [k, v] of map.entries()) obj[k] = v;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-  } catch {}
+  } catch { /* noop */ }
 }
 
 export const vtVerdicts = writable<Map<string, VerdictLabel>>(loadPersisted());
@@ -84,7 +83,7 @@ function persistReasons(map: Map<string, string>) {
     const obj: Record<string, string> = {};
     for (const [k, v] of map.entries()) obj[k] = v;
     localStorage.setItem(REASONS_KEY, JSON.stringify(obj));
-  } catch {}
+  } catch { /* noop */ }
 }
 
 export const vtReasons = writable<Map<string, string>>(loadReasons());
@@ -132,22 +131,31 @@ export function reasonFor(subject: string): string | undefined {
 }
 
 export function setVerdictFromReport(rep: VtReport) {
-  // Map VT verdicts to simple UI labels (case-insensitive)
   const v = String(rep.verdict || '').toLowerCase();
   if (v === 'clean') {
     setVerdict(rep.subject, 'Safe');
-    // clear any old reason
-    vtReasons.update((m) => { const next = new Map(m); next.delete(normalizeKey(rep.subject)); return next; });
+    vtReasons.update((m) => {
+      const next = new Map(m);
+      next.delete(normalizeKey(rep.subject));
+      return next;
+    });
   } else if (v === 'suspicious' || v === 'malicious') {
     setVerdict(rep.subject, 'Sus');
-    vtReasons.update((m) => { const next = new Map(m); next.delete(normalizeKey(rep.subject)); return next; });
+    vtReasons.update((m) => {
+      const next = new Map(m);
+      next.delete(normalizeKey(rep.subject));
+      return next;
+    });
   } else {
-    // Unknown: tag as Not Scanned with reason
     setVerdict(rep.subject, 'Not');
     const rs = (rep.reason || '').toString();
     if (rs) {
       const key = normalizeKey(rep.subject);
-      vtReasons.update((m) => { const next = new Map(m); next.set(key, rs); return next; });
+      vtReasons.update((m) => {
+        const next = new Map(m);
+        next.set(key, rs);
+        return next;
+      });
     }
   }
 }

@@ -35,7 +35,7 @@ tags.subscribe((list) => {
   try {
     const uniq = Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(uniq));
-  } catch {}
+  } catch { /* noop */ }
 });
 
 export function addTag(name: string) {
@@ -46,4 +46,3 @@ export function addTag(name: string) {
     return [...list, n];
   });
 }
-

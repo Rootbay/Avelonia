@@ -7,7 +7,6 @@ pub fn silent_install(path: String, elevate: bool) -> Result<(), String> {
     if !pb.exists() { return Err(format!("installer not found: {}", path)); }
     let ext = pb.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
-    // Helper: Start-Process -Verb RunAs and wait
     fn run_process_elevated(file: &str, args: &[&str]) -> bool {
         let arglist = {
             let items: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', "''"))).collect();
@@ -25,7 +24,7 @@ pub fn silent_install(path: String, elevate: bool) -> Result<(), String> {
     }
 
     if ext == "msi" {
-        let args = ["/i", &path, "/qn", "/norestart", "ALLUSERS=1"]; // machine-wide when possible
+        let args = ["/i", &path, "/qn", "/norestart", "ALLUSERS=1"];
         let ok = if elevate { run_process_elevated("msiexec", &args) } else {
             Command::new("msiexec").args(args).status().map(|s| s.success()).unwrap_or(false)
         };
@@ -92,7 +91,6 @@ pub fn launch_installer(path: String, elevate: bool) -> Result<(), String> {
         if ok { return Ok(()); }
         return Err("msiexec launch failed".into());
     }
-    // EXE: no args
     let ok = if elevate { run_process_elevated(&path, &[]) } else {
         Command::new(&path).status().map(|s| s.success()).unwrap_or(false)
     };
@@ -104,8 +102,6 @@ pub fn launch_installer(path: String, elevate: bool) -> Result<(), String> {
 pub fn launch_installer(_path: String, _elevate: bool) -> Result<(), String> {
     Err("Installer launch is only supported on Windows in this build".into())
 }
-
-// ---------------- Installation verification (Windows) ----------------
 
 #[derive(serde::Serialize, Clone, Default)]
 pub struct UninstallEntry {
@@ -151,7 +147,6 @@ fn read_uninstall_entries() -> Vec<UninstallEntry> {
     let hku = RegKey::predef(HKEY_CURRENT_USER);
     let base = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
     let base_wow = "Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
-    // Native view is handled by default handles; also try explicit 64/32 views when present.
     collect_from(&hklm, base, "HKLM", "x64", &mut out);
     collect_from(&hklm, base_wow, "HKLM", "x86", &mut out);
     collect_from(&hku, base, "HKCU", "x64", &mut out);
@@ -196,7 +191,6 @@ pub async fn verify_install(display_name_hint: Option<String>, timeout_ms: Optio
         sleep(Duration::from_millis(step)).await;
         elapsed += step;
     }
-    // Fallback: if an entry already existed before, accept any matching entry after timeout
     let final_entries = read_uninstall_entries();
     if !hint.is_empty() {
         if let Some(e) = final_entries.into_iter().find(|e| e.display_name.to_lowercase().contains(&hint)) {

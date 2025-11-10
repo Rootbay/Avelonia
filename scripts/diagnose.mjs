@@ -21,7 +21,15 @@ async function main() {
   results.push(['prettier', await run('bun', ['run', 'format:check'])]);
 
   console.log('\n=== Backend: cargo check (src-tauri) ===');
-  results.push(['cargo-check', await run('powershell', ['-NoLogo','-NoProfile','-Command','cd src-tauri; cargo check --all-targets --color always'])]);
+  results.push([
+    'cargo-check',
+    await run('powershell', [
+      '-NoLogo',
+      '-NoProfile',
+      '-Command',
+      'cd src-tauri; cargo check --all-targets --color always',
+    ]),
+  ]);
 
   console.log('\n=== Summary ===');
   let ok = true;
@@ -33,5 +41,7 @@ async function main() {
   process.exit(ok ? 0 : 1);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
-
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

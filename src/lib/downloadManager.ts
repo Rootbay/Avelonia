@@ -18,7 +18,15 @@ export interface Download {
   tags?: string[];
   downloadLink: string;
   eta: string;
-  status: 'available' | 'pending' | 'downloading' | 'paused' | 'completed' | 'queued' | 'failed' | 'installed';
+  status:
+    | 'available'
+    | 'pending'
+    | 'downloading'
+    | 'paused'
+    | 'completed'
+    | 'queued'
+    | 'failed'
+    | 'installed';
   progress: number;
   speed?: string;
   targetPath?: string;
@@ -42,17 +50,22 @@ const downloadPathReservations = new Map<number, string>();
 const usedPaths = new Set<string>();
 let usedPathsSeeded = false;
 const autoInstallTried = new Set<number>();
-// Serialize auto-install attempts to avoid overlapping installers (MSI is single-instance)
 const installQueue: number[] = [];
 let installBusy = false;
 const postCompleteTimers = new Map<number, number>();
 let installPresenceTimer: number | null = null;
+
+type VerifyInstallResult = {
+  verified: boolean;
+  matched?: {
+    display_name?: string;
+    display_version?: string;
+  };
+};
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
-  } catch {
-    // ignore logging errors
-  }
+  } catch { /* noop */ }
 }
 
 async function maybeAutoInstall(id: number) {
@@ -62,14 +75,13 @@ async function maybeAutoInstall(id: number) {
     if (autoInstallTried.has(id)) return;
     installQueue.push(id);
     void processInstallQueue();
-  } catch {}
+  } catch { /* noop */ }
 }
 
 async function processInstallQueue() {
   if (installBusy) return;
   installBusy = true;
   try {
-    // Drain queue sequentially. This avoids MSI single-instance conflicts and stacked UAC prompts.
     while (installQueue.length > 0) {
       const id = installQueue.shift() as number;
       if (autoInstallTried.has(id)) continue;
@@ -85,7 +97,10 @@ async function processInstallQueue() {
         continue;
       }
       if (downloader.installMode === 'normal') {
-        await appLog('INFO', `Launching installer (interactive) for ${snap.name}${downloader.elevate ? ' [elevated]' : ''}`);
+        await appLog(
+          'INFO',
+          `Launching installer (interactive) for ${snap.name}${downloader.elevate ? ' [elevated]' : ''}`
+        );
         try {
           await invoke('launch_installer', { path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Installer launched: ${snap.name}`);
@@ -95,7 +110,10 @@ async function processInstallQueue() {
           autoInstallTried.add(id);
         }
       } else {
-        await appLog('INFO', `Attempting silent install of ${snap.name} (${ext.toUpperCase()})${downloader.elevate ? ' [elevated]' : ''}`);
+        await appLog(
+          'INFO',
+          `Attempting silent install of ${snap.name} (${ext.toUpperCase()})${downloader.elevate ? ' [elevated]' : ''}`
+        );
         try {
           await invoke('silent_install', { path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
@@ -114,30 +132,28 @@ async function processInstallQueue() {
         }
       }
 
-      // Optional verification: check Uninstall registry for a new entry matching the app name
       try {
         if (downloader.verifyInstall) {
           const result = (await invoke('verify_install', {
             displayNameHint: snap.name,
             timeoutMs: 30000,
-          })) as { verified: boolean; matched?: { display_name?: string; display_version?: string } };
-          if (result && (result as any).verified) {
-            const dn = (result as any)?.matched?.display_name || snap.name;
-            const dv = (result as any)?.matched?.display_version || '';
+          })) as VerifyInstallResult;
+          if (result?.verified) {
+            const dn = result.matched?.display_name ?? snap.name;
+            const dv = result.matched?.display_version ?? '';
             await appLog('SUCCESS', `Installed (verified): ${dn}${dv ? ' ' + dv : ''}`);
-            // Prevent integrity watcher from flipping status back to available when the installer file is removed.
-            // Once verified installed, we can drop the installer path reference.
             updateDownloadById(id, (draft) => {
               draft.status = 'installed';
               draft.targetPath = undefined;
             });
           } else {
-            await appLog('WARN', `Install not verified for ${snap.name} (no uninstall entry detected)`);
+            await appLog(
+              'WARN',
+              `Install not verified for ${snap.name} (no uninstall entry detected)`
+            );
           }
         }
-      } catch {
-        // ignore verification errors
-      }
+      } catch { /* noop */ }
     }
   } finally {
     installBusy = false;
@@ -165,9 +181,7 @@ async function checkAndMarkInstalled(id: number) {
         await appLog('SUCCESS', `Installed (verified): ${dl.name}`);
       }
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* noop */ }
 }
 
 function schedulePostCompleteCheck(id: number, delayMs = 5000) {
@@ -178,7 +192,7 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
       void checkAndMarkInstalled(id);
     }, delayMs) as unknown as number;
     postCompleteTimers.set(id, timer);
-  } catch {}
+  } catch { /* noop */ }
 }
 
 function seedUsedPaths() {
@@ -305,7 +319,7 @@ async function performDownload(download: Download): Promise<void> {
       void (async () => {
         try {
           await appLog('ERROR', 'Download failed to start: ' + download.name);
-        } catch {}
+        } catch { /* noop */ }
       })();
       updateDownloadById(download.id, (draft) => {
         draft.status = 'failed';
@@ -347,7 +361,6 @@ export function initDownloadListener() {
     const now = Date.now();
     const previous = lastSample.get(id);
 
-    // Always update progress and status promptly
     updateDownloadById(id, (draft) => {
       draft.progress = total === 0 ? -1 : Math.min(100, (downloaded / total) * 100);
       draft.status = total > 0 && downloaded >= total ? 'completed' : 'downloading';
@@ -369,16 +382,13 @@ export function initDownloadListener() {
             'SUCCESS',
             'Download completed: ' + snap.name + (snap.targetPath ? ' -> ' + snap.targetPath : '')
           );
-          // Try auto-install if enabled
           void maybeAutoInstall(id);
-          // Schedule a post-complete check to mark as Installed when present
           schedulePostCompleteCheck(id, 5000);
         }
       })();
       return;
     }
 
-    // Compute smoothed speed (EMA) and throttle UI updates
     if (previous) {
       const deltaBytes = downloaded - previous.bytes;
       const deltaTime = (now - previous.time) / 1000;
@@ -392,7 +402,7 @@ export function initDownloadListener() {
         const shouldEmit = now - lastEmit >= UI_UPDATE_MS;
         if (shouldEmit) {
           const bps = nextAvg;
-          let speedStr = formatBytesPerSec(bps);
+          const speedStr = formatBytesPerSec(bps);
           let etaStr = '';
           if (total > 0 && bps > 1) {
             const remaining = Math.max(0, total - downloaded);
@@ -400,9 +410,10 @@ export function initDownloadListener() {
             const hrs = Math.floor(etaSec / 3600);
             const mins = Math.floor((etaSec % 3600) / 60);
             const secs = etaSec % 60;
-            etaStr = hrs > 0
-              ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-              : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            etaStr =
+              hrs > 0
+                ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+                : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
           } else if (total === 0) {
             etaStr = '—';
           }
@@ -415,7 +426,6 @@ export function initDownloadListener() {
         }
       }
     } else {
-      // First sample: show placeholder ETA
       if (total === 0) {
         updateDownloadById(id, (draft) => {
           draft.eta = '—';
@@ -460,9 +470,8 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Uninstalled detected: ${d.name}`);
             }
-          } catch {}
+          } catch { /* noop */ }
         } else if (d.status === 'completed' && isLikelyInstaller(d)) {
-          // If the installer file is gone, flip back to available (parallell stöd till integrity watch)
           try {
             const p = d.targetPath;
             let exists = false;
@@ -479,10 +488,10 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Installer file missing; reset to available: ${d.name}`);
             }
-          } catch {}
+          } catch { /* noop */ }
         }
       }
-    } catch {}
+    } catch { /* noop */ }
   }, intervalMs) as unknown as number;
 }
 
@@ -514,7 +523,6 @@ export async function getDownloadPath(dl: Download): Promise<string | null> {
 
     const existingPath = typeof dl.targetPath === 'string' ? dl.targetPath : null;
 
-    // Prefer an already assigned path for this item when available
     if (existingPath && !reservedPaths.has(existingPath) && !takenByOthers.has(existingPath)) {
       return existingPath;
     }
@@ -550,7 +558,6 @@ export function startDownload(id: number) {
     return;
   }
 
-  // Reset auto-install attempt flag for this item so a fresh download can auto-install again.
   autoInstallTried.delete(id);
 
   if (activeDownloads.has(id) || pendingQueue.includes(id)) {
@@ -581,7 +588,6 @@ export function startDownload(id: number) {
     draft.targetPath = undefined;
   });
 
-  // Log start/queue action for dashboard
   void (async () => {
     const snap = getDownloadSnapshot(id);
     if (!snap) return;
@@ -620,15 +626,8 @@ export async function cancelDownload(id: number) {
 
   lastSample.delete(id);
   finalizeDownload(id);
-  void (async () => { const snap = getDownloadSnapshot(id); if (snap) await appLog('WARN', 'Canceled download: ' + snap.name); })();
+  void (async () => {
+    const snap = getDownloadSnapshot(id);
+    if (snap) await appLog('WARN', 'Canceled download: ' + snap.name);
+  })();
 }
-
-
-
-
-
-
-
-
-
-

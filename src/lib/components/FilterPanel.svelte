@@ -41,8 +41,15 @@
 </script>
 
 {#if showFilters}
-  <Card class={bare ? 'bg-transparent border-0 shadow-none rounded-none p-0' : 'border border-border/60 bg-card/80 shadow-sm'}>
-    <CardHeader class={(bare ? 'px-0 pt-0' : '') + ' flex flex-col gap-2 md:flex-row md:items-center md:justify-between'}>
+  <Card
+    class={bare
+      ? 'bg-transparent border-0 shadow-none rounded-none p-0'
+      : 'border border-border/60 bg-card/80 shadow-sm'}
+  >
+    <CardHeader
+      class={(bare ? 'px-0 pt-0' : '') +
+        ' flex flex-col gap-2 md:flex-row md:items-center md:justify-between'}
+    >
       <CardTitle class="text-base font-semibold">Refine downloads</CardTitle>
       <Button variant="ghost" size="sm" onclick={clearFilters}>Clear all</Button>
     </CardHeader>
@@ -66,7 +73,27 @@
       <div class="space-y-2">
         <Label for="filter-status">Status</Label>
         <Select type="single" bind:value={filters.status}>
-          <SelectTrigger id="filter-status" class="w-full" placeholder="All statuses" />
+          <SelectTrigger id="filter-status" class="w-full">
+            <p>
+              {filters.status === 'available'
+                ? 'Available'
+                : filters.status === 'pending'
+                ? 'Pending'
+                : filters.status === 'queued'
+                ? 'Queued'
+                : filters.status === 'downloading'
+                ? 'Downloading'
+                : filters.status === 'paused'
+                ? 'Paused'
+                : filters.status === 'completed'
+                ? 'Completed'
+                : filters.status === 'installed'
+                ? 'Installed'
+                : filters.status === 'failed'
+                ? 'Failed'
+                : 'All statuses'}
+            </p>
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="">All statuses</SelectItem>
             <SelectItem value="available">Available</SelectItem>

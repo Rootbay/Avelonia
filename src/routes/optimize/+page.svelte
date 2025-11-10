@@ -2,9 +2,14 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
-
   import { Button } from '$lib/components/ui/button';
-  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+  } from '$lib/components/ui/card';
   import { Input } from '$lib/components/ui/input';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { Badge } from '$lib/components/ui/badge';
@@ -47,13 +52,8 @@
     Flag,
   } from '@lucide/svelte';
 
-  // Shared message area
   let message = $state('');
-
-  // Snippet context helper for typed child buttons
   type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
-
-  // Startup shortcuts
   type StartupItem = { path: string; name: string };
   let startupItems = $state<StartupItem[]>([]);
   let selectedStartup = $state(new Set<string>());
@@ -63,7 +63,6 @@
   let startupVisible = $state(50);
   let startupSentinel: HTMLElement | null = null;
 
-  // Performance tuning for Optimize page
   const STARTUP_MAX_DOM = 300;
   const REGISTRY_MAX_DOM = 300;
   const TASKS_MAX_DOM = 600;
@@ -71,17 +70,14 @@
   const REGISTRY_ROW_PX = 56;
   const TASKS_ROW_PX = 64;
 
-  // Windowing offsets (simple sliding window to cap DOM size)
   let startupStart = $state(0);
   let registryStart = $state(0);
   let tasksStart = $state(0);
-  // Scroll container refs for robust handlers (use $state to satisfy Svelte runes reactivity checks)
   let startupScrollEl = $state<HTMLElement | null>(null);
   let registryScrollEl = $state<HTMLElement | null>(null);
   let tasksScrollEl = $state<HTMLElement | null>(null);
-
-  // Debounced queries to reduce recomputation while typing
   let startupQueryDeb = $state('');
+
   $effect(() => {
     const t = setTimeout(() => (startupQueryDeb = startupQuery), 180);
     return () => clearTimeout(t);
@@ -93,7 +89,13 @@
     try {
       const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
       startupItems = Array.isArray(items) ? items : [];
-      try { console.debug('[VT] startup items loaded:', startupItems.length, startupItems.map((i)=>i.name).slice(0,10)); } catch {}
+      try {
+        console.debug(
+          '[VT] startup items loaded:',
+          startupItems.length,
+          startupItems.map((i) => i.name).slice(0, 10)
+        );
+      } catch { /* noop */ }
       selectedStartup = new Set();
       startupLoaded = true;
       startupVisible = Math.min(startupItems.length, 50);
@@ -109,7 +111,6 @@
     await loadStartupItems();
   }
 
-  // Live update (polling) for Startup list
   let _startupPollTimer: number | null = null;
   let _startupPollBusy = false;
   async function pollStartupOnce() {
@@ -118,22 +119,26 @@
     try {
       const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
       const next = Array.isArray(items) ? items : [];
-      // Compare by path set
       const curSet = new Set(startupItems.map((i) => i.path));
       const nextSet = new Set(next.map((i) => i.path));
       let changed = curSet.size !== nextSet.size;
       if (!changed) {
-        for (const p of nextSet) { if (!curSet.has(p)) { changed = true; break; } }
+        for (const p of nextSet) {
+          if (!curSet.has(p)) {
+            changed = true;
+            break;
+          }
+        }
       }
       if (changed) {
         const keep = new Set(selectedStartup);
         startupItems = next;
-        // Preserve selection where possible
         selectedStartup = new Set(Array.from(keep).filter((p) => nextSet.has(p)));
         startupVisible = Math.min(Math.max(50, startupVisible), startupItems.length);
       }
-    } catch {}
-    finally { _startupPollBusy = false; }
+    } catch { /* noop */ } finally {
+      _startupPollBusy = false;
+    }
   }
 
   function normalizeWinPath(p: string) {
@@ -162,7 +167,10 @@
     const target = event.currentTarget as HTMLElement | null;
     requestAnimationFrame(() => {
       const el = (target as HTMLElement | null) || startupScrollEl;
-      if (!el) { _startupScrollTick = false; return; }
+      if (!el) {
+        _startupScrollTick = false;
+        return;
+      }
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
         startupVisible = Math.min(startupVisible + 100, filteredStartupItems.length);
         if (startupVisible - startupStart > STARTUP_MAX_DOM) {
@@ -172,7 +180,7 @@
       _startupScrollTick = false;
     });
   }
-  // Startup removal confirmation state
+
   let showStartupConfirm = $state(false);
   let pendingStartup: string[] = $state([]);
   function requestRemoveSelectedStartup() {
@@ -180,6 +188,7 @@
     pendingStartup = Array.from(selectedStartup);
     showStartupConfirm = true;
   }
+
   async function confirmRemoveStartup() {
     showStartupConfirm = false;
     try {
@@ -203,16 +212,20 @@
       pendingStartup = [];
     }
   }
+
   async function openStartupFolders() {
     try {
       const folders: string[] = await invoke('get_startup_folders');
       for (const f of folders) {
-        try { await openPath(f); } catch {}
+        try {
+          await openPath(f);
+        } catch { /* noop */ }
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  // Registry Run
   type StartupRegItem = { hive: string; key: string; name: string; command: string };
   let startupRegItems = $state<StartupRegItem[]>([]);
   let selectedReg = $state(new Set<string>());
@@ -222,14 +235,7 @@
   let registryVisible = $state(50);
   let registrySentinel: HTMLElement | null = null;
   const regId = (it: StartupRegItem) => `${it.hive}|${it.key}|${it.name}`;
-
   let registryQueryDeb = $state('');
-  $effect(() => {
-    const t = setTimeout(() => (registryQueryDeb = registryQuery), 200);
-    return () => clearTimeout(t);
-  });
-
-  // Registry removal confirmation state
   let showRegistryConfirm = $state(false);
   let pendingRegistry: StartupRegItem[] = $state([]);
   let registryForce = $state(false);
@@ -239,8 +245,11 @@
   let registryDeleteTasksByMatch = $state(false);
   let registryRemoveWMIByMatch = $state(false);
   let registryUserRebooted = $state(false);
+  let showPostCleanup = $state(false);
+  let postDiagLoading = $state(false);
+  let postDiag: CleanupDiagnostics | null = $state(null);
+  let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
 
-  // Post-cleanup diagnostics & instructions popup
   type CleanupDiagnostics = {
     removedRegistry: { ok: string[]; stillPresent: string[] };
     runningImages: { running: string[]; stopped: string[] };
@@ -248,12 +257,7 @@
     serviceMatches: { running: string[]; disabled: string[] };
     rebootRecommended: boolean;
   };
-  let showPostCleanup = $state(false);
-  let postDiagLoading = $state(false);
-  let postDiag: CleanupDiagnostics | null = $state(null);
 
-  // Presets for removal strategy
-  let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
   function applyRegPreset(p: 'basic' | 'force' | 'aggressive' | 'full') {
     if (p === 'basic') {
       registryForce = false;
@@ -285,20 +289,31 @@
       registryRemoveWMIByMatch = true;
     }
   }
+
   $effect(() => {
-    // Apply preset when it changes; manual tweaks are still respected until preset is changed again
     const _p = regPreset;
     applyRegPreset(_p);
   });
 
-  // History-driven suggestions
+  $effect(() => {
+    const t = setTimeout(() => (registryQueryDeb = registryQuery), 200);
+    return () => clearTimeout(t);
+  });
+
   type RegistryAttempt = {
     attempts: number;
     rebootConfirmed: boolean;
-    lastOptions: { force: boolean; ifeo: boolean; dor: boolean; purge: boolean; tasks: boolean; wmi: boolean };
+    lastOptions: {
+      force: boolean;
+      ifeo: boolean;
+      dor: boolean;
+      purge: boolean;
+      tasks: boolean;
+      wmi: boolean;
+    };
     lastStrategy?: 'basic' | 'force' | 'aggressive' | 'full';
     fullCleanupUsed?: boolean;
-    pendingVerification?: boolean; // set when full cleanup used; verified after reboot
+    pendingVerification?: boolean;
     suspicious?: boolean;
     suspiciousReason?: string;
     lastImages?: string[];
@@ -311,15 +326,14 @@
     try {
       const raw = localStorage.getItem(REG_HISTORY_KEY);
       if (raw) registryHistory = JSON.parse(raw) ?? {};
-    } catch {}
+    } catch { /* noop */ }
   });
   function saveRegHistory() {
     try {
       localStorage.setItem(REG_HISTORY_KEY, JSON.stringify(registryHistory));
-    } catch {}
+    } catch { /* noop */ }
   }
 
-  // Track reboot with boot time signature from backend
   let rebootDetected = $state(false);
   async function initBootCheck() {
     try {
@@ -333,9 +347,7 @@
     }
   }
 
-  const regHasExeImage = $derived(
-    pendingRegistry.some((r) => !!extractExeFromCommand(r.command))
-  );
+  const regHasExeImage = $derived(pendingRegistry.some((r) => !!extractExeFromCommand(r.command)));
   const regHasExePath = $derived(
     pendingRegistry.some((r) => !!extractExePathFromCommand(r.command))
   );
@@ -348,18 +360,17 @@
       const h = registryHistory[id];
       if (!h) continue;
       if (h.rebootConfirmed) anyRebooted = true;
-      if (h.attempts >= 1 && (h.lastOptions.force || h.lastOptions.ifeo || h.lastOptions.dor)) triedBasic = true;
+      if (h.attempts >= 1 && (h.lastOptions.force || h.lastOptions.ifeo || h.lastOptions.dor))
+        triedBasic = true;
     }
     return anyRebooted && triedBasic;
   });
 
-  // (deduplicated: RegistryAttempt + registryHistory are defined above)
   function requestRemoveSelectedRegistry() {
     const entries = startupRegItems.filter((it) => selectedReg.has(regId(it)));
     if (entries.length === 0) return;
     pendingRegistry = entries;
     showRegistryConfirm = true;
-    // reset toggles
     registryForce = false;
     registryBlockIFEO = false;
     registryDeleteOnReboot = false;
@@ -368,12 +379,13 @@
     registryRemoveWMIByMatch = false;
     registryUserRebooted = false;
 
-    // Suggest advanced steps if user has rebooted after a prior attempt
     const ids = pendingRegistry.map(regId);
     const anyRebooted = ids.some((id) => registryHistory[id]?.rebootConfirmed);
     const triedBasic = ids.some((id) => {
       const h = registryHistory[id];
-      return h && h.attempts >= 1 && (h.lastOptions.force || h.lastOptions.ifeo || h.lastOptions.dor);
+      return (
+        h && h.attempts >= 1 && (h.lastOptions.force || h.lastOptions.ifeo || h.lastOptions.dor)
+      );
     });
     if (anyRebooted && triedBasic) {
       registryPurgeStartupApproved = true;
@@ -381,53 +393,87 @@
       registryRemoveWMIByMatch = true;
     }
   }
+
   async function confirmRemoveRegistry() {
     showRegistryConfirm = false;
     try {
       const strategyUsed = regPreset;
-      const removed: number = await invoke(registryForce ? 'force_remove_registry_run' : 'remove_registry_run', { entries: pendingRegistry });
+      const removed: number = await invoke(
+        registryForce ? 'force_remove_registry_run' : 'remove_registry_run',
+        { entries: pendingRegistry }
+      );
       message = `Removed ${removed} registry startup entr${removed === 1 ? 'y' : 'ies'}.`;
       if (removed > 0) {
         toast.success(message);
-        pushLog('SUCCESS', message + (strategyUsed ? ` (preset: ${strategyUsed})` : ''), 'Optimize');
+        pushLog(
+          'SUCCESS',
+          message + (strategyUsed ? ` (preset: ${strategyUsed})` : ''),
+          'Optimize'
+        );
       } else {
         toast.info('No entries removed');
         pushLog('INFO', 'No registry entries removed', 'Optimize');
       }
       selectedReg = new Set();
       await reloadRegistryItems();
-      // Watchdog monitor: poll for reappearance or process restart
       monitorRegistryWatchdog([...pendingRegistry]);
 
-      // Optional hardening actions
-      const images = Array.from(new Set(pendingRegistry.map((r) => extractExeFromCommand(r.command)).filter((x): x is string => !!x)));
-      const paths = Array.from(new Set(pendingRegistry.map((r) => extractExePathFromCommand(r.command)).filter((x): x is string => !!x)));
-      // Try to stop/disable related services by matching PathName
+      const images = Array.from(
+        new Set(
+          pendingRegistry
+            .map((r) => extractExeFromCommand(r.command))
+            .filter((x): x is string => !!x)
+        )
+      );
+      const paths = Array.from(
+        new Set(
+          pendingRegistry
+            .map((r) => extractExePathFromCommand(r.command))
+            .filter((x): x is string => !!x)
+        )
+      );
       try {
-        const services = (await invoke('list_services')) as Array<{ name: string; display_name: string; state: string; start_mode: string; path: string }>;
+        const services = (await invoke('list_services')) as Array<{
+          name: string;
+          display_name: string;
+          state: string;
+          start_mode: string;
+          path: string;
+        }>;
         const lower = (s: string) => s?.toLowerCase?.() ?? '';
         const suspects = new Set(
           services
             .filter((svc) => {
               const p = lower(svc.path);
-              return images.some((img) => p.includes(lower(img))) || paths.some((full) => p.includes(lower(full)));
+              return (
+                images.some((img) => p.includes(lower(img))) ||
+                paths.some((full) => p.includes(lower(full)))
+              );
             })
             .map((s) => s.name)
         );
         if (suspects.size > 0) {
           const names = Array.from(suspects);
-          try { await invoke('stop_services', { names }); } catch {}
+          try {
+            await invoke('stop_services', { names });
+          } catch { /* noop */ }
           try {
             const n = (await invoke('disable_services', { names })) as number;
             if (n > 0) toast.message(`Disabled ${n} related service${n === 1 ? '' : 's'}.`);
-          } catch (e) { console.warn('disable_services failed', e); }
+          } catch (e) {
+            console.warn('disable_services failed', e);
+          }
         }
-      } catch (e) { console.warn('list_services failed', e); }
+      } catch (e) {
+        console.warn('list_services failed', e);
+      }
       if (registryBlockIFEO && images.length) {
         try {
           const n = (await invoke('block_process_ifeo', { images, enable: true })) as number;
           if (n > 0) toast.success(`Blocked ${n} process${n === 1 ? '' : 'es'} via IFEO.`);
-        } catch (e) { console.warn('block_process_ifeo failed', e); }
+        } catch (e) {
+          console.warn('block_process_ifeo failed', e);
+        }
       }
       let dorScheduled = false;
       if (registryDeleteOnReboot && paths.length) {
@@ -437,36 +483,48 @@
             toast.message(`Scheduled delete on reboot for ${n} file${n === 1 ? '' : 's'}.`);
             dorScheduled = true;
           }
-        } catch (e) { console.warn('schedule_delete_on_reboot failed', e); }
+        } catch (e) {
+          console.warn('schedule_delete_on_reboot failed', e);
+        }
       }
-      // Purge StartupApproved entries
       if (registryPurgeStartupApproved) {
         try {
           const names = pendingRegistry.map((r) => r.name);
           const n = (await invoke('purge_startup_approved', { names })) as number;
           if (n > 0) toast.message(`Purged StartupApproved for ${n} entr${n === 1 ? 'y' : 'ies'}.`);
-        } catch (e) { console.warn('purge_startup_approved failed', e); }
+        } catch (e) {
+          console.warn('purge_startup_approved failed', e);
+        }
       }
-      // Delete related Scheduled Tasks
       if (registryDeleteTasksByMatch && (images.length || paths.length)) {
         try {
           const n = (await invoke('delete_tasks_by_match', { images, paths })) as number;
           if (n > 0) toast.message(`Deleted ${n} related scheduled task${n === 1 ? '' : 's'}.`);
-        } catch (e) { console.warn('delete_tasks_by_match failed', e); }
+        } catch (e) {
+          console.warn('delete_tasks_by_match failed', e);
+        }
       }
-      // Remove matching WMI subscriptions
       if (registryRemoveWMIByMatch && (images.length || paths.length)) {
         try {
-          const n = (await invoke('remove_wmi_subscriptions_by_match', { images, paths })) as number;
+          const n = (await invoke('remove_wmi_subscriptions_by_match', {
+            images,
+            paths,
+          })) as number;
           if (n > 0) toast.message('Removed WMI event subscriptions matching target.');
-        } catch (e) { console.warn('remove_wmi_subscriptions_by_match failed', e); }
+        } catch (e) {
+          console.warn('remove_wmi_subscriptions_by_match failed', e);
+        }
       }
 
-      // Post-cleanup diagnostics and instructions popup
       try {
         postDiagLoading = true;
-        const shouldSuggestReboot = dorScheduled || strategyUsed === 'full' || strategyUsed === 'aggressive';
-        const diag = await runPostCleanupDiagnostics(pendingRegistry, { images, paths, rebootRecommended: shouldSuggestReboot });
+        const shouldSuggestReboot =
+          dorScheduled || strategyUsed === 'full' || strategyUsed === 'aggressive';
+        const diag = await runPostCleanupDiagnostics(pendingRegistry, {
+          images,
+          paths,
+          rebootRecommended: shouldSuggestReboot,
+        });
         postDiag = diag;
         showPostCleanup = true;
       } catch (e) {
@@ -479,17 +537,35 @@
       message = `Failed to remove registry entries: ${e}`;
       toast.error(message);
     } finally {
-      // Persist history per selected entry, include strategy and verification flags
       try {
         const strategy = regPreset;
-        const images = Array.from(new Set(pendingRegistry.map((r) => extractExeFromCommand(r.command)).filter((x): x is string => !!x)));
-        const paths = Array.from(new Set(pendingRegistry.map((r) => extractExePathFromCommand(r.command)).filter((x): x is string => !!x)));
+        const images = Array.from(
+          new Set(
+            pendingRegistry
+              .map((r) => extractExeFromCommand(r.command))
+              .filter((x): x is string => !!x)
+          )
+        );
+        const paths = Array.from(
+          new Set(
+            pendingRegistry
+              .map((r) => extractExePathFromCommand(r.command))
+              .filter((x): x is string => !!x)
+          )
+        );
         for (const it of pendingRegistry) {
           const id = regId(it);
           const prev = (registryHistory[id] ?? {
             attempts: 0,
             rebootConfirmed: false,
-            lastOptions: { force: false, ifeo: false, dor: false, purge: false, tasks: false, wmi: false },
+            lastOptions: {
+              force: false,
+              ifeo: false,
+              dor: false,
+              purge: false,
+              tasks: false,
+              wmi: false,
+            },
           }) as RegistryAttempt;
           registryHistory[id] = {
             attempts: (prev.attempts ?? 0) + 1,
@@ -513,7 +589,7 @@
           } as RegistryAttempt;
         }
         saveRegHistory();
-      } catch {}
+      } catch { /* noop */ }
       pendingRegistry = [];
       registryForce = false;
       registryBlockIFEO = false;
@@ -537,43 +613,47 @@
       rebootRecommended: !!opts.rebootRecommended,
     };
 
-    // 1) Verify registry removals
     try {
       const list = (await invoke('list_registry_run')) as StartupRegItem[];
       const present = new Set(list.map(regId));
       for (const t of targets) {
         const id = regId(t);
-        if (present.has(id)) diag.removedRegistry.stillPresent.push(`${t.hive} \\ ${t.key} Ã¢â€ â€™ ${t.name}`);
-        else diag.removedRegistry.ok.push(`${t.hive} \\ ${t.key} Ã¢â€ â€™ ${t.name}`);
+        const label = `${t.hive} \\ ${t.key} -> ${t.name}`;
+        if (present.has(id)) diag.removedRegistry.stillPresent.push(label);
+        else diag.removedRegistry.ok.push(label);
       }
     } catch (e) {
       console.warn('diagnostics: list_registry_run failed', e);
     }
 
-    // 2) Check if related process images are running
     for (const img of opts.images) {
       try {
         const running = (await invoke('is_process_running', { image: img })) as boolean;
         if (running) diag.runningImages.running.push(img);
         else diag.runningImages.stopped.push(img);
-      } catch {}
+      } catch { /* noop */ }
     }
 
-    // 3) Check for related scheduled tasks (by image or path substring)
     try {
-      const tasks = (await invoke('list_scheduled_tasks')) as Array<{ name: string; task_to_run?: string }>;
+      const tasks = (await invoke('list_scheduled_tasks')) as Array<{
+        name: string;
+        task_to_run?: string;
+      }>;
       const matches: string[] = [];
       for (const t of tasks) {
         let cmd = (t as any)?.task_to_run || '';
         if (!cmd) {
           try {
-            const details = (await invoke('get_task_details', { task_name: t.name })) as [string, string] | any;
+            const details = (await invoke('get_task_details', { task_name: t.name })) as
+              | [string, string]
+              | any;
             cmd = Array.isArray(details) ? (details[0] ?? '') : (details?.task_to_run ?? '');
-          } catch {}
+          } catch { /* noop */ }
         }
         const lower = (cmd || '').toLowerCase();
         if (!lower) continue;
-        const hit = opts.images.some((i) => lower.includes(i.toLowerCase())) ||
+        const hit =
+          opts.images.some((i) => lower.includes(i.toLowerCase())) ||
           opts.paths.some((p) => lower.includes(p.toLowerCase()));
         if (hit) matches.push(t.name);
       }
@@ -582,20 +662,24 @@
       console.warn('diagnostics: list_scheduled_tasks failed', e);
     }
 
-    // 4) Check services that still reference the images/paths
     try {
       const services = (await invoke('list_services')) as Array<{
-        name: string; state: string; start_mode: string; path: string;
+        name: string;
+        state: string;
+        start_mode: string;
+        path: string;
       }>;
       for (const s of services) {
         const p = (s.path || '').toLowerCase();
         if (!p) continue;
-        const hit = opts.images.some((i) => p.includes(i.toLowerCase())) ||
+        const hit =
+          opts.images.some((i) => p.includes(i.toLowerCase())) ||
           opts.paths.some((q) => p.includes(q.toLowerCase()));
         if (!hit) continue;
         const state = (s.state || '').toLowerCase();
         const mode = (s.start_mode || '').toLowerCase();
-        if (state.includes('running') || mode === 'auto' || mode === 'automatic') diag.serviceMatches.running.push(s.name);
+        if (state.includes('running') || mode === 'auto' || mode === 'automatic')
+          diag.serviceMatches.running.push(s.name);
         else diag.serviceMatches.disabled.push(s.name);
       }
       diag.serviceMatches.running = Array.from(new Set(diag.serviceMatches.running));
@@ -611,7 +695,7 @@
     if (!cmd) return null;
     const quoted = cmd.match(/"([^"\\]+?\.exe)"/i);
     if (quoted?.[1]) return quoted[1].split('\\').pop() || quoted[1];
-    const bare = cmd.match(/\b([\w .\-]+\.exe)\b/i);
+    const bare = cmd.match(/\b([\w .-]+\.exe)\b/i);
     if (bare?.[1]) return bare[1].split('\\').pop() || bare[1];
     return null;
   }
@@ -620,7 +704,7 @@
     if (!cmd) return null;
     const q = cmd.match(/"([^"\\]+?\.exe)"/i);
     if (q?.[1]) return q[1];
-    const b = cmd.match(/\b([a-zA-Z]:\\[^\s\"]+?\.exe)\b/);
+    const b = cmd.match(/\b([a-zA-Z]:\\[^\s"]+?\.exe)\b/);
     if (b?.[1]) return b[1];
     return null;
   }
@@ -628,7 +712,6 @@
   async function monitorRegistryWatchdog(targets: StartupRegItem[]) {
     try {
       const ids = new Set(targets.map(regId));
-      // gather process images from commands
       const images = new Set(
         targets
           .map((t) => extractExeFromCommand(t.command))
@@ -638,7 +721,6 @@
       let readded = false;
       let restarted: string[] = [];
       for (let i = 0; i < 6; i++) {
-        // check reappearance in registry
         try {
           const list = (await invoke('list_registry_run')) as StartupRegItem[];
           const set = new Set(list.map(regId));
@@ -648,15 +730,14 @@
             toast.warning('Watchdog detected: entry reappeared in Startup (Registry).');
             break;
           }
-        } catch {}
+        } catch { /* noop */ }
 
-        // check processes
         try {
           for (const img of images) {
             const running = (await invoke('is_process_running', { image: img })) as boolean;
             if (running && !restarted.includes(img)) restarted.push(img);
           }
-        } catch {}
+        } catch { /* noop */ }
 
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -677,7 +758,13 @@
     try {
       const res = (await invoke('list_registry_run')) as StartupRegItem[];
       startupRegItems = Array.isArray(res) ? res : [];
-      try { console.debug('[VT] registry items loaded:', startupRegItems.length, startupRegItems.map((i)=>i.name).slice(0,10)); } catch {}
+      try {
+        console.debug(
+          '[VT] registry items loaded:',
+          startupRegItems.length,
+          startupRegItems.map((i) => i.name).slice(0, 10)
+        );
+      } catch { /* noop */ }
       selectedReg = new Set();
       registryLoaded = true;
       registryVisible = Math.min(startupRegItems.length, 50);
@@ -692,7 +779,6 @@
     await loadRegistryItems();
   }
 
-  // Live update (polling) for Registry list
   let _registryPollTimer: number | null = null;
   let _registryPollBusy = false;
   async function pollRegistryOnce() {
@@ -705,18 +791,25 @@
       const curSet = new Set(startupRegItems.map(id));
       const nextSet = new Set(next.map(id));
       let changed = curSet.size !== nextSet.size;
-      if (!changed) { for (const k of nextSet) { if (!curSet.has(k)) { changed = true; break; } } }
+      if (!changed) {
+        for (const k of nextSet) {
+          if (!curSet.has(k)) {
+            changed = true;
+            break;
+          }
+        }
+      }
       if (changed) {
         startupRegItems = next;
         const keep = new Set(selectedReg);
-        // preserve selection ids present in next
         selectedReg = new Set(Array.from(keep).filter((k) => nextSet.has(k)));
         registryVisible = Math.min(Math.max(50, registryVisible), startupRegItems.length);
       }
-    } catch {}
-    finally { _registryPollBusy = false; }
+    } catch { /* noop */ } finally {
+      _registryPollBusy = false;
+    }
   }
-  // After registry items load and if a reboot was detected, mark reappeared entries as suspicious
+
   async function scanSuspiciousAfterReboot() {
     try {
       if (!registryLoaded || !rebootDetected) return;
@@ -727,7 +820,6 @@
         const wasFull = !!(rec as RegistryAttempt).fullCleanupUsed;
         const pending = !!(rec as RegistryAttempt).pendingVerification;
         if (wasFull && pending && present.has(id)) {
-          // Mark suspicious
           const r = (registryHistory[id] as RegistryAttempt) || ({} as RegistryAttempt);
           r.pendingVerification = false;
           r.rebootConfirmed = true;
@@ -738,7 +830,8 @@
           if (Array.isArray(r.lastImages) && r.lastImages.length) {
             hint.push(`Process image(s): ${r.lastImages.join(', ')}`);
           }
-          r.suspiciousReason = `Entry reappeared after Full cleanup and reboot. ${hint.join(' Ã‚Â· ')}`.trim();
+          r.suspiciousReason =
+            `Entry reappeared after Full cleanup and reboot. ${hint.join(' Ã‚Â· ')}`.trim();
           registryHistory[id] = r;
           updates += 1;
         }
@@ -764,7 +857,10 @@
     const target = event.currentTarget as HTMLElement | null;
     requestAnimationFrame(() => {
       const el = (target as HTMLElement | null) || registryScrollEl;
-      if (!el) { _registryScrollTick = false; return; }
+      if (!el) {
+        _registryScrollTick = false;
+        return;
+      }
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
         registryVisible = Math.min(registryVisible + 100, filteredRegistryItems.length);
         if (registryVisible - registryStart > REGISTRY_MAX_DOM) {
@@ -779,23 +875,34 @@
     if (entries.length === 0) return;
     try {
       await invoke('remove_registry_run', { entries });
-      pushLog('SUCCESS', `Removed ${entries.length} registry startup entr${entries.length===1?'y':'ies'}`, 'Optimize');
-      toast.success(`Removed ${entries.length} registry entr${entries.length===1?'y':'ies'}`);
+      pushLog(
+        'SUCCESS',
+        `Removed ${entries.length} registry startup entr${entries.length === 1 ? 'y' : 'ies'}`,
+        'Optimize'
+      );
+      toast.success(`Removed ${entries.length} registry entr${entries.length === 1 ? 'y' : 'ies'}`);
       await reloadRegistryItems();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  // Scheduled Tasks
-  type ScheduledTask = { name: string; next_run_time: string; status: string; task_to_run: string; author: string; is_sus: boolean };
+  type ScheduledTask = {
+    name: string;
+    next_run_time: string;
+    status: string;
+    task_to_run: string;
+    author: string;
+    is_sus: boolean;
+  };
   let tasks = $state<ScheduledTask[]>([]);
   let tasksQuery = $state('');
   let taskFilter = $state<'all' | 'sus'>('all');
   let includeDisabled = $state(true);
   let includeNoNext = $state(true);
-  let taskSort = $state<'suspicious' | 'name' | 'next' | 'status' | 'author' | 'command'>('suspicious');
-  // SUS heuristics toggles
-  // When false (default), Microsoft system tasks under \Microsoft\Windows will not be flagged SUS
-  // unless the command is strongly suspicious (hard patterns). When true, treat MS tasks like others.
+  let taskSort = $state<'suspicious' | 'name' | 'next' | 'status' | 'author' | 'command'>(
+    'suspicious'
+  );
   let includeMicrosoftInSus = $state(false);
   let tasksLoaded = $state(false);
   let loadingTasks = $state(false);
@@ -804,17 +911,17 @@
   let enrichInFlight = $state(0);
   let enriching = $state(new Set<string>());
   let tasksQueryDeb = $state('');
+  let selectedTasks = $state(new Set<string>());
+  type TaskAction = 'disable' | 'enable' | 'delete' | 'run' | 'end' | '';
+  let taskAction = $state<TaskAction>('');
+  let showTaskConfirm = $state(false);
+  let pendingAction = $state<TaskAction>('');
+  let pendingNames = $state<string[]>([]);
+
   $effect(() => {
     const t = setTimeout(() => (tasksQueryDeb = tasksQuery), 220);
     return () => clearTimeout(t);
   });
-  let selectedTasks = $state(new Set<string>());
-  type TaskAction = 'disable' | 'enable' | 'delete' | 'run' | 'end' | '';
-  let taskAction = $state<TaskAction>('');
-  // Pre-UAC confirmation dialog state
-  let showTaskConfirm = $state(false);
-  let pendingAction = $state<TaskAction>('');
-  let pendingNames = $state<string[]>([]);
 
   function isCommandSuspicious(cmd: string): boolean {
     const c = (cmd || '').toLowerCase();
@@ -838,10 +945,7 @@
   function isHardCommandSuspicious(cmd: string): boolean {
     const c = (cmd || '').toLowerCase();
     return (
-      c.includes(' -enc ') ||
-      c.includes('/b64') ||
-      c.includes('http://') ||
-      c.includes('https://')
+      c.includes(' -enc ') || c.includes('/b64') || c.includes('http://') || c.includes('https://')
     );
   }
 
@@ -859,7 +963,9 @@
     }
     enrichInFlight += 1;
     try {
-      const result = (await invoke('get_task_details', { task_name: name })) as [string, string] | any;
+      const result = (await invoke('get_task_details', { task_name: name })) as
+        | [string, string]
+        | any;
       let task_to_run = '';
       let author = '';
       if (Array.isArray(result)) {
@@ -872,10 +978,11 @@
       const baseSus = isCommandSuspicious(task_to_run);
       let finalSus = baseSus;
       if (!includeMicrosoftInSus && isUnderMicrosoft(name)) {
-        // Only flag MS tasks if strongly suspicious
         finalSus = isHardCommandSuspicious(task_to_run);
       }
-      tasks = tasks.map((t) => (t.name === name ? { ...t, task_to_run, author, is_sus: finalSus } : t));
+      tasks = tasks.map((t) =>
+        t.name === name ? { ...t, task_to_run, author, is_sus: finalSus } : t
+      );
     } catch (e) {
       // ignore
     } finally {
@@ -885,7 +992,6 @@
   }
 
   function queueEnrichVisibleTasks(limit = 10) {
-    // Enrich from the raw tasks list so filters (like 'sus') don't prevent fetching details
     const slice = tasks.slice(0, Math.max(tasksVisible, 200));
     let queued = 0;
     for (const t of slice) {
@@ -897,9 +1003,8 @@
     }
   }
 
-  // Nudge enrichment when filters change so 'Suspicious only' can populate
   $effect(() => {
-    const _ = taskFilter; // track
+    const _ = taskFilter;
     queueEnrichVisibleTasks(20);
   });
 
@@ -912,7 +1017,6 @@
     return { base, folder };
   }
 
-  // selection helpers for tasks are defined after sortedTasks
   async function runSelectedTasks() {
     const names = Array.from(selectedTasks);
     if (!taskAction || names.length === 0) {
@@ -947,7 +1051,7 @@
           }
           console.groupEnd();
         } catch {
-          // ignore console errors in restricted envs
+          // ignore
         }
       }
       await loadTasks();
@@ -966,19 +1070,22 @@
       tasks = Array.isArray(res) ? res : [];
       tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
-      // Mark initial SUS set via backend fast scan
       try {
         const susNames = (await invoke('list_suspicious_tasks')) as string[];
         if (Array.isArray(susNames) && susNames.length) {
-          const initial = includeMicrosoftInSus ? susNames : susNames.filter((nm) => !isUnderMicrosoft(nm));
+          const initial = includeMicrosoftInSus
+            ? susNames
+            : susNames.filter((nm) => !isUnderMicrosoft(nm));
           const susSet = new Set(initial);
           tasks = tasks.map((t) => (susSet.has(t.name) ? { ...t, is_sus: true } : t));
         }
-      } catch {}
-      // kick off enrichment for visible tasks to populate command/author progressively
+      } catch { /* noop */ }
       queueEnrichVisibleTasks(12);
-    } catch (e) { console.error(e); }
-    finally { loadingTasks = false; }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      loadingTasks = false;
+    }
   }
   function onTasksScroll(event: Event) {
     const target = event.currentTarget as HTMLElement | null;
@@ -990,7 +1097,6 @@
     }
   }
 
-  // Filters
   const filteredStartupItems = $derived(
     startupItems.filter((it) => {
       const q = startupQueryDeb.trim().toLowerCase();
@@ -999,14 +1105,16 @@
     })
   );
   const allStartupSelected = $derived(
-    filteredStartupItems.length > 0 && filteredStartupItems.every((it) => selectedStartup.has(it.path))
+    filteredStartupItems.length > 0 &&
+      filteredStartupItems.every((it) => selectedStartup.has(it.path))
   );
   function toggleAllStartup() {
     if (filteredStartupItems.length === 0) return;
-    selectedStartup = allStartupSelected ? new Set() : new Set(filteredStartupItems.map((it) => it.path));
+    selectedStartup = allStartupSelected
+      ? new Set()
+      : new Set(filteredStartupItems.map((it) => it.path));
   }
 
-  // Keep DOM window bounded for Startup list
   $effect(() => {
     const total = filteredStartupItems.length;
     if (startupVisible > total) startupVisible = total;
@@ -1020,10 +1128,15 @@
     startupRegItems.filter((it) => {
       const q = registryQueryDeb.trim().toLowerCase();
       if (q === '') return true;
-      return it.name.toLowerCase().includes(q) || it.command.toLowerCase().includes(q) || it.key.toLowerCase().includes(q) || it.hive.toLowerCase().includes(q);
+      return (
+        it.name.toLowerCase().includes(q) ||
+        it.command.toLowerCase().includes(q) ||
+        it.key.toLowerCase().includes(q) ||
+        it.hive.toLowerCase().includes(q)
+      );
     })
   );
-  // Suspicious list derived from history
+
   const suspectEntries = $derived(
     Object.entries(registryHistory)
       .filter(([, v]) => !!(v as any)?.suspicious)
@@ -1034,15 +1147,17 @@
         return { id, hive, key, name, reason, lastStrategy };
       })
   );
+
   const allRegistrySelected = $derived(
-    filteredRegistryItems.length > 0 && filteredRegistryItems.every((it) => selectedReg.has(regId(it)))
+    filteredRegistryItems.length > 0 &&
+      filteredRegistryItems.every((it) => selectedReg.has(regId(it)))
   );
+
   function toggleAllRegistry() {
     if (filteredRegistryItems.length === 0) return;
     selectedReg = allRegistrySelected ? new Set() : new Set(filteredRegistryItems.map(regId));
   }
 
-  // Keep DOM window bounded for Registry list
   $effect(() => {
     const total = filteredRegistryItems.length;
     if (registryVisible > total) registryVisible = total;
@@ -1052,7 +1167,6 @@
     if (registryStart > registryVisible) registryStart = 0;
   });
 
-  // Dialog for suspicious log
   let showSuspectLog = $state(false);
 
   const filteredTasks = $derived(
@@ -1065,12 +1179,18 @@
       const hasNext = next !== '' && next !== 'n/a' && next !== 'Ã¢â‚¬â€' && next !== '-';
       if (!includeNoNext && !hasNext) return false;
       if (q === '') return true;
-      return (t.name || '').toLowerCase().includes(q) || (t.task_to_run || '').toLowerCase().includes(q) || status.includes(q) || (t.author || '').toLowerCase().includes(q);
+      return (
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.task_to_run || '').toLowerCase().includes(q) ||
+        status.includes(q) ||
+        (t.author || '').toLowerCase().includes(q)
+      );
     })
   );
   const sortedTasks = $derived.by(() => {
     const arr: ScheduledTask[] = [...filteredTasks];
-    const cmpStr = (a?: string, b?: string) => (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' });
+    const cmpStr = (a?: string, b?: string) =>
+      (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' });
     if (taskSort === 'suspicious') {
       arr.sort((a, b) => (a.is_sus === b.is_sus ? cmpStr(a.name, b.name) : a.is_sus ? -1 : 1));
     } else if (taskSort === 'name') {
@@ -1078,7 +1198,8 @@
     } else if (taskSort === 'next') {
       const toTime = (s?: string) => {
         const v = (s || '').trim();
-        if (!v || v.toLowerCase() === 'n/a' || v === 'Ã¢â‚¬â€' || v === '-') return Number.POSITIVE_INFINITY;
+        if (!v || v.toLowerCase() === 'n/a' || v === 'Ã¢â‚¬â€' || v === '-')
+          return Number.POSITIVE_INFINITY;
         const t = Date.parse(v);
         return isNaN(t) ? Number.POSITIVE_INFINITY : t;
       };
@@ -1093,7 +1214,6 @@
     return arr as ScheduledTask[];
   });
 
-  // Keep DOM window bounded for Tasks list
   $effect(() => {
     const total = sortedTasks.length;
     if (tasksVisible > total) tasksVisible = total;
@@ -1102,27 +1222,32 @@
     }
     if (tasksStart > tasksVisible) tasksStart = 0;
   });
+
   const allTasksSelected = $derived(
-    sortedTasks.length > 0 && sortedTasks.slice(tasksStart, tasksVisible).every((t) => selectedTasks.has(t.name))
+    sortedTasks.length > 0 &&
+      sortedTasks.slice(tasksStart, tasksVisible).every((t) => selectedTasks.has(t.name))
   );
+
   function toggleTask(name: string) {
     if (selectedTasks.has(name)) selectedTasks.delete(name);
     else selectedTasks.add(name);
     selectedTasks = new Set(selectedTasks);
   }
+
   function toggleAllTasks() {
     const slice = sortedTasks.slice(tasksStart, tasksVisible);
     if (slice.length === 0) return;
     if (allTasksSelected) selectedTasks = new Set();
     else selectedTasks = new Set(slice.map((t) => t.name));
   }
-  // Heuristic: tasks under \Microsoft\Windows or marked SUS are likely protected
+
   function isLikelyProtected(name: string): boolean {
     const t = tasks.find((x) => x.name === name);
     if (!t) return false;
     const parts = splitTaskName(t.name);
     return !!t.is_sus || (parts.folder || '').startsWith('\\Microsoft\\Windows');
   }
+
   function requestRunSelected() {
     const names = Array.from(selectedTasks);
     if (!taskAction || names.length === 0) {
@@ -1133,50 +1258,90 @@
     pendingNames = names;
     showTaskConfirm = true;
   }
+
   function confirmRunAction() {
     showTaskConfirm = false;
-    // reuse existing flow by setting state and calling runner
     taskAction = pendingAction;
     selectedTasks = new Set(pendingNames);
     void runSelectedTasks();
   }
+
   function switchToDisableAndRun() {
     pendingAction = 'disable';
     confirmRunAction();
   }
 
-  // Network helpers
-  async function flushDns() { try { await invoke('flush_dns'); } catch (e) { console.error(e);} }
-  async function resetWinsock() { try { await invoke('reset_winsock'); } catch (e) { console.error(e);} }
-  async function renewIp() { try { await invoke('renew_ip'); } catch (e) { console.error(e);} }
-
-  // Observe sections to load lazily
-  onMount(() => {
-    // Detect reboot signature early
-    void initBootCheck();
-    const io = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        if (startupSentinel && entry.target === startupSentinel) loadStartupItems();
-        if (registrySentinel && entry.target === registrySentinel) loadRegistryItems();
-        if (tasksSentinel && entry.target === tasksSentinel) loadTasks();
+  async function runNetworkAction(
+    label: string,
+    action: () => Promise<string>
+  ) {
+    try {
+      const output = await action();
+      const message = (output ?? '').trim();
+      if (message) {
+        toast.success(message);
+      } else {
+        toast.success(`${label} completed`);
       }
-    }, { root: null, rootMargin: '0px', threshold: 0.1 });
+    } catch (error: unknown) {
+      console.error(error);
+      const text =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+          ? error
+          : `${label} failed`;
+      toast.error(text);
+    }
+  }
+
+  async function flushDns() {
+    await runNetworkAction('Flush DNS', () => invoke<string>('flush_dns'));
+  }
+
+  async function resetWinsock() {
+    await runNetworkAction('Reset Winsock', () => invoke<string>('reset_winsock'));
+  }
+
+  async function renewIp() {
+    await runNetworkAction('Renew IP', () => invoke<string>('renew_ip'));
+  }
+
+  onMount(() => {
+    void initBootCheck();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          if (startupSentinel && entry.target === startupSentinel) loadStartupItems();
+          if (registrySentinel && entry.target === registrySentinel) loadRegistryItems();
+          if (tasksSentinel && entry.target === tasksSentinel) loadTasks();
+        }
+      },
+      { root: null, rootMargin: '0px', threshold: 0.1 }
+    );
     if (startupSentinel) io.observe(startupSentinel);
     if (registrySentinel) io.observe(registrySentinel);
     if (tasksSentinel) io.observe(tasksSentinel);
-    // Start lightweight polling while Optimize is mounted
-    try { _startupPollTimer = setInterval(pollStartupOnce, 5000) as unknown as number; } catch {}
-    try { _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number; } catch {}
+    try {
+      _startupPollTimer = setInterval(pollStartupOnce, 5000) as unknown as number;
+    } catch { /* noop */ }
+    try {
+      _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number;
+    } catch { /* noop */ }
     return () => {
       io.disconnect();
-      try { if (_startupPollTimer) clearInterval(_startupPollTimer as unknown as number); } catch {}
-      try { if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number); } catch {}
-      _startupPollTimer = null; _registryPollTimer = null;
+      try {
+        if (_startupPollTimer) clearInterval(_startupPollTimer as unknown as number);
+      } catch { /* noop */ }
+      try {
+        if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number);
+      } catch { /* noop */ }
+      _startupPollTimer = null;
+      _registryPollTimer = null;
     };
   });
 
-  // When registry section is loaded and a reboot was detected, evaluate suspicious reappearance
   $effect(() => {
     if (registryLoaded) {
       void scanSuspiciousAfterReboot();
@@ -1188,12 +1353,12 @@
   <Card>
     <CardHeader>
       <CardTitle class="text-2xl">Optimize</CardTitle>
-      <CardDescription>Manage startup items, registry Run keys, and scheduled tasks.</CardDescription>
+      <CardDescription
+        >Manage startup items, registry Run keys, and scheduled tasks.</CardDescription>
     </CardHeader>
   </Card>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <!-- Startup Apps -->
     <Card class="gap-4 py-4">
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
@@ -1203,28 +1368,59 @@
       </CardHeader>
       <CardContent class="space-y-2">
         <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={reloadStartupItems}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Refresh"
+            aria-label="Refresh"
+            onclick={reloadStartupItems}
+          >
             <RefreshCw class="size-4" />
           </Button>
-          <Button variant="ghost" size="icon" title="Open Startup Folders" aria-label="Open Startup Folders" onclick={openStartupFolders}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Open Startup Folders"
+            aria-label="Open Startup Folders"
+            onclick={openStartupFolders}
+          >
             <FolderOpen class="size-4" />
           </Button>
-          <Button variant="ghost" size="icon" title="Disable Selected" aria-label="Disable Selected" onclick={requestRemoveSelectedStartup} disabled={selectedStartup.size === 0}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Disable Selected"
+            aria-label="Disable Selected"
+            onclick={requestRemoveSelectedStartup}
+            disabled={selectedStartup.size === 0}
+          >
             <Trash2 class="size-4" />
           </Button>
         </div>
         <div class="flex items-center gap-2">
           <div class="relative flex-1">
-            <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <SearchIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
             <Input class="pl-9" placeholder="Filter by name or path..." bind:value={startupQuery} />
           </div>
           <div class="flex gap-1">
-            <Button size="sm" variant="ghost" onclick={toggleAllStartup} disabled={filteredStartupItems.length === 0}>{allStartupSelected ? 'Deselect All' : 'Select All'}</Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onclick={toggleAllStartup}
+              disabled={filteredStartupItems.length === 0}
+              >{allStartupSelected ? 'Deselect All' : 'Select All'}</Button
+            >
           </div>
         </div>
         <div bind:this={startupSentinel} class="h-0" aria-hidden="true"></div>
         {#if loadingStartup && startupItems.length === 0}
-          <div role="status" aria-busy="true" class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden">
+          <div
+            role="status"
+            aria-busy="true"
+            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          >
             <ul class="divide-y divide-border/60">
               {#each Array.from({ length: 8 }) as _, i}
                 <li class="px-2 py-2">
@@ -1241,7 +1437,12 @@
             </ul>
           </div>
         {:else if filteredStartupItems.length > 0}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={startupScrollEl} data-vt-scope="startup-list" onscroll={onStartupScroll}>
+          <div
+            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+            bind:this={startupScrollEl}
+            data-vt-scope="startup-list"
+            onscroll={onStartupScroll}
+          >
             <ul class="divide-y divide-border/60">
               {#if startupStart > 0}
                 <li style={`height:${startupStart * STARTUP_ROW_PX}px`} aria-hidden="true"></li>
@@ -1250,15 +1451,34 @@
                 <li class="px-2 py-2 rounded-sm hover:bg-muted/30 transition-colors">
                   <label class="flex items-start justify-between gap-3">
                     <div class="flex items-start gap-3 min-w-0 flex-1">
-                      <Checkbox checked={selectedStartup.has(item.path)} onCheckedChange={() => toggleStartup(item.path)} />
+                      <Checkbox
+                        checked={selectedStartup.has(item.path)}
+                        onCheckedChange={() => toggleStartup(item.path)}
+                      />
                       <div class="min-w-0">
                         <div class="font-semibold truncate">{item.name}</div>
-                        <div class="text-xs text-muted-foreground font-mono truncate max-w-[60ch]">{normalizeWinPath(item.path)}</div>
+                        <div class="text-xs text-muted-foreground font-mono truncate max-w-[60ch]">
+                          {normalizeWinPath(item.path)}
+                        </div>
                       </div>
                     </div>
                     <div class="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" title="Open" aria-label="Open" onclick={() => openPath(normalizeWinPath(item.path))}><Eye class="size-4" /></Button>
-                      <Button variant="ghost" size="icon" title="Show in Explorer" aria-label="Show in Explorer" onclick={() => revealItemInDir(normalizeWinPath(item.path))}><FolderOpen class="size-4" /></Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Open"
+                        aria-label="Open"
+                        onclick={() => openPath(normalizeWinPath(item.path))}
+                        ><Eye class="size-4" /></Button
+                      >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Show in Explorer"
+                        aria-label="Show in Explorer"
+                        onclick={() => revealItemInDir(normalizeWinPath(item.path))}
+                        ><FolderOpen class="size-4" /></Button
+                      >
                     </div>
                   </label>
                 </li>
@@ -1271,7 +1491,11 @@
         {:else if startupLoaded}
           <p class="text-sm text-muted-foreground">No startup items found.</p>
         {:else}
-          <div role="status" aria-busy="true" class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden">
+          <div
+            role="status"
+            aria-busy="true"
+            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          >
             <ul class="divide-y divide-border/60">
               {#each Array.from({ length: 6 }) as _, i}
                 <li class="px-2 py-2">
@@ -1288,235 +1512,247 @@
             </ul>
           </div>
         {/if}
-  </CardContent>
-  </Card>
+      </CardContent>
+    </Card>
 
-  <!-- Confirm Registry Removal -->
-  <AlertDialog open={showRegistryConfirm} onOpenChange={(v) => (showRegistryConfirm = !!v)}>
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>Remove Registry Startup</AlertDialogTitle>
-        <AlertDialogDescription>
-          This removes selected Run/RunOnce entries.
-          The app will attempt forced removal if needed (may prompt for admin).
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      {#if regPreset === 'full'}
-        <Alert class="mb-2">
-          <AlertDescription>
-            Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and delete-on-reboot,
-            purging StartupApproved and removing related Scheduled Tasks and WMI subscriptions
-            You may get UAC prompts. Save your work and close unnecessary apps before continuing.
-          </AlertDescription>
-        </Alert>
-      {:else if regPreset === 'aggressive'}
-        <Alert class="mb-2">
-          <AlertDescription>
-            Aggressive: tries forced removal, blocks execution via IFEO (if an exe image is found), and schedules delete-on-reboot
-            when a full path exists. Does not purge StartupApproved, Scheduled Tasks, or WMI automatically.
-            May prompt UAC.
-          </AlertDescription>
-        </Alert>
-      {:else if regPreset === 'force'}
-        <Alert class="mb-2">
-          <AlertDescription>
-            Force only: takes ownership/permissions on the key and removes the value with elevation. Does not use IFEO, delete-on-reboot or
-            workarounds. Good when a simple removal is denied.
-          </AlertDescription>
-        </Alert>
-      {:else}
-        <Alert class="mb-2">
-          <AlertDescription>
-            Basic: attempts normal removal without elevation. Fastest path when nothing is locking the entry. If it fails, try Force or Aggressive.
-          </AlertDescription>
-        </Alert>
-      {/if}
-      <div class="space-y-4 text-sm">
-        <div class="flex items-center justify-between gap-2 pr-2">
-          <div>Selected: {pendingRegistry.length}</div>
-          <Select type="single" bind:value={regPreset}>
-            <SelectTrigger class="w-40" placeholder="Strategy" />
-            <SelectContent>
-              <SelectItem value="basic">Basic</SelectItem>
-              <SelectItem value="force">Force only</SelectItem>
-              <SelectItem value="aggressive">Aggressive</SelectItem>
-              <SelectItem value="full">Full cleanup</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <!-- Strategy dropdown moved to toolbar above for clearer placement -->
-
-        <!-- Recommended summary and More options removed for simpler UI -->
-        {#if pendingRegistry.length}
-          <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
-            {#each pendingRegistry.slice(0, 10) as it}
-              <li class="truncate">
-                {it.name}
-                <span class="text-muted-foreground"> Ã¢â‚¬â€ {it.hive}\{it.key}</span>
-              </li>
-            {/each}
-            {#if pendingRegistry.length > 10}
-              <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingRegistry.length - 10} more</li>
-            {/if}
-          </ul>
+    <AlertDialog open={showRegistryConfirm} onOpenChange={(v) => (showRegistryConfirm = !!v)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove Registry Startup</AlertDialogTitle>
+          <AlertDialogDescription>
+            This removes selected Run/RunOnce entries. The app will attempt forced removal if needed
+            (may prompt for admin).
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {#if regPreset === 'full'}
+          <Alert class="mb-2">
+            <AlertDescription>
+              Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and
+              delete-on-reboot, purging StartupApproved and removing related Scheduled Tasks and WMI
+              subscriptions You may get UAC prompts. Save your work and close unnecessary apps
+              before continuing.
+            </AlertDescription>
+          </Alert>
+        {:else if regPreset === 'aggressive'}
+          <Alert class="mb-2">
+            <AlertDescription>
+              Aggressive: tries forced removal, blocks execution via IFEO (if an exe image is
+              found), and schedules delete-on-reboot when a full path exists. Does not purge
+              StartupApproved, Scheduled Tasks, or WMI automatically. May prompt UAC.
+            </AlertDescription>
+          </Alert>
+        {:else if regPreset === 'force'}
+          <Alert class="mb-2">
+            <AlertDescription>
+              Force only: takes ownership/permissions on the key and removes the value with
+              elevation. Does not use IFEO, delete-on-reboot or workarounds. Good when a simple
+              removal is denied.
+            </AlertDescription>
+          </Alert>
+        {:else}
+          <Alert class="mb-2">
+            <AlertDescription>
+              Basic: attempts normal removal without elevation. Fastest path when nothing is locking
+              the entry. If it fails, try Force or Aggressive.
+            </AlertDescription>
+          </Alert>
         {/if}
-      </div>
-      <AlertDialogFooter class="pr-2">
-        <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}>Cancel</AlertDialogCancel>
-        <AlertDialogAction onclick={confirmRemoveRegistry}>Continue</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-
-  <!-- Suspicious log dialog -->
-  <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
-    <DialogContent class="sm:max-w-xl">
-      <DialogHeader>
-        <DialogTitle>Suspicious Entries (Registry Startup)</DialogTitle>
-        <DialogDescription>Entries that reappeared after Full cleanup and reboot.</DialogDescription>
-      </DialogHeader>
-      {#if suspectEntries.length === 0}
-        <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
-      {:else}
-        <div class="max-h-[50vh] overflow-y-auto space-y-3">
-          {#each suspectEntries as s}
-            <div class="rounded-md border p-3 bg-muted/10">
-              <div class="flex items-center gap-2">
-                <Badge variant="destructive">Suspicious</Badge>
-                <span class="font-medium">{s.name}</span>
-                {#if s.lastStrategy}
-                  <Badge variant="secondary" class="ml-auto">{s.lastStrategy}</Badge>
-                {/if}
-              </div>
-              <div class="mt-1 text-xs text-muted-foreground font-mono break-all">{s.hive}\{s.key}</div>
-              <p class="mt-2 text-sm">{s.reason}</p>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      <DialogFooter>
-        <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Close</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
-  <!-- Post-cleanup instructions & diagnostics -->
-  <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
-    <DialogContent class="sm:max-w-xl">
-      <DialogHeader>
-        <DialogTitle>Action Complete</DialogTitle>
-        <DialogDescription>
-          Quick system check and recommended next steps.
-        </DialogDescription>
-      </DialogHeader>
-
-      {#if postDiagLoading}
-        <div class="text-sm text-muted-foreground">Running system checkâ€¦</div>
-      {:else if postDiag}
         <div class="space-y-4 text-sm">
-          <div>
-            <p class="font-medium">Registry Entries</p>
-            {#if postDiag.removedRegistry.stillPresent.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">All selected entries appear removed.</p>
-            {:else}
-              <p class="text-destructive">Some entries remain:</p>
-              <ul class="list-disc pl-5 mt-1">
-                {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
-                  <li class="break-all">{r}</li>
-                {/each}
-                {#if postDiag.removedRegistry.stillPresent.length > 6}
-                  <li>â€¦and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
-                {/if}
-              </ul>
-            {/if}
+          <div class="flex items-center justify-between gap-2 pr-2">
+            <div>Selected: {pendingRegistry.length}</div>
+            <Select type="single" bind:value={regPreset}>
+              <SelectTrigger class="w-40" placeholder="Strategy" />
+              <SelectContent>
+                <SelectItem value="basic">Basic</SelectItem>
+                <SelectItem value="force">Force only</SelectItem>
+                <SelectItem value="aggressive">Aggressive</SelectItem>
+                <SelectItem value="full">Full cleanup</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <div>
-            <p class="font-medium">Processes</p>
-            {#if postDiag.runningImages.running.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">No related processes are running.</p>
-            {:else}
-              <p class="text-destructive">Processes still running:</p>
-              <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
-            {/if}
-          </div>
-
-          <div>
-            <p class="font-medium">Scheduled Tasks</p>
-            {#if postDiag.taskMatches.remaining.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">No related tasks found.</p>
-            {:else}
-              <p class="text-destructive">Related tasks remaining:</p>
-              <ul class="list-disc pl-5 mt-1">
-                {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
-                  <li class="break-all">{t}</li>
-                {/each}
-                {#if postDiag.taskMatches.remaining.length > 8}
-                  <li>â€¦and {postDiag.taskMatches.remaining.length - 8} more</li>
-                {/if}
-              </ul>
-            {/if}
-          </div>
-
-          <div>
-            <p class="font-medium">Services</p>
-            {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
-              <p class="text-emerald-600 dark:text-emerald-400">Inga related services hittades.</p>
-            {:else}
-              {#if postDiag.serviceMatches.running.length > 0}
-                <p class="text-destructive">Running services: {postDiag.serviceMatches.running.join(', ')}</p>
+          {#if pendingRegistry.length}
+            <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
+              {#each pendingRegistry.slice(0, 10) as it}
+                <li class="truncate">
+                  {it.name}
+                  <span class="text-muted-foreground"> Ã¢â‚¬â€ {it.hive}\{it.key}</span>
+                </li>
+              {/each}
+              {#if pendingRegistry.length > 10}
+                <li class="text-muted-foreground">
+                  Ã¢â‚¬Â¦ and {pendingRegistry.length - 10} more
+                </li>
               {/if}
-              {#if postDiag.serviceMatches.disabled.length > 0}
-                <p class="text-muted-foreground">Disabled: {postDiag.serviceMatches.disabled.join(', ')}</p>
-              {/if}
-            {/if}
-          </div>
-
-          <div class="space-y-2">
-            <p class="font-medium">Recommended Next Steps</p>
-            <ul class="list-disc pl-5">
-              {#if postDiag.rebootRecommended}
-                <li>Restart your computer to complete delete-on-reboot.</li>
-              {/if}
-              {#if postDiag.runningImages.running.length > 0}
-                <li>Close or uninstall the processes still running: {postDiag.runningImages.running.join(', ')}.</li>
-              {/if}
-              {#if postDiag.taskMatches.remaining.length > 0}
-<li>Open Task Scheduler and remove the remaining tasks above.</li>
-              {/if}
-              {#if postDiag.serviceMatches.running.length > 0}
-                <li>Stop/Disable related services and verify nothing re-enables them.</li>
-              {/if}
-              <li>Run an antivirus/antimalware scan if the entries were malicious.</li>
             </ul>
-          </div>
+          {/if}
         </div>
-      {/if}
+        <AlertDialogFooter class="pr-2">
+          <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onclick={confirmRemoveRegistry}>Continue</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
-      <DialogFooter class="flex flex-wrap gap-2">
-        {#if postDiag?.rebootRecommended}
-          <Button
-            onclick={async () => {
-              try {
-                await invoke('restart_system');
-              } catch (e) {
-                console.error(e);
-                toast.error('Could not restart the system');
-              }
-            }}
+    <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
+      <DialogContent class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Suspicious Entries (Registry Startup)</DialogTitle>
+          <DialogDescription
+            >Entries that reappeared after Full cleanup and reboot.</DialogDescription
           >
-            Starta om
-          </Button>
+        </DialogHeader>
+        {#if suspectEntries.length === 0}
+          <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
+        {:else}
+          <div class="max-h-[50vh] overflow-y-auto space-y-3">
+            {#each suspectEntries as s}
+              <div class="rounded-md border p-3 bg-muted/10">
+                <div class="flex items-center gap-2">
+                  <Badge variant="destructive">Suspicious</Badge>
+                  <span class="font-medium">{s.name}</span>
+                  {#if s.lastStrategy}
+                    <Badge variant="secondary" class="ml-auto">{s.lastStrategy}</Badge>
+                  {/if}
+                </div>
+                <div class="mt-1 text-xs text-muted-foreground font-mono break-all">
+                  {s.hive}\{s.key}
+                </div>
+                <p class="mt-2 text-sm">{s.reason}</p>
+              </div>
+            {/each}
+          </div>
         {/if}
-        <Button variant="outline" onclick={() => (showPostCleanup = false)}>
-          Senare
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+        <DialogFooter>
+          <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <!-- Registry Startup -->
+    <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
+      <DialogContent class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Action Complete</DialogTitle>
+          <DialogDescription>Quick system check and recommended next steps.</DialogDescription>
+        </DialogHeader>
+
+        {#if postDiagLoading}
+          <div class="text-sm text-muted-foreground">Running system checkâ€¦</div>
+        {:else if postDiag}
+          <div class="space-y-4 text-sm">
+            <div>
+              <p class="font-medium">Registry Entries</p>
+              {#if postDiag.removedRegistry.stillPresent.length === 0}
+                <p class="text-emerald-600 dark:text-emerald-400">
+                  All selected entries appear removed.
+                </p>
+              {:else}
+                <p class="text-destructive">Some entries remain:</p>
+                <ul class="list-disc pl-5 mt-1">
+                  {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
+                    <li class="break-all">{r}</li>
+                  {/each}
+                  {#if postDiag.removedRegistry.stillPresent.length > 6}
+                    <li>â€¦and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
+                  {/if}
+                </ul>
+              {/if}
+            </div>
+
+            <div>
+              <p class="font-medium">Processes</p>
+              {#if postDiag.runningImages.running.length === 0}
+                <p class="text-emerald-600 dark:text-emerald-400">
+                  No related processes are running.
+                </p>
+              {:else}
+                <p class="text-destructive">Processes still running:</p>
+                <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
+              {/if}
+            </div>
+
+            <div>
+              <p class="font-medium">Scheduled Tasks</p>
+              {#if postDiag.taskMatches.remaining.length === 0}
+                <p class="text-emerald-600 dark:text-emerald-400">No related tasks found.</p>
+              {:else}
+                <p class="text-destructive">Related tasks remaining:</p>
+                <ul class="list-disc pl-5 mt-1">
+                  {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
+                    <li class="break-all">{t}</li>
+                  {/each}
+                  {#if postDiag.taskMatches.remaining.length > 8}
+                    <li>â€¦and {postDiag.taskMatches.remaining.length - 8} more</li>
+                  {/if}
+                </ul>
+              {/if}
+            </div>
+
+            <div>
+              <p class="font-medium">Services</p>
+              {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
+                <p class="text-emerald-600 dark:text-emerald-400">
+                  Inga related services hittades.
+                </p>
+              {:else}
+                {#if postDiag.serviceMatches.running.length > 0}
+                  <p class="text-destructive">
+                    Running services: {postDiag.serviceMatches.running.join(', ')}
+                  </p>
+                {/if}
+                {#if postDiag.serviceMatches.disabled.length > 0}
+                  <p class="text-muted-foreground">
+                    Disabled: {postDiag.serviceMatches.disabled.join(', ')}
+                  </p>
+                {/if}
+              {/if}
+            </div>
+
+            <div class="space-y-2">
+              <p class="font-medium">Recommended Next Steps</p>
+              <ul class="list-disc pl-5">
+                {#if postDiag.rebootRecommended}
+                  <li>Restart your computer to complete delete-on-reboot.</li>
+                {/if}
+                {#if postDiag.runningImages.running.length > 0}
+                  <li>
+                    Close or uninstall the processes still running: {postDiag.runningImages.running.join(
+                      ', '
+                    )}.
+                  </li>
+                {/if}
+                {#if postDiag.taskMatches.remaining.length > 0}
+                  <li>Open Task Scheduler and remove the remaining tasks above.</li>
+                {/if}
+                {#if postDiag.serviceMatches.running.length > 0}
+                  <li>Stop/Disable related services and verify nothing re-enables them.</li>
+                {/if}
+                <li>Run an antivirus/antimalware scan if the entries were malicious.</li>
+              </ul>
+            </div>
+          </div>
+        {/if}
+
+        <DialogFooter class="flex flex-wrap gap-2">
+          {#if postDiag?.rebootRecommended}
+            <Button
+              onclick={async () => {
+                try {
+                  await invoke('restart_system');
+                } catch (e) {
+                  console.error(e);
+                  toast.error('Could not restart the system');
+                }
+              }}
+            >
+              Starta om
+            </Button>
+          {/if}
+          <Button variant="outline" onclick={() => (showPostCleanup = false)}>Senare</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <Card class="gap-4 py-4">
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
@@ -1526,33 +1762,66 @@
       </CardHeader>
       <CardContent class="space-y-2">
         <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button variant="ghost" size="icon" title="Refresh" aria-label="Refresh" onclick={reloadRegistryItems}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Refresh"
+            aria-label="Refresh"
+            onclick={reloadRegistryItems}
+          >
             <RefreshCw class="size-4" />
           </Button>
-          <Button variant="ghost" size="icon" title="Disable Selected" aria-label="Disable Selected" onclick={requestRemoveSelectedRegistry} disabled={selectedReg.size === 0}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Disable Selected"
+            aria-label="Disable Selected"
+            onclick={requestRemoveSelectedRegistry}
+            disabled={selectedReg.size === 0}
+          >
             <Trash2 class="size-4" />
           </Button>
-          <!-- Suspicious log open -->
           {#if Object.values(registryHistory).some((r: any) => r?.suspicious)}
-            <Button variant="ghost" size="icon" title="Show suspicious log" aria-label="Show suspicious log" onclick={() => (showSuspectLog = true)}>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Show suspicious log"
+              aria-label="Show suspicious log"
+              onclick={() => (showSuspectLog = true)}
+            >
               <Flag class="size-4 text-destructive" />
             </Button>
           {/if}
         </div>
         <div class="flex items-center gap-2">
           <div class="relative flex-1">
-            <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input class="pl-9" placeholder="Filter by name, command, or key..." bind:value={registryQuery} />
+            <SearchIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
+            <Input
+              class="pl-9"
+              placeholder="Filter by name, command, or key..."
+              bind:value={registryQuery}
+            />
           </div>
           <div class="flex gap-1">
-            <Button size="sm" variant="ghost" onclick={toggleAllRegistry} disabled={filteredRegistryItems.length === 0}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onclick={toggleAllRegistry}
+              disabled={filteredRegistryItems.length === 0}
+            >
               {allRegistrySelected ? 'Deselect All' : 'Select All'}
             </Button>
           </div>
         </div>
         <div bind:this={registrySentinel} class="h-0" aria-hidden="true"></div>
         {#if loadingRegistry && startupRegItems.length === 0}
-          <div role="status" aria-busy="true" class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden">
+          <div
+            role="status"
+            aria-busy="true"
+            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          >
             <ul class="divide-y divide-border/60">
               {#each Array.from({ length: 8 }) as _, i}
                 <li class="px-2 py-2">
@@ -1569,7 +1838,12 @@
             </ul>
           </div>
         {:else if filteredRegistryItems.length > 0}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={registryScrollEl} data-vt-scope="registry-list" onscroll={onRegistryScroll}>
+          <div
+            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+            bind:this={registryScrollEl}
+            data-vt-scope="registry-list"
+            onscroll={onRegistryScroll}
+          >
             <ul class="divide-y divide-border/60">
               {#if registryStart > 0}
                 <li style={`height:${registryStart * REGISTRY_ROW_PX}px`} aria-hidden="true"></li>
@@ -1577,7 +1851,10 @@
               {#each filteredRegistryItems.slice(registryStart, registryVisible) as it (regId(it))}
                 <li class="px-2 py-2 space-y-1 rounded-sm hover:bg-muted/30 transition-colors">
                   <label class="flex items-center gap-3">
-                    <Checkbox checked={selectedReg.has(regId(it))} onCheckedChange={() => toggleReg(it)} />
+                    <Checkbox
+                      checked={selectedReg.has(regId(it))}
+                      onCheckedChange={() => toggleReg(it)}
+                    />
                     <span class="font-semibold">
                       {it.name}
                       {#if (registryHistory[regId(it)] as any)?.suspicious}
@@ -1586,16 +1863,26 @@
                     </span>
                   </label>
                   <div class="text-xs text-muted-foreground">{it.hive}\{it.key}</div>
-                  <div class="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <div
+                    class="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                  >
                     <span class="font-mono truncate max-w-[52ch]">{it.command}</span>
                     <div class="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" title="Copy command" aria-label="Copy command" onclick={() => copyText(it.command)}><CopyIcon class="size-4" /></Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Copy command"
+                        aria-label="Copy command"
+                        onclick={() => copyText(it.command)}><CopyIcon class="size-4" /></Button
+                      >
                       <Button
                         variant="ghost"
                         size="icon"
                         title="Open in Registry"
                         aria-label="Open in Registry"
-                        onclick={() => { void invoke('open_registry_key', { hive: it.hive, key: it.key }); }}
+                        onclick={() => {
+                          void invoke('open_registry_key', { hive: it.hive, key: it.key });
+                        }}
                       >
                         <FolderOpen class="size-4" />
                       </Button>
@@ -1611,7 +1898,11 @@
         {:else if registryLoaded}
           <p class="text-sm text-muted-foreground">No registry startup entries found.</p>
         {:else}
-          <div role="status" aria-busy="true" class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden">
+          <div
+            role="status"
+            aria-busy="true"
+            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          >
             <ul class="divide-y divide-border/60">
               {#each Array.from({ length: 6 }) as _, i}
                 <li class="px-2 py-2">
@@ -1631,14 +1922,13 @@
       </CardContent>
     </Card>
 
-    <!-- Confirm Startup Removal -->
     <AlertDialog open={showStartupConfirm} onOpenChange={(v) => (showStartupConfirm = !!v)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Remove Startup Shortcuts</AlertDialogTitle>
           <AlertDialogDescription>
-            This disables selected startup apps by removing their shortcuts.
-            The app will attempt forced removal if needed (may prompt for admin).
+            This disables selected startup apps by removing their shortcuts. The app will attempt
+            forced removal if needed (may prompt for admin).
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div class="space-y-2 text-sm">
@@ -1661,7 +1951,6 @@
       </AlertDialogContent>
     </AlertDialog>
 
-    <!-- Network -->
     <Card class="gap-4 py-4">
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
@@ -1672,30 +1961,81 @@
       <CardContent class="space-y-2">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1">
-            <Button variant="ghost" size="sm" onclick={flushDns} title="Flush DNS Cache" aria-label="Flush DNS Cache"><RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span></Button>
-            <Button variant="ghost" size="sm" onclick={resetWinsock} title="Reset Winsock" aria-label="Reset Winsock"><RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span></Button>
-            <Button variant="ghost" size="sm" onclick={renewIp} title="Renew IP" aria-label="Renew IP"><RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span></Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={flushDns}
+              title="Flush DNS Cache"
+              aria-label="Flush DNS Cache"
+              ><RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span
+              ></Button
+            >
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={resetWinsock}
+              title="Reset Winsock"
+              aria-label="Reset Winsock"
+              ><RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span
+              ></Button
+            >
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={renewIp}
+              title="Renew IP"
+              aria-label="Renew IP"
+              ><RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span
+              ></Button
+            >
           </div>
         </div>
-        <p class="text-xs text-muted-foreground">Actions may briefly interrupt connectivity. Some changes can require a reboot.</p>
+        <p class="text-xs text-muted-foreground">
+          Actions may briefly interrupt connectivity. Some changes can require a reboot.
+        </p>
       </CardContent>
     </Card>
 
-    <!-- Scheduled Tasks -->
     <Card class="gap-4 py-4">
       <CardHeader>
-        <CardTitle class="flex items-center gap-2"><ListChecks class="size-5" /> Scheduled Tasks</CardTitle>
-        <CardDescription>Inspect Task Scheduler entries and highlight suspicious ones.</CardDescription>
+        <CardTitle class="flex items-center gap-2"
+          ><ListChecks class="size-5" /> Scheduled Tasks</CardTitle
+        >
+        <CardDescription
+          >Inspect Task Scheduler entries and highlight suspicious ones.</CardDescription
+        >
       </CardHeader>
       <CardContent class="space-y-2">
         <div class="flex items-center gap-2 flex-wrap">
           <div class="relative flex-1">
-            <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input class="pl-9" placeholder="Search name, command, status or author..." bind:value={tasksQuery} />
+            <SearchIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+            />
+            <Input
+              class="pl-9"
+              placeholder="Search name, command, status or author..."
+              bind:value={tasksQuery}
+            />
           </div>
           <div class="flex items-center gap-2 flex-wrap">
             <Select type="single" bind:value={taskSort}>
-              <SelectTrigger class="w-40" placeholder="Sort by" />
+              <SelectTrigger class="w-40">
+                <p>
+                  {taskSort === 'suspicious'
+                    ? 'Suspicious first'
+                    : taskSort === 'name'
+                    ? 'Name'
+                    : taskSort === 'next'
+                    ? 'Next run'
+                    : taskSort === 'status'
+                    ? 'Status'
+                    : taskSort === 'author'
+                    ? 'Author'
+                    : taskSort === 'command'
+                    ? 'Command'
+                    : 'Sort by'}
+                </p>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="suspicious">Suspicious first</SelectItem>
                 <SelectItem value="name">Name</SelectItem>
@@ -1706,31 +2046,75 @@
               </SelectContent>
             </Select>
             <Select type="single">
-              <SelectTrigger class="w-40" placeholder="Filters" />
+              <SelectTrigger class="w-40">
+                <p>
+                  {taskFilter === 'sus' && !includeDisabled && !includeNoNext && !includeMicrosoftInSus
+                    ? 'Suspicious only'
+                    : taskFilter === 'sus' && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                    ? 'Suspicious + extras'
+                    : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                    ? 'Custom filters'
+                    : 'Filters'}
+                </p>
+              </SelectTrigger>
               <SelectContent>
                 <div class="p-2 space-y-2 min-w-[16rem]">
                   <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox checked={taskFilter === 'sus'} onCheckedChange={() => (taskFilter = taskFilter === 'sus' ? 'all' : 'sus')} />
-                    <span class="flex items-center gap-1"><Flag class="size-4 text-destructive" /> Suspicious only</span>
+                    <Checkbox
+                      checked={taskFilter === 'sus'}
+                      onCheckedChange={() => (taskFilter = taskFilter === 'sus' ? 'all' : 'sus')}
+                    />
+                    <span class="flex items-center gap-1"
+                      ><Flag class="size-4 text-destructive" /> Suspicious only</span
+                    >
                   </label>
                   <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox checked={includeDisabled} onCheckedChange={() => (includeDisabled = !includeDisabled)} />
+                    <Checkbox
+                      checked={includeDisabled}
+                      onCheckedChange={() => (includeDisabled = !includeDisabled)}
+                    />
                     <span>Show disabled</span>
                   </label>
                   <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox checked={includeNoNext} onCheckedChange={() => (includeNoNext = !includeNoNext)} />
+                    <Checkbox
+                      checked={includeNoNext}
+                      onCheckedChange={() => (includeNoNext = !includeNoNext)}
+                    />
                     <span>Show 'No next run'</span>
                   </label>
                   <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox checked={includeMicrosoftInSus} onCheckedChange={() => (includeMicrosoftInSus = !includeMicrosoftInSus)} />
+                    <Checkbox
+                      checked={includeMicrosoftInSus}
+                      onCheckedChange={() => (includeMicrosoftInSus = !includeMicrosoftInSus)}
+                    />
                     <span>Include Microsoft system tasks in SUS</span>
                   </label>
                 </div>
               </SelectContent>
             </Select>
-            <Button size="sm" variant="secondary" onclick={loadTasks} title="Refresh tasks" aria-label="Refresh tasks"><RefreshCw class="mr-2 size-4" /> Refresh</Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onclick={loadTasks}
+              title="Refresh tasks"
+              aria-label="Refresh tasks"><RefreshCw class="mr-2 size-4" /> Refresh</Button
+            >
             <Select type="single" bind:value={taskAction}>
-              <SelectTrigger class="w-40" placeholder="Action" />
+              <SelectTrigger class="w-40">
+                <p>
+                  {taskAction === 'disable'
+                    ? 'Disable'
+                    : taskAction === 'enable'
+                    ? 'Enable'
+                    : taskAction === 'delete'
+                    ? 'Delete'
+                    : taskAction === 'run'
+                    ? 'Run now'
+                    : taskAction === 'end'
+                    ? 'End'
+                    : 'Action'}
+                </p>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="disable">Disable</SelectItem>
                 <SelectItem value="enable">Enable</SelectItem>
@@ -1739,13 +2123,29 @@
                 <SelectItem value="end">End</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="sm" onclick={requestRunSelected} disabled={!taskAction || selectedTasks.size === 0} title="Run action" aria-label="Run action">Run</Button>
-            <Button size="sm" variant="ghost" onclick={toggleAllTasks} disabled={sortedTasks.length === 0}>{allTasksSelected ? 'Deselect All' : 'Select All'}</Button>
+            <Button
+              size="sm"
+              onclick={requestRunSelected}
+              disabled={!taskAction || selectedTasks.size === 0}
+              title="Run action"
+              aria-label="Run action">Run</Button
+            >
+            <Button
+              size="sm"
+              variant="ghost"
+              onclick={toggleAllTasks}
+              disabled={sortedTasks.length === 0}
+              >{allTasksSelected ? 'Deselect All' : 'Select All'}</Button
+            >
           </div>
         </div>
         <div bind:this={tasksSentinel} class="h-0" aria-hidden="true"></div>
         {#if loadingTasks && tasks.length === 0}
-          <div role="status" aria-busy="true" class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden">
+          <div
+            role="status"
+            aria-busy="true"
+            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          >
             <ul class="divide-y divide-border/60">
               {#each Array.from({ length: 10 }) as _, i}
                 <li class="px-3 py-2">
@@ -1767,7 +2167,11 @@
             </ul>
           </div>
         {:else}
-          <div class="h-[300px] rounded-md bg-muted/10 overflow-y-auto" bind:this={tasksScrollEl} onscroll={onTasksScroll}>
+          <div
+            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+            bind:this={tasksScrollEl}
+            onscroll={onTasksScroll}
+          >
             <ul class="divide-y divide-border/60">
               {#if tasksStart > 0}
                 <li style={`height:${tasksStart * TASKS_ROW_PX}px`} aria-hidden="true"></li>
@@ -1777,18 +2181,33 @@
                 <li class="px-3 py-2 hover:bg-muted/30 transition-colors">
                   <div class="flex items-center justify-between gap-3">
                     <div class="flex items-start gap-3 min-w-0 flex-1">
-                      <Checkbox checked={selectedTasks.has(t.name)} onCheckedChange={() => toggleTask(t.name)} />
+                      <Checkbox
+                        checked={selectedTasks.has(t.name)}
+                        onCheckedChange={() => toggleTask(t.name)}
+                      />
                       <div class="min-w-0">
                         <div class="flex items-center gap-2">
-                          <span class="font-semibold truncate max-w-[60ch]">{parts.base || t.name}</span>
-                          {#if t.is_sus}<Badge variant="outline" class="text-[10px] border-red-500/30 text-red-600 bg-red-500/10">SUS</Badge>{/if}
+                          <span class="font-semibold truncate max-w-[60ch]"
+                            >{parts.base || t.name}</span
+                          >
+                          {#if t.is_sus}<Badge
+                              variant="outline"
+                              class="text-[10px] border-red-500/30 text-red-600 bg-red-500/10"
+                              >SUS</Badge
+                            >{/if}
                         </div>
-                        <div class="mt-1 text-xs text-muted-foreground font-mono truncate max-w-[80ch]">{parts.folder}</div>
+                        <div
+                          class="mt-1 text-xs text-muted-foreground font-mono truncate max-w-[80ch]"
+                        >
+                          {parts.folder}
+                        </div>
                       </div>
                     </div>
                     <div class="shrink-0 text-right">
                       <div class="text-xs text-muted-foreground">{t.status || 'Ã¢â‚¬â€'}</div>
-                      <div class="text-[10px] text-muted-foreground">Next: {t.next_run_time || 'Ã¢â‚¬â€'}</div>
+                      <div class="text-[10px] text-muted-foreground">
+                        Next: {t.next_run_time || 'Ã¢â‚¬â€'}
+                      </div>
                     </div>
                   </div>
                 </li>
@@ -1831,7 +2250,11 @@
         <ul class="max-h-32 overflow-auto rounded bg-muted/10 p-2 text-xs">
           {#each pendingNames.slice(0, 8) as nm}
             {@const p = splitTaskName(nm)}
-            <li class="truncate">{p.base} <span class="text-muted-foreground">{p.folder}</span>{#if isLikelyProtected(nm)} <span class="ml-1 text-[10px] text-destructive">protected</span>{/if}</li>
+            <li class="truncate">
+              {p.base}
+              <span class="text-muted-foreground">{p.folder}</span>{#if isLikelyProtected(nm)}
+                <span class="ml-1 text-[10px] text-destructive">protected</span>{/if}
+            </li>
           {/each}
           {#if pendingNames.length > 8}
             <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingNames.length - 8} more</li>

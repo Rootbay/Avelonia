@@ -1,5 +1,4 @@
-﻿// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use futures_util::StreamExt;
+﻿use futures_util::StreamExt;
 use reqwest::{Client, Url};
 use serde::{Serialize};
 use std::fs::File;
@@ -40,24 +39,20 @@ fn path_exists(path: String) -> Result<bool, String> {
 
 fn filename_from_cd<S: AsRef<str>>(cd: S) -> Option<String> {
     let cd = cd.as_ref();
-    // Try RFC 5987 filename*
     if let Some(idx) = cd.to_lowercase().find("filename*=") {
         let rest = &cd[idx+10..];
         let parts: Vec<&str> = rest.split(';').collect();
         let val = parts[0].trim();
-        // format: charset''encoded
         if let Some(pos) = val.find("''") {
             let enc = &val[pos+2..];
             if let Ok(decoded) = percent_encoding::percent_decode_str(enc).decode_utf8() {
                 return Some(decoded.to_string());
             }
         } else {
-            // Sometimes quoted
             let v = val.trim_matches('"');
             return Some(v.to_string());
         }
     }
-    // Fallback: filename="..."
     if let Some(idx) = cd.to_lowercase().find("filename=") {
         let rest = &cd[idx+9..];
         let v = rest.split(';').next().unwrap_or("").trim().trim_matches('"');
@@ -96,7 +91,6 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    // Try HEAD first
     let mut filename: Option<String> = None;
     let mut ext: Option<String> = None;
     let mut size: Option<u64> = None;
@@ -114,7 +108,6 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
             }
         }
     }
-    // Fallback minimal GET (first bytes) if needed
     if filename.is_none() || ext.is_none() {
         let get = client.get(&url).header(reqwest::header::RANGE, "bytes=0-0").send().await;
         if let Ok(resp) = get {
@@ -129,7 +122,6 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
                 }
             }
             if size.is_none() {
-                // Try to parse Content-Range: bytes 0-0/123456
                 if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE) {
                     if let Ok(s) = cr.to_str() {
                         if let Some(pos) = s.rfind('/') {
@@ -141,7 +133,6 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
         }
     }
 
-    // Final fallbacks based on URL path
     if filename.is_none() {
         if let Ok(u) = Url::parse(&url) {
             if let Some(seg) = u.path_segments().and_then(|s| s.last()).and_then(|s| percent_encoding::percent_decode_str(s).decode_utf8().ok()).map(|cow| cow.to_string()) {
@@ -151,7 +142,6 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
     }
 
     let filename = filename.unwrap_or_else(|| "download".to_string());
-    // Try to infer extension from filename if still missing
     if ext.is_none() {
         let lower = filename.to_lowercase();
         let multi = [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"];
@@ -193,7 +183,6 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
         println!("Rust: Unknown content length for ID {} (streaming)", id);
     }
 
-    // Write to temporary .part file then rename on success
     let temp_path = format!("{}.part", &path);
     let mut file =
         File::create(&temp_path).map_err(|e| {
@@ -231,10 +220,8 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
         ) {
             println!("Rust Error: Failed to emit progress event for ID {}: {}", id, e);
         }
-        // println!("Rust: Emitted progress for ID {}: {}/{}", id, downloaded, total);
     }
 
-    // If cancelled before completion, try to remove the partial file
     let was_cancelled = state.0.get(&id).map_or(false, |r| *r);
     if was_cancelled || (total > 0 && downloaded < total) {
         if let Err(e) = std::fs::remove_file(&temp_path) {
@@ -243,7 +230,6 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
             println!("Rust: Removed partial file for ID {} at {}", id, temp_path);
         }
     } else {
-        // Completed successfully. Emit a final 100% progress and rename .part -> final
         let final_total = if total == 0 { downloaded } else { total };
         if let Err(e) = app.emit(
             "download-progress",
@@ -305,7 +291,7 @@ pub fn run() {
             cleaner::start_empty_scan,
             cleaner::start_shortcut_scan,
             cleaner::clean_temp_files,
-            cleaner::delete_files, // New command
+            cleaner::delete_files,
             cleaner::move_to_trash,
             cleaner::empty_recycle_bin,
             cleaner::find_large_files,
@@ -360,7 +346,6 @@ pub fn run() {
             installer::list_uninstall_entries,
             installer::verify_install,
             installer::is_installed,
-            // VT reputation & config
             vt::vt_get_status,
             vt::vt_set_api_key,
             vt::vt_load_cache,

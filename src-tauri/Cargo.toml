@@ -1,9 +1,9 @@
 [package]
 name = "avelonia"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["Evoq", "Pysen"]
-edition = "2021"
+description = "A PC maintaince suite app"
+authors = ["xeintdm", "Pysen"]
+edition = "2024"
 
 [lib]
 name = "avelonia_lib"

@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, AppHandle}; // Added this line
+use tauri::{Emitter, AppHandle};
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -63,13 +63,10 @@ pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, Strin
     let mut scanned_count = 0;
 
     let common_temp_paths: Vec<PathBuf> = vec![
-        // Windows
         env::var_os("TEMP").map(PathBuf::from).unwrap_or_default(),
         env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Temp")).unwrap_or_default(),
-        // macOS
         PathBuf::from("/tmp"),
         PathBuf::from("/private/tmp"),
-        // Linux
         PathBuf::from("/var/tmp"),
     ].into_iter().filter(|p| p.exists() && p.is_dir()).collect();
 
@@ -81,7 +78,7 @@ pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, Strin
             if entry.file_type().is_file() {
                 temp_files.push(entry.path().display().to_string());
                 scanned_count += 1;
-                if scanned_count % 100 == 0 { // Emit progress every 100 files
+                if scanned_count % 100 == 0 {
                     app_handle.emit("scan_progress", format!("Scanned {} temporary files...", scanned_count))
                         .map_err(|e| e.to_string())?;
                 }
@@ -92,10 +89,6 @@ pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, Strin
     Ok(temp_files)
 }
 
-// Streamed variant to avoid huge payloads over IPC.
-// Emits events:
-//  - "cleaner-temp-batch": Vec<String>
-//  - "cleaner-temp-done": { total: usize }
 #[tauri::command]
 pub fn get_temp_files_stream(app_handle: AppHandle, batch_size: Option<usize>, max: Option<usize>) -> Result<usize, String> {
     let bs = batch_size.unwrap_or(250).max(50).min(1000);
@@ -162,8 +155,6 @@ pub fn cancel_temp_scan() -> Result<(), String> {
     Ok(())
 }
 
-// ---------------- Background scanning orchestrators (non-blocking) ----------------
-
 fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chunk: usize) {
     if items.is_empty() { return; }
     let mut start = 0usize;
@@ -172,7 +163,6 @@ fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chu
         let end = std::cmp::min(start + chunk, n);
         let slice: Vec<(String, u64)> = items[start..end].to_vec();
         let _ = app.emit(event, slice);
-        // small yield to avoid flooding the IPC/event queue and freezing UI
         std::thread::sleep(std::time::Duration::from_millis(8));
         start = end;
         if TEMP_CANCEL.load(Ordering::Relaxed) { break; }
@@ -195,18 +185,15 @@ fn emit_chunked_strings(app: &AppHandle, event: &str, items: &[String], chunk: u
 
 #[tauri::command]
 pub fn start_cleaner_scan(app_handle: AppHandle, min_size_bytes: Option<u64>, max_temp: Option<usize>) -> Result<(), String> {
-    // Spawn a detached thread so the command returns immediately.
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
     std::thread::spawn(move || {
         let _ = app.emit("cleaner-progress", "Starting scan...");
-        // 1) Temp (streamed by existing function)
         let _ = app.emit("cleaner-progress", "Scanning temporary files...");
         let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(20_000)));
 
         if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"temp"})); return; }
 
-        // 2) Large files
         let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
         let _ = app.emit("cleaner-progress", "Scanning large files...");
         match find_large_files_min(min, app.clone()) {
@@ -219,11 +206,9 @@ pub fn start_cleaner_scan(app_handle: AppHandle, min_size_bytes: Option<u64>, ma
 
         if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"large"})); return; }
 
-        // 3) Duplicate groups
         let _ = app.emit("cleaner-progress", "Scanning duplicates...");
         match find_duplicate_groups(app.clone()) {
             Ok(groups) => {
-                // chunk groups to avoid huge IPC messages
                 let mut start = 0usize;
                 let chunk = 60usize;
                 while start < groups.len() {
@@ -240,7 +225,6 @@ pub fn start_cleaner_scan(app_handle: AppHandle, min_size_bytes: Option<u64>, ma
 
         if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"duplicate"})); return; }
 
-        // 4) Empty folders
         let _ = app.emit("cleaner-progress", "Scanning empty folders...");
         match find_empty_folders(app.clone()) {
             Ok(list) => {
@@ -252,7 +236,6 @@ pub fn start_cleaner_scan(app_handle: AppHandle, min_size_bytes: Option<u64>, ma
 
         if TEMP_CANCEL.load(Ordering::Relaxed) { let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"empty"})); return; }
 
-        // 5) Broken shortcuts
         let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
         match find_broken_shortcuts(app.clone()) {
             Ok(list) => {
@@ -273,7 +256,6 @@ pub fn cancel_cleaner_scan() -> Result<(), String> {
     Ok(())
 }
 
-// Category-specific background starters (optional helpers for UI buttons)
 #[tauri::command]
 pub fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> Result<(), String> {
     let app = app_handle.clone();
@@ -402,7 +384,6 @@ pub fn empty_recycle_bin() -> Result<(), String> {
     Err("Emptying recycle bin is only supported on Windows.".to_string())
 }
 
-// Quick Clean commands (Windows only) ---------------------------------------------------------
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn quick_clear_user_temp() -> Result<CleanupStats, String> {
@@ -433,7 +414,6 @@ pub fn quick_clear_prefetch() -> Result<CleanupStats, String> {
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn quick_clear_recent() -> Result<CleanupStats, String> {
-    // Delete only .lnk shortcuts in Recent
     if let Some(appdata) = env::var_os("APPDATA") {
         let recent = PathBuf::from(appdata).join("Microsoft/Windows/Recent");
         if !recent.exists() || !recent.is_dir() {
@@ -493,7 +473,7 @@ pub fn get_drive_info() -> Result<(u64, u64), String> {
 
 #[tauri::command]
 pub fn find_large_files(app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
-    let min_size_bytes: u64 = 100 * 1024 * 1024; // 100 MB
+    let min_size_bytes: u64 = 100 * 1024 * 1024;
     find_large_files_min(min_size_bytes, app_handle)
 }
 
@@ -505,7 +485,6 @@ pub fn find_large_files_min(min_size_bytes: u64, app_handle: tauri::AppHandle) -
     let documents_path = PathBuf::from(&user_profile).join("Documents");
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
-    // Collect files first (sequential walk), then filter in parallel
     let mut files: Vec<PathBuf> = Vec::new();
     let mut scanned_count = 0usize;
     for scan_path in paths_to_scan {
@@ -538,8 +517,6 @@ pub fn find_large_files_min(min_size_bytes: u64, app_handle: tauri::AppHandle) -
     Ok(results)
 }
 
-/// Return the top-K largest files from common user folders.
-/// Defaults: k=1000, min_size_bytes=100 MB. Emits `scan_progress` messages periodically.
 #[tauri::command]
 pub fn find_large_files_top(k: Option<usize>, min_size_bytes: Option<u64>, app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
     let k = k.unwrap_or(1000).clamp(100, 10_000);
@@ -551,10 +528,9 @@ pub fn find_large_files_top(k: Option<usize>, min_size_bytes: Option<u64>, app_h
     let documents_path = PathBuf::from(&user_profile).join("Documents");
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
-    // Enumerate file paths with a hard cap to avoid excessive memory usage
     let mut files: Vec<PathBuf> = Vec::new();
     let mut scanned_count = 0usize;
-    let enum_cap: usize = 300_000; // safety cap on number of entries traversed
+    let enum_cap: usize = 300_000;
     for scan_path in paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
             for entry in walkdir::WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()) {
@@ -570,14 +546,12 @@ pub fn find_large_files_top(k: Option<usize>, min_size_bytes: Option<u64>, app_h
         }
     }
 
-    // Get sizes in parallel and filter by threshold
     let sized: Vec<(u64, String)> = files
         .par_iter()
         .filter_map(|p| fs::metadata(p).ok().map(|m| (m.len(), p.display().to_string())))
         .filter(|(len, _)| *len >= min_size)
         .collect();
 
-    // Keep a min-heap of size k for top-K selection
     let mut heap: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::with_capacity(k + 1);
     for (len, path) in sized.into_iter() {
         if heap.len() < k {
@@ -588,7 +562,6 @@ pub fn find_large_files_top(k: Option<usize>, min_size_bytes: Option<u64>, app_h
             }
         }
     }
-    // Drain heap into vec and sort descending by size
     let mut out: Vec<(String, u64)> = heap.into_iter().map(|Reverse((len, path))| (path, len)).collect();
     out.sort_by(|a, b| b.1.cmp(&a.1));
     Ok(out)
@@ -601,7 +574,6 @@ pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String,
     let downloads_path = PathBuf::from(&user_profile).join("Downloads");
     let documents_path = PathBuf::from(&user_profile).join("Documents");
     let paths_to_scan = vec![downloads_path, documents_path];
-    // Enumerate files
     let mut files: Vec<PathBuf> = Vec::new();
     for scan_path in &paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
@@ -615,7 +587,6 @@ pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String,
         }
     }
 
-    // Get sizes in parallel, then bucket
     let sized: Vec<(u64, String)> = files
         .par_iter()
         .filter_map(|p| fs::metadata(p).ok().map(|m| (m.len(), p.display().to_string())))
@@ -623,7 +594,6 @@ pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String,
     let mut size_buckets: HashMap<u64, Vec<String>> = HashMap::new();
     for (sz, p) in sized { size_buckets.entry(sz).or_default().push(p); }
 
-    // Hash only buckets with >1, in parallel
     let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
     for (_size, group) in size_buckets.into_iter().filter(|(_, v)| v.len() > 1) {
         let hashed: Vec<(String, String)> = group
@@ -656,8 +626,8 @@ pub struct DuplicateGroup { pub hash: String, pub size: u64, pub files: Vec<Stri
 #[tauri::command]
 pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
     let mut scanned_count = 0usize;
-    let first_pass_limit: usize = 30_000; // cap number of files enumerated
-    let hash_limit: usize = 15_000; // cap number of files hashed
+    let first_pass_limit: usize = 30_000;
+    let hash_limit: usize = 15_000;
 
     let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
     let downloads_path = PathBuf::from(&user_profile).join("Downloads");
@@ -665,7 +635,6 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
     let desktop_path = PathBuf::from(&user_profile).join("Desktop");
     let paths_to_scan = vec![downloads_path, documents_path, desktop_path];
 
-    // Enumerate files with a hard cap
     let mut files: Vec<PathBuf> = Vec::new();
     for scan_path in &paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
@@ -680,7 +649,6 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
         if files.len() >= first_pass_limit { break; }
     }
 
-    // Get sizes in parallel and bucket
     let sized: Vec<(u64, String)> = files
         .par_iter()
         .filter_map(|p| fs::metadata(p).ok().map(|m| (m.len(), p.display().to_string())))
@@ -688,7 +656,6 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
     let mut size_buckets: HashMap<u64, Vec<String>> = HashMap::new();
     for (sz, p) in sized { size_buckets.entry(sz).or_default().push(p); }
 
-    // Hash buckets in parallel up to hash_limit items
     let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
     let mut hashed = 0usize;
     for (_size, group) in size_buckets.into_iter().filter(|(_, v)| v.len() > 1) {
@@ -737,7 +704,7 @@ pub fn move_to_trash(files: Vec<String>) -> Result<usize, String> {
 fn calculate_file_hash(path: &Path) -> Result<String, io::Error> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0; 1024]; // Read in 1KB chunks
+    let mut buffer = [0; 1024];
 
     loop {
         let bytes_read = file.read(&mut buffer)?;
@@ -758,10 +725,8 @@ pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, S
     let downloads_path = PathBuf::from(&user_profile).join("Downloads");
     let desktop_path = PathBuf::from(&user_profile).join("Desktop");
     let documents_path = PathBuf::from(&user_profile).join("Documents");
-
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
-    // Collect directories first
     let mut dirs: Vec<PathBuf> = Vec::new();
     for scan_path in paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
@@ -772,7 +737,6 @@ pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, S
             }
         }
     }
-    // Check emptiness in parallel
     let results: Vec<String> = dirs
         .par_iter()
         .filter_map(|d| {
@@ -796,7 +760,6 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
 
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
-    // Collect .lnk files
     let mut lnk_files: Vec<PathBuf> = Vec::new();
     for scan_path in paths_to_scan {
         if scan_path.exists() && scan_path.is_dir() {
@@ -812,7 +775,6 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
             }
         }
     }
-    // Parse shortcuts in parallel
     let results: Vec<String> = lnk_files
         .par_iter()
         .filter_map(|p| {
@@ -850,7 +812,6 @@ pub fn move_files(files: Vec<String>, destination: String) -> Result<usize, Stri
         if !from.exists() || !from.is_file() { continue; }
         let file_name = match from.file_name() { Some(n) => n, None => continue };
         let mut to = dest.join(file_name);
-        // handle name collisions
         if to.exists() {
             let mut idx = 1u32;
             let stem = to.file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
@@ -870,7 +831,6 @@ pub fn move_files(files: Vec<String>, destination: String) -> Result<usize, Stri
             moved += 1;
             continue;
         }
-        // cross-device fallback: copy then remove
         match fs::copy(&from, &to) {
             Ok(_) => {
                 let _ = fs::remove_file(&from);

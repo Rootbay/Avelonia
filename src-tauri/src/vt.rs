@@ -10,10 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 
-// Two days TTL by default
 const DEFAULT_TTL_SECS: u64 = 2 * 24 * 60 * 60;
-
-// Public VT (free) API has 4 requests/min. We will space requests by ~16s.
 const PUBLIC_API_INTERVAL_SECS: u64 = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,9 +42,9 @@ pub struct CacheEntry {
 
 #[derive(Default)]
 pub struct VtState {
-    api_key: Mutex<Option<String>>, // never exposed to frontend
-    cache: Arc<DashMap<String, CacheEntry>>, // sha256 -> entry
-    last_req: Mutex<Option<u64>>,   // epoch seconds for coarse throttling
+    api_key: Mutex<Option<String>>,
+    cache: Arc<DashMap<String, CacheEntry>>,
+    last_req: Mutex<Option<u64>>,
 }
 
 impl VtState {
@@ -64,19 +61,17 @@ pub struct VtStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VtItemReport {
-    pub subject: String,   // display/path
+    pub subject: String,
     pub sha256: String,
     pub verdict: Verdict,
     pub positives: u32,
     pub permalink: Option<String>,
-    pub source: String, // "startup" | "registry"
-    // Detailed stats (optional depending on VT response)
+    pub source: String,
     pub malicious: u32,
     pub suspicious: u32,
     pub harmless: u32,
     pub undetected: u32,
     pub total_vendors: u32,
-    // If the item could not be scanned or resolved
     pub reason: Option<String>,
 }
 
@@ -88,11 +83,9 @@ fn epoch_now() -> u64 {
 }
 
 fn get_config_dir() -> PathBuf {
-    // Windows: %APPDATA%\avelonia
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join("avelonia");
     }
-    // Fallback to temp dir
     std::env::temp_dir().join("avelonia")
 }
 
@@ -240,7 +233,6 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
 }
 
 async fn ensure_rate_limit(state: &VtState) {
-    // Compute wait time without holding the mutex across .await to remain Send
     let wait_secs: u64 = {
         let now = epoch_now();
         let guard = state.last_req.lock().unwrap();
@@ -252,13 +244,11 @@ async fn ensure_rate_limit(state: &VtState) {
         } else { 0 }
     };
     if wait_secs > 0 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
-    // Update last_req timestamp after waiting
     let mut guard = state.last_req.lock().unwrap();
     *guard = Some(epoch_now());
 }
 
 async fn lookup_or_fetch(state: &State<'_, VtState>, sha256: &str, force: bool) -> Result<CacheEntry, String> {
-    // Try cache unless forcing
     if !force {
         if let Some(entry) = state.cache.get(sha256) {
             let age = epoch_now().saturating_sub(entry.last_checked);
@@ -274,7 +264,6 @@ async fn lookup_or_fetch(state: &State<'_, VtState>, sha256: &str, force: bool) 
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
-    // Rate limit
     ensure_rate_limit(&*state).await;
     let fetched = vt_fetch(&client, &key, sha256).await?;
     state.cache.insert(sha256.to_string(), fetched.clone());
@@ -297,7 +286,6 @@ pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, String> {
     Ok(VtStatus { key_set, cached_items: state.cache.len() })
 }
 
-// ---------------- Auto-scan snapshot policy ----------------
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct VtSnapshot {
     last_scan: u64,
@@ -366,7 +354,6 @@ pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(
     let mut need_startup = 0usize;
     let mut need_registry = 0usize;
 
-    // Startup shortcuts
     let items = resolve_startup_shortcut_targets();
     for (_display, path) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
@@ -376,7 +363,6 @@ pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(
         }
     }
 
-    // Registry run
     let items = resolve_registry_run_targets();
     for (_display, path, _hive, _key, _name) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
@@ -402,14 +388,12 @@ pub fn vt_load_cache(state: State<'_, VtState>) -> Result<usize, String> {
 
 #[cfg(target_os = "windows")]
 fn resolve_startup_shortcut_targets() -> Vec<(String /*display*/, String /*path*/)> {
-    // Use optimize module to enumerate; re-open .lnk to resolve the target path
     let mut out = Vec::new();
     if let Ok(items) = crate::optimize::list_startup_shortcuts() {
         for it in items {
             let display = it.name.clone();
             let p = std::path::PathBuf::from(&it.path);
             if p.exists() && p.is_file() {
-                // Try to parse .lnk
                 if let Ok(link) = lnk::ShellLink::open(&p, lnk::encoding::WINDOWS_1252) {
                     if let Some(info) = link.link_info() {
                         let common = info.common_path_suffix().to_string();
@@ -421,7 +405,6 @@ fn resolve_startup_shortcut_targets() -> Vec<(String /*display*/, String /*path*
                     }
                 }
             }
-            // fallback: keep the .lnk path
             out.push((display, it.path));
         }
     }
@@ -430,7 +413,6 @@ fn resolve_startup_shortcut_targets() -> Vec<(String /*display*/, String /*path*
 
 #[cfg(target_os = "windows")]
 fn extract_exe_from_command(cmd: &str) -> Option<String> {
-    // Similar to optimize::extract_image_from_command but self-contained and more tolerant
     fn expand_env_case_insensitive(input: &str) -> String {
         let mut out = input.to_string();
         for (k, v) in std::env::vars() {
@@ -443,36 +425,29 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
     }
     let mut s = cmd.trim().to_string();
     if s.is_empty() { return None; }
-    // Tolerate unmatched trailing quote
     if s.ends_with('"') && !s.starts_with('"') { s = s.trim_end_matches('"').to_string(); }
-    // Take the first arg (quoted aware)
     let mut first = if s.starts_with('"') {
         s.split('"').nth(1).unwrap_or("")
     } else {
         s.split_whitespace().next().unwrap_or("")
     };
     if first.is_empty() { return None; }
-    // Environment expansion (case-insensitive)
     let expanded = expand_env_case_insensitive(first);
     let mut p = PathBuf::from(&expanded);
     if p.exists() { return Some(p.display().to_string()); }
-    // If quoted part included trailing comma or semicolon, trim punctuation
     first = first.trim_end_matches(&[',', ';', '.'][..]);
     let expanded2 = expand_env_case_insensitive(first);
     p = PathBuf::from(&expanded2);
     if p.exists() { return Some(p.display().to_string()); }
 
-    // Heuristic: if token has no extension but "token.exe" exists, use it
     if Path::new(&expanded2).extension().is_none() {
         let mut cand = PathBuf::from(&expanded2);
         cand.set_extension("exe");
         if cand.exists() { return Some(cand.display().to_string()); }
     }
 
-    // If it's a bare image name (e.g., rundll32.exe), try resolving via common system dirs and PATH
     let lower = first.to_lowercase();
     if lower.ends_with(".exe") && !lower.contains('\\') && !lower.contains('/') {
-        // Candidate search roots
         let mut roots: Vec<PathBuf> = Vec::new();
         if let Some(system_root) = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR")) {
             roots.push(PathBuf::from(&system_root).join("System32"));
@@ -487,17 +462,15 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
         }
     }
 
-    // Fallback: search for any .exe token in the full command string
     let lower_all = s.to_lowercase();
     if let Some(idx) = lower_all.rfind(".exe") {
-        let end = idx + 4; // include .exe
+        let end = idx + 4;
         let start = s[..end].rfind(|c| c == ' ' || c == '"' || c == '\\' || c == '\t').map(|i| i + 1).unwrap_or(0);
         let token = s[start..end].trim_matches('"');
         if !token.is_empty() {
             let exp = expand_env_case_insensitive(token);
             let q = PathBuf::from(exp.trim_matches('"'));
             if q.exists() { return Some(q.display().to_string()); }
-            // Try resolve by filename via system roots/PATH
             if let Some(name) = Path::new(token).file_name().map(|x| x.to_string_lossy().to_string()) {
                 let mut roots: Vec<PathBuf> = Vec::new();
                 if let Some(system_root) = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR")) {
@@ -564,7 +537,6 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
             }
         }
         if !pb.exists() || !pb.is_file() {
-            // File missing: report as Unknown with reason
             let rep = VtItemReport {
                 subject: display.clone(),
                 sha256: String::new(),
@@ -620,10 +592,8 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
                     reason: None,
                 };
                 out.push(rep.clone());
-                // Emit a general report event for UI to render verdict tags
                 let _ = app.emit("vt-report", &rep);
                 if matches!(entry.verdict, Verdict::Malicious | Verdict::Suspicious) {
-                    // Deduplicate popups using last_alerted TTL window
                     let mut need_emit = true;
                     if let Some(mut cached) = state.cache.get_mut(&entry.sha256) {
                         let last = cached.last_alerted.unwrap_or(0);
@@ -637,7 +607,6 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
                 }
             }
             Err(e) => {
-                // Map error to reason
                 let es = e.to_lowercase();
                 let reason = if es.contains("api key not set") { "no-api-key" }
                     else if es.contains("http 429") { "rate-limited" }
@@ -673,14 +642,12 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
     let mut out: Vec<VtItemReport> = Vec::new();
-    // Enumerate all registry Run items directly so we can also report entries without a resolvable executable
     let items_full = crate::optimize::list_registry_run().unwrap_or_default();
     for it in items_full.into_iter().take(limit) {
         let display = it.command.clone();
         let name = it.name.clone();
         let maybe_img = extract_exe_from_command(&it.command);
         if maybe_img.is_none() {
-            // No resolvable executable image
             let subj = if !name.trim().is_empty() { name.clone() } else { display.clone() };
             let rep = VtItemReport {
                 subject: subj,
@@ -703,7 +670,6 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
         let path = maybe_img.unwrap();
         let pb = PathBuf::from(&path);
         if !pb.exists() || !pb.is_file() {
-            // If extract_exe_from_command failed upstream, this path may not exist
             let rep = VtItemReport {
                 subject: if !name.trim().is_empty() { name.clone() } else { display.clone() },
                 sha256: String::new(),
@@ -743,7 +709,6 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
         } };
         match lookup_or_fetch(&state, &sha, force).await {
             Ok(entry) => {
-                // Prefer the value name for subject; fall back to command when missing
                 let subj = if !name.trim().is_empty() { name.clone() } else { display.clone() };
                 let total = entry.malicious_count + entry.suspicious_count + entry.harmless_count + entry.undetected_count;
                 let rep = VtItemReport {
@@ -763,7 +728,6 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
                 out.push(rep.clone());
                 let _ = app.emit("vt-report", &rep);
                 if matches!(entry.verdict, Verdict::Malicious | Verdict::Suspicious) {
-                    // Deduplicate popups
                     let mut need_emit = true;
                     if let Some(mut cached) = state.cache.get_mut(&entry.sha256) {
                         let last = cached.last_alerted.unwrap_or(0);
@@ -806,10 +770,8 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_all(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<(usize, usize), String> {
-    // returns (startup_scanned, registry_scanned)
     let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force).await?.len();
     let n2 = vt_scan_registry(app, state, limit, force).await?.len();
-    // update snapshot baseline
     let prev = load_snapshot();
     let mut cur = build_current_snapshot(prev.last_scan);
     cur.last_scan = epoch_now();
@@ -817,7 +779,6 @@ pub async fn vt_scan_all(app: AppHandle, state: State<'_, VtState>, limit: Optio
     Ok((n1, n2))
 }
 
-// Non-Windows fallbacks
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn vt_scan_startup(_app: AppHandle, _state: State<'_, VtState>, _limit: Option<u32>) -> Result<Vec<VtItemReport>, String> { Ok(Vec::new()) }
@@ -844,7 +805,6 @@ pub async fn vt_auto_maybe_scan(app: AppHandle, state: State<'_, VtState>) -> Re
         let _ = app.emit("vt-autoscan-done", &serde_json::json!({"reason": r, "startup": n1, "registry": n2}));
         return Ok(Some(r.to_string()));
     }
-    // No change and TTL not reached: emit skip for visibility
     let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": "no-change"}));
     Ok(None)
 }

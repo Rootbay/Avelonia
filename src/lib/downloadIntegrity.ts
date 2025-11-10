@@ -21,7 +21,6 @@ export async function verifyDownloadsOnce(): Promise<void> {
           const ok = await invoke<boolean>('path_exists', { path: d.targetPath as string });
           return { id: d.id, exists: ok };
         } catch {
-          // If check fails, don't flip status; treat as unknown
           return { id: d.id, exists: true };
         }
       })
@@ -29,7 +28,6 @@ export async function verifyDownloadsOnce(): Promise<void> {
 
     const missing = new Set(results.filter((r) => !r.exists).map((r) => r.id));
     if (missing.size === 0) return;
-    // mark for downstream consumers (e.g., dashboard logs)
     for (const id of missing) recentlyMissing.add(id);
 
     downloads.update((list) =>
@@ -40,7 +38,6 @@ export async function verifyDownloadsOnce(): Promise<void> {
         next.progress = 0;
         next.speed = '';
         next.eta = 'N/A';
-        // Keep targetPath for reference? Clear to avoid confusion in UI
         next.targetPath = undefined;
         return next;
       })
@@ -52,9 +49,7 @@ export async function verifyDownloadsOnce(): Promise<void> {
 
 export function startDownloadIntegrityWatch(intervalMs = 20000): void {
   stopDownloadIntegrityWatch();
-  // Kick off immediately, then at interval
   void verifyDownloadsOnce();
-  // In browsers, setInterval returns number
   timer = setInterval(() => void verifyDownloadsOnce(), intervalMs) as unknown as number;
 }
 

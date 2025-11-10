@@ -27,10 +27,15 @@ export function setCleanerMessage(msg: string) {
 }
 
 export function endCleanerScan(total?: number) {
-  cleanerScan.update((s) => ({ phase: 'done', found: typeof total === 'number' ? total : (s.found||0), startedAt: s.startedAt, finishedAt: Date.now(), message: '' }));
+  cleanerScan.update((s) => ({
+    phase: 'done',
+    found: typeof total === 'number' ? total : s.found || 0,
+    startedAt: s.startedAt,
+    finishedAt: Date.now(),
+    message: '',
+  }));
 }
 
 export function resetCleanerScan() {
   cleanerScan.set(initial);
 }
-

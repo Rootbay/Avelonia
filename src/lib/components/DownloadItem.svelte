@@ -6,7 +6,7 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { TableRow, TableCell } from '$lib/components/ui/table';
   import { toast } from '$lib/components/ui/sonner';
-  import { MoreHorizontal } from '@lucide/svelte';
+  import { Ellipsis } from '@lucide/svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -18,17 +18,12 @@
 
   type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
 
-  const { download, selected, onToggleSelect, startDownload, cancelDownload } = $props<{
+  const { download, selected, onToggleSelect, startDownload } = $props<{
     download: Download;
     selected: boolean;
     onToggleSelect?: (payload: { checked: boolean; shiftKey: boolean }) => void;
     startDownload: (id: number) => void;
-    cancelDownload: (id: number) => void;
   }>();
-
-  const downloading = $derived(
-    download.status === 'downloading' || download.status === 'pending' || download.status === 'queued'
-  );
 
   const statusTone = $derived.by(() => {
     switch (download.status) {
@@ -46,8 +41,6 @@
         return 'text-muted-foreground';
     }
   });
-
-  // Note: indicator system removed per request
 
   async function ensurePath(): Promise<string | null> {
     return await getDownloadPath(download);
@@ -97,8 +90,15 @@
   {@const { class: propsClass, ...restWithoutClass } = rawProps}
   {@const restProps = restWithoutClass as Record<string, unknown>}
   <span role="none" onclick={(e: MouseEvent) => e.stopPropagation()}>
-    <Button {...restProps} type="button" variant="ghost" size="sm" aria-label="Details" class={propsClass}>
-      <MoreHorizontal class="size-4" />
+    <Button
+      {...restProps}
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label="Details"
+      class={propsClass}
+    >
+      <Ellipsis class="size-4" />
     </Button>
   </span>
 {/snippet}
@@ -163,7 +163,9 @@
   <TableCell class="hidden md:table-cell text-muted-foreground">{download.category}</TableCell>
   <TableCell class="hidden md:table-cell text-muted-foreground">{download.eta}</TableCell>
 
-  <TableCell class="w-[180px] pl-6 sm:pl-8 flex flex-col gap-2 md:flex-row md:items-center md:justify-start">
+  <TableCell
+    class="w-[180px] pl-6 sm:pl-8 flex flex-col gap-2 md:flex-row md:items-center md:justify-start"
+  >
     <span class={`text-xs font-semibold uppercase tracking-wide ${statusTone}`}>
       {download.status}
       {#if download.progress < 0}
@@ -181,10 +183,22 @@
         <DropdownMenu>
           <DropdownMenuTrigger child={DetailsTrigger} />
           <DropdownMenuContent align="end" onclick={(e: MouseEvent) => e.stopPropagation()}>
-            <DropdownMenuLabel class="max-w-64 truncate" title={download.name}>{download.name}</DropdownMenuLabel>
+            <DropdownMenuLabel class="max-w-64 truncate" title={download.name}
+              >{download.name}</DropdownMenuLabel
+            >
             <DropdownMenuSeparator />
-            <DropdownMenuItem onclick={(e: MouseEvent) => { e.stopPropagation(); void openFile(e); }}>Open file</DropdownMenuItem>
-            <DropdownMenuItem onclick={(e: MouseEvent) => { e.stopPropagation(); void showInFolder(e); }}>Show in folder</DropdownMenuItem>
+            <DropdownMenuItem
+              onclick={(e: MouseEvent) => {
+                e.stopPropagation();
+                void openFile(e);
+              }}>Open file</DropdownMenuItem
+            >
+            <DropdownMenuItem
+              onclick={(e: MouseEvent) => {
+                e.stopPropagation();
+                void showInFolder(e);
+              }}>Show in folder</DropdownMenuItem
+            >
           </DropdownMenuContent>
         </DropdownMenu>
       {:else if download.status === 'failed'}
@@ -193,5 +207,3 @@
     </div>
   </TableCell>
 </TableRow>
-
-<!-- Indicator row removed per request -->

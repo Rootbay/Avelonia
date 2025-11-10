@@ -10,6 +10,7 @@
   import { pushLog as pushSystemLog, type LogLevel } from '$lib/logStore';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
+  import { Checkbox } from '$lib/components/ui/checkbox';
   import {
     Card,
     CardContent,
@@ -35,7 +36,6 @@
     SheetDescription,
     SheetHeader,
     SheetTitle,
-    SheetTrigger,
   } from '$lib/components/ui/sheet';
   import {
     Dialog,
@@ -47,8 +47,20 @@
     DialogClose,
   } from '$lib/components/ui/dialog';
   import { toast } from '$lib/components/ui/sonner';
-  import { ArrowUpDown, ListChecks, SlidersHorizontal, Keyboard } from '@lucide/svelte';
-  import { Play, XCircle, RefreshCcw, Clipboard as ClipboardIcon, FileDown, Eye, FolderOpen, Trash2 } from '@lucide/svelte';
+  import {
+    Play,
+    CircleX,
+    RefreshCcw,
+    Clipboard as ClipboardIcon,
+    FileDown,
+    Eye,
+    FolderOpen,
+    Trash2,
+    ArrowUpDown,
+    ListChecks,
+    SlidersHorizontal,
+    Keyboard
+  } from '@lucide/svelte';
   import { sanitizeFileName, normalizeExtension } from '$lib/downloadPath';
   import { prettifyDisplayName } from '$lib/name';
   import { tags as customTags, addTag, BUILT_IN_TAGS } from '$lib/tags';
@@ -57,13 +69,6 @@
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
-  $effect(() => {
-    const t = setTimeout(() => {
-      debouncedSearchTerm = searchTerm;
-    }, 150);
-    return () => clearTimeout(t);
-  });
-  let showFilters = $state(false);
   let filtersOpen = $state(false);
   let actionsOpen = $state(false);
   let filters = $state({
@@ -77,8 +82,6 @@
   type StatusGroup = 'all' | 'available' | 'active' | 'completed' | 'failed';
   type SortKey = 'name' | 'size' | 'status' | 'eta' | 'fileType' | 'category';
 
-  type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
-
   const statusFilters: Array<{ value: StatusGroup; label: string }> = [
     { value: 'all', label: 'All' },
     { value: 'available', label: 'Available' },
@@ -88,13 +91,13 @@
   ];
 
   const sortOptions: Array<{ value: SortKey; label: string }> = [
-  { value: 'name', label: 'Name' },
-  { value: 'size', label: 'Size' },
-  { value: 'fileType', label: 'File Type' },
-  { value: 'category', label: 'Category' },
-  { value: 'eta', label: 'ETA' },
-  { value: 'status', label: 'Status' },
-];
+    { value: 'name', label: 'Name' },
+    { value: 'size', label: 'Size' },
+    { value: 'fileType', label: 'File Type' },
+    { value: 'category', label: 'Category' },
+    { value: 'eta', label: 'ETA' },
+    { value: 'status', label: 'Status' },
+  ];
 
   let statusGroup = $state<StatusGroup>('all');
   let sortBy = $state<SortKey>('name');
@@ -108,7 +111,6 @@
   let showVerifyInfo = $state(false);
   let optionsOpen = $state(false);
   let returnToOptions = $state(false);
-  // Show a brief initial skeleton on page entry (similar to Optimize)
   let initialLoading = $state(true);
   let lastSelectedIndex: number | null = null;
   let tableEl: HTMLTableElement | null = null;
@@ -126,23 +128,6 @@
   let elevateInstall = $state($settings.downloader.elevate);
   let fallbackOpen = $state($settings.downloader.fallbackOpen);
   let verifyInstall = $state($settings.downloader.verifyInstall);
-  $effect(() => {
-    autoInstall = $settings.downloader.autoInstall;
-    installMode = $settings.downloader.installMode;
-    elevateInstall = $settings.downloader.elevate;
-    fallbackOpen = $settings.downloader.fallbackOpen;
-    verifyInstall = $settings.downloader.verifyInstall;
-  });
-  $effect(() => {
-    updateDownloaderSettings({ autoInstall, installMode, elevate: elevateInstall, fallbackOpen, verifyInstall });
-  });
-  // When closing info popups, reopen the Options sheet if we navigated from there
-  $effect(() => {
-    if (!showInstallInfo && !showVerifyInfo && returnToOptions) {
-      optionsOpen = true;
-      returnToOptions = false;
-    }
-  });
   const guessed = $derived.by(() => guessFromUrl(addUrl));
   let probeName = $state('');
   let probeExt = $state('');
@@ -151,14 +136,44 @@
   const effectiveExt = $derived(probeExt || guessed.ext);
   const effectiveName = $derived(prettifyDisplayName(probeName || guessed.name, effectiveExt));
 
-  // Keep suggested name in sync until user edits the field
+  $effect(() => {
+    autoInstall = $settings.downloader.autoInstall;
+    installMode = $settings.downloader.installMode;
+    elevateInstall = $settings.downloader.elevate;
+    fallbackOpen = $settings.downloader.fallbackOpen;
+    verifyInstall = $settings.downloader.verifyInstall;
+  });
+
+  $effect(() => {
+    updateDownloaderSettings({
+      autoInstall,
+      installMode,
+      elevate: elevateInstall,
+      fallbackOpen,
+      verifyInstall,
+    });
+  });
+
+  $effect(() => {
+    if (!showInstallInfo && !showVerifyInfo && returnToOptions) {
+      optionsOpen = true;
+      returnToOptions = false;
+    }
+  });
+
   $effect(() => {
     if (!nameTouched) {
       addName = effectiveName;
     }
   });
 
-  // Probe server headers for better filename/extension when URL looks valid
+  $effect(() => {
+    const t = setTimeout(() => {
+      debouncedSearchTerm = searchTerm;
+    }, 150);
+    return () => clearTimeout(t);
+  });
+
   $effect(() => {
     const u = addUrl.trim();
     if (!/^https?:\/\//i.test(u)) {
@@ -169,7 +184,11 @@
     const t = setTimeout(async () => {
       try {
         probing = true;
-        const res = (await invoke('probe_download', { url: u })) as { filename?: string; ext?: string; size?: number };
+        const res = (await invoke('probe_download', { url: u })) as {
+          filename?: string;
+          ext?: string;
+          size?: number;
+        };
         probeName = res?.filename || '';
         probeExt = res?.ext || '';
         probeSize = typeof res?.size === 'number' ? (res!.size as number) : 0;
@@ -188,10 +207,8 @@
     try {
       const u = new URL(url);
       let last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
-      // Strip query-like suffixes sometimes embedded in filename
       last = last.replace(/[?#].*$/, '');
       if (!last) return { name: 'download', ext: '' };
-      // Try multi-dot extensions first
       const lower = last.toLowerCase();
       const multi = ['.tar.gz', '.tar.bz2', '.tar.xz', '.tar.zst'];
       for (const m of multi) {
@@ -270,16 +287,11 @@
     selectedIds = new Set();
   }
 
-  // Keep selection stable even for completed items so users can re-download.
-  // (Previously, completed items were auto-unselected which broke header/select-all UX.)
-
-  // Utility to send app logs to Dashboard via Tauri event bus
   async function appLog(level: LogLevel, message: string) {
     try {
-      // Reduce noise: only persist WARN/ERROR/SUCCESS; ignore INFO here
       if (level === 'INFO') return;
       pushSystemLog(level, message, 'Downloader');
-    } catch {}
+    } catch { /* noop */ }
   }
 
   const STORAGE_KEY = 'avelonia_downloader_ui_v1';
@@ -302,7 +314,7 @@
           sortDirection = s.sortDirection;
         if (s?.statusGroup) statusGroup = s.statusGroup;
       }
-    } catch {}
+    } catch { /* noop */ }
 
     const keyHandler = (e: KeyboardEvent) => {
       const meta = e.ctrlKey || e.metaKey;
@@ -330,18 +342,19 @@
       window.removeEventListener('keydown', keyHandler);
     };
   });
-  // Turn off initial page skeleton after a short delay
+
   onMount(() => {
     const t = setTimeout(() => (initialLoading = false), 350);
     return () => clearTimeout(t);
   });
+
   $effect(() => {
     try {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({ searchTerm, filters, sortBy, sortDirection, statusGroup })
       );
-    } catch {}
+    } catch { /* noop */ }
   });
 
   let minListHeight = $state(0);
@@ -352,8 +365,8 @@
       const headerH = header ? header.getBoundingClientRect().height : 44;
       const measured = firstRow ? firstRow.getBoundingClientRect().height : 48;
       const rowH = Math.max(36, Math.min(80, measured));
-      const capMax = Math.ceil(headerH + rowH * 10 + 6); // header + 10 rows + small buffer
-      const capMin = Math.ceil(headerH + rowH * 5 + 6); // header + 5 rows minimum
+      const capMax = Math.ceil(headerH + rowH * 10 + 6);
+      const capMin = Math.ceil(headerH + rowH * 5 + 6);
       maxListHeight = capMax;
       minListHeight = capMin;
     } catch {
@@ -363,19 +376,15 @@
   }
 
   $effect(() => {
-    // Recalculate when the filtered list length changes
     const _len = filteredDownloads.length;
-    // Next tick to allow DOM to render
     setTimeout(recomputeMaxHeight, 0);
   });
 
   onMount(() => {
     const onR = () => recomputeMaxHeight();
     window.addEventListener('resize', onR);
-    // initial calculation
     setTimeout(onR, 0);
 
-    // IntersectionObserver to progressively append items when the sentinel enters view
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -545,13 +554,11 @@
       .sort(sortDownloads)
   );
 
-  // Virtualization/windowing for the downloads table (similar to Optimize lists)
   const DOWNLOAD_ROW_PX = 56;
   const DOWNLOAD_MAX_DOM = 600;
   let downloadsStart = $state(0);
   let downloadsVisible = $state(10);
   const VIEW_CHUNK = 30;
-  // Trigger loading earlier and avoid huge "jump to all" bursts
   const SCROLL_THRESHOLD_PX = 200;
   let lastVisible = $state(0);
   let skeletonIds = $state(new Set<number>());
@@ -560,7 +567,6 @@
   const windowedDownloads = $derived(
     filteredDownloads.slice(downloadsStart, Math.min(downloadsVisible, filteredDownloads.length))
   );
-  // We intentionally omit a bottom spacer to support true incremental loading as you scroll.
 
   function markSkeletonRange(startIndex: number, endIndex: number) {
     try {
@@ -571,7 +577,7 @@
         for (const id of ids) skeletonIds.delete(id);
         skeletonIds = new Set(skeletonIds);
       }, 350);
-    } catch {}
+    } catch { /* noop */ }
   }
 
   function onDownloadsScroll(event: Event) {
@@ -583,10 +589,9 @@
       return;
     }
     requestAnimationFrame(() => {
-      // Consider both an absolute pixel threshold and a ratio of total scrollable height
       const nearBottomPx = el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_THRESHOLD_PX;
       const progress = (el.scrollTop + el.clientHeight) / Math.max(1, el.scrollHeight);
-      const nearBottomRatio = progress >= 0.8; // ~last 20%
+      const nearBottomRatio = progress >= 0.8;
 
       if (nearBottomPx || nearBottomRatio) {
         const prev = downloadsVisible;
@@ -604,7 +609,6 @@
     });
   }
 
-  // Keep DOM window bounded when data or filters change
   $effect(() => {
     const total = filteredDownloads.length;
     if (downloadsVisible > total) downloadsVisible = total;
@@ -612,7 +616,6 @@
       downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
     }
     if (downloadsStart > downloadsVisible) downloadsStart = 0;
-    // Reset skeletons when data set changes significantly
     skeletonIds = new Set();
     lastVisible = downloadsVisible;
   });
@@ -630,17 +633,37 @@
     filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'completed').length
   );
 
-  // Action counts for nicer Bulk actions UI
-  const startableAll = $derived($downloads.filter((d) => d.status === 'available' && !!d.downloadLink).length);
-  const cancelableAll = $derived($downloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
-  const startableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'available' && !!d.downloadLink).length);
-  const cancelableFiltered = $derived(filteredDownloads.filter((d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued').length);
-  const startableSelected = $derived(
-    filteredDownloads.filter(
-      (d) => selectedIds.has(d.id) && (d.status === 'available' || d.status === 'completed') && !!d.downloadLink
+  const startableAll = $derived(
+    $downloads.filter((d) => d.status === 'available' && !!d.downloadLink).length
+  );
+  const cancelableAll = $derived(
+    $downloads.filter(
+      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
     ).length
   );
-  const cancelableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')).length);
+  const startableFiltered = $derived(
+    filteredDownloads.filter((d) => d.status === 'available' && !!d.downloadLink).length
+  );
+  const cancelableFiltered = $derived(
+    filteredDownloads.filter(
+      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+    ).length
+  );
+  const startableSelected = $derived(
+    filteredDownloads.filter(
+      (d) =>
+        selectedIds.has(d.id) &&
+        (d.status === 'available' || d.status === 'completed') &&
+        !!d.downloadLink
+    ).length
+  );
+  const cancelableSelected = $derived(
+    filteredDownloads.filter(
+      (d) =>
+        selectedIds.has(d.id) &&
+        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+    ).length
+  );
   const failedFiltered = $derived(filteredDownloads.filter((d) => d.status === 'failed').length);
   const deletableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id)).length);
   const deletableFiltered = $derived(filteredDownloads.length);
@@ -776,9 +799,12 @@
       toast.info('No selected downloads to delete');
       return;
     }
-    // Cancel active ones before removing
+
     for (const d of filteredDownloads) {
-      if (selectedIds.has(d.id) && (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')) {
+      if (
+        selectedIds.has(d.id) &&
+        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+      ) {
         cancelDownload(d.id);
       }
     }
@@ -907,7 +933,6 @@
     }
   }
 
-  // Range selection with Shift
   function toggleSelectRange(currentIndex: number, value: boolean) {
     if (lastSelectedIndex === null) {
       const id = filteredDownloads[currentIndex]?.id;
@@ -1038,8 +1063,6 @@
     </CardContent>
   </Card>
 
-  
-
   <Dialog bind:open={showInstallInfo}>
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
@@ -1049,7 +1072,10 @@
         <ul class="list-disc pl-5 space-y-1">
           <li>Tries to install supported installers (.msi, .exe) silently using common flags.</li>
           <li>SmartScreen and UAC prompts may still appear if required by Windows.</li>
-          <li>Not all vendors support silent mode; if enabled, you can allow fallback to open the installer normally.</li>
+          <li>
+            Not all vendors support silent mode; if enabled, you can allow fallback to open the
+            installer normally.
+          </li>
           <li>Elevation (UAC) may be needed for machine-wide installs.</li>
         </ul>
       </DialogDescription>
@@ -1067,10 +1093,16 @@
       </DialogHeader>
       <DialogDescription>
         <ul class="list-disc pl-5 space-y-1">
-          <li>After install (silent or normal), we check for entries in Windows "Programs and Features".</li>
+          <li>
+            After install (silent or normal), we check for entries in Windows "Programs and
+            Features".
+          </li>
           <li>We diff the Uninstall registry (HKLM/HKCU, 64/32-bit) for up to 30 seconds.</li>
           <li>If a matching entry is found, the install is marked as verified in the log.</li>
-          <li>Some installers register later; verification can be missed even if the install succeeded.</li>
+          <li>
+            Some installers register later; verification can be missed even if the install
+            succeeded.
+          </li>
         </ul>
       </DialogDescription>
       <DialogFooter>
@@ -1080,7 +1112,6 @@
       </DialogFooter>
     </DialogContent>
   </Dialog>
-
 
   <Dialog bind:open={addOpen}>
     <DialogContent>
@@ -1095,7 +1126,12 @@
         </div>
         <div class="space-y-1">
           <label class="text-sm font-medium" for="add-cat">Category</label>
-          <Input id="add-cat" placeholder="e.g. Utilities" bind:value={addCategory} list="category-options" />
+          <Input
+            id="add-cat"
+            placeholder="e.g. Utilities"
+            bind:value={addCategory}
+            list="category-options"
+          />
           <datalist id="category-options">
             {#each tagOptions as t}
               <option value={t}></option>
@@ -1105,14 +1141,22 @@
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1">
             <label class="text-sm font-medium" for="add-name">Name</label>
-            <Input id="add-name" placeholder="App name" bind:value={addName} oninput={() => (nameTouched = true)} />
+            <Input
+              id="add-name"
+              placeholder="App name"
+              bind:value={addName}
+              oninput={() => (nameTouched = true)}
+            />
             {#if !nameTouched}
-              <p class="text-xs text-muted-foreground">Suggested: {effectiveName}{#if probing} (detecting...){/if}</p>
+              <p class="text-xs text-muted-foreground">
+                Suggested: {effectiveName}{#if probing}
+                  (detecting...){/if}
+              </p>
             {/if}
           </div>
           <div class="space-y-1">
             <div class="text-sm font-medium">Type</div>
-            <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || 'â€”'}</div>
+            <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || '—'}</div>
           </div>
         </div>
       </div>
@@ -1126,183 +1170,412 @@
   <Card class="bg-card/70 shadow-sm">
     <CardHeader class="gap-4 pb-2">
       <div class="flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <div class="flex min-w-[260px] flex-1">
-              <Input class="w-full" placeholder="Search downloads..." bind:value={searchTerm} aria-label="Search downloads" />
-            </div>
-            <div class="flex items-center gap-2">
-              <Button type="button" size="sm" variant="outline" aria-label="Add download" onclick={() => (addOpen = true)}>
-                <span class="hidden sm:inline">Add</span>
-                <span class="sm:hidden">+</span>
-              </Button>
-              <Button type="button" size="sm" variant="outline" aria-label="Open filters" onclick={() => (filtersOpen = true)}>
-                <SlidersHorizontal class="size-4" />
-                <span class="ml-2 hidden sm:inline">Filters</span>
-              </Button>
-              <Button type="button" size="sm" variant="outline" aria-label="Bulk actions" onclick={() => (actionsOpen = true)}>
-                <ListChecks class="size-4" />
-                <span class="ml-2 hidden sm:inline">Actions</span>
-              </Button>
-              
-              <Button type="button" size="sm" variant="outline" aria-label="Open options" onclick={() => (optionsOpen = true)}>Options</Button>
-              <Button type="button" variant="ghost" size="icon" onclick={() => (showHelp = true)} aria-label="Keyboard shortcuts">
-                <Keyboard class="size-4" />
-                <span class="sr-only">Keyboard shortcuts</span>
-              </Button>
-            </div>
-            <Sheet bind:open={actionsOpen}>
-              <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
-                <SheetHeader class="space-y-1 p-0">
-                  <SheetTitle>Bulk actions</SheetTitle>
-                  <SheetDescription
-                    >Apply actions to the current selection or filtered list.</SheetDescription
-                  >
-                </SheetHeader>
-                <div class="mt-3 space-y-3">
-                  <div class="space-y-2">
-                    <p class="text-xs uppercase tracking-wide text-muted-foreground">All downloads</p>
-                    <div class="grid gap-2">
-                      <Button type="button" variant="outline" class="justify-between" onclick={() => { startAll(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
-                        {#if startableAll > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableAll}</span>{/if}
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex min-w-[260px] flex-1">
+            <Input
+              class="w-full"
+              placeholder="Search downloads..."
+              bind:value={searchTerm}
+              aria-label="Search downloads"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Add download"
+              onclick={() => (addOpen = true)}
+            >
+              <span class="hidden sm:inline">Add</span>
+              <span class="sm:hidden">+</span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Open filters"
+              onclick={() => (filtersOpen = true)}
+            >
+              <SlidersHorizontal class="size-4" />
+              <span class="ml-2 hidden sm:inline">Filters</span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Bulk actions"
+              onclick={() => (actionsOpen = true)}
+            >
+              <ListChecks class="size-4" />
+              <span class="ml-2 hidden sm:inline">Actions</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Open options"
+              onclick={() => (optionsOpen = true)}>Options</Button
+            >
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onclick={() => (showHelp = true)}
+              aria-label="Keyboard shortcuts"
+            >
+              <Keyboard class="size-4" />
+              <span class="sr-only">Keyboard shortcuts</span>
+            </Button>
+          </div>
+          <Sheet bind:open={actionsOpen}>
+            <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+              <SheetHeader class="space-y-1 p-0">
+                <SheetTitle>Bulk actions</SheetTitle>
+                <SheetDescription
+                  >Apply actions to the current selection or filtered list.</SheetDescription
+                >
+              </SheetHeader>
+              <div class="mt-3 space-y-3">
+                <div class="space-y-2">
+                  <p class="text-xs uppercase tracking-wide text-muted-foreground">All downloads</p>
+                  <div class="grid gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      onclick={() => {
+                        startAll();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
+                      {#if startableAll > 0}<span class="text-xs text-muted-foreground tabular-nums"
+                          >{startableAll}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={cancelableAll === 0}
+                      onclick={() => {
+                        cancelAllActive();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><CircleX class="size-4" /> Cancel active</span
+                      >
+                      {#if cancelableAll > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums">{cancelableAll}</span
+                        >{/if}
+                    </Button>
+                  </div>
+                </div>
+                <Separator />
+                <div class="space-y-2">
+                  <p class="text-xs uppercase tracking-wide text-muted-foreground">Current view</p>
+                  <div class="grid gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={startableFiltered === 0}
+                      onclick={() => {
+                        startAllFiltered();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><Play class="size-4" /> Start filtered</span
+                      >
+                      {#if startableFiltered > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{startableFiltered}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={cancelableFiltered === 0}
+                      onclick={() => {
+                        cancelAllFiltered();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><CircleX class="size-4" /> Cancel filtered</span
+                      >
+                      {#if cancelableFiltered > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{cancelableFiltered}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={deletableFiltered === 0}
+                      onclick={() => {
+                        deleteFiltered();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><Trash2 class="size-4" /> Delete filtered</span
+                      >
+                      {#if deletableFiltered > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{deletableFiltered}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={failedFiltered === 0}
+                      onclick={() => {
+                        retryFailedFiltered();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><RefreshCcw class="size-4" /> Retry failed (filtered)</span
+                      >
+                      {#if failedFiltered > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums">{failedFiltered}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      class="justify-between"
+                      onclick={() => {
+                        exportFilteredCSV();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><FileDown class="size-4" /> Export CSV</span
+                      >
+                    </Button>
+                  </div>
+                </div>
+                <Separator />
+                <div class="space-y-2">
+                  <p class="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
+                  <div class="grid gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={startableSelected === 0}
+                      onclick={() => {
+                        startSelected();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><Play class="size-4" /> Start selected</span
+                      >
+                      {#if startableSelected > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{startableSelected}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      class="justify-between"
+                      disabled={cancelableSelected === 0}
+                      onclick={() => {
+                        cancelSelected();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><CircleX class="size-4" /> Cancel selected</span
+                      >
+                      {#if cancelableSelected > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{cancelableSelected}</span
+                        >{/if}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      class="justify-between"
+                      disabled={deletableSelected === 0}
+                      onclick={() => {
+                        deleteSelected();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><Trash2 class="size-4" /> Delete selected</span
+                      >
+                      {#if deletableSelected > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{deletableSelected}</span
+                        >{/if}
+                    </Button>
+                    <div class="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="outline"
+                        class="justify-center"
+                        disabled={selectedCompletedCount === 0}
+                        onclick={() => {
+                          openSelectedCompleted();
+                          actionsOpen = false;
+                        }}
+                      >
+                        <Eye class="size-4" />
+                        <span class="ml-2">Open</span>
                       </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableAll === 0} onclick={() => { cancelAllActive(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel active</span>
-                        {#if cancelableAll > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableAll}</span>{/if}
+                      <Button
+                        variant="outline"
+                        class="justify-center"
+                        disabled={selectedCompletedCount === 0}
+                        onclick={() => {
+                          showSelectedCompleted();
+                          actionsOpen = false;
+                        }}
+                      >
+                        <FolderOpen class="size-4" />
+                        <span class="ml-2">Show</span>
                       </Button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="ghost"
+                        class="justify-center"
+                        disabled={selectedIds.size === 0}
+                        onclick={() => {
+                          copySelectedLinks();
+                          actionsOpen = false;
+                        }}
+                      >
+                        <ClipboardIcon class="size-4" />
+                        <span class="ml-2">Copy links</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        class="justify-center"
+                        onclick={() => {
+                          exportFilteredCSV();
+                          actionsOpen = false;
+                        }}
+                      >
+                        <FileDown class="size-4" />
+                        <span class="ml-2">Export</span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <Separator />
+                <div class="space-y-2">
+                  <p class="text-xs uppercase tracking-wide text-muted-foreground">Failed</p>
+                  <div class="grid gap-2">
+                    <Button
+                      variant="outline"
+                      class="justify-between"
+                      disabled={failedCount === 0}
+                      onclick={() => {
+                        retryAllFailed();
+                        actionsOpen = false;
+                      }}
+                    >
+                      <span class="flex items-center gap-2"
+                        ><RefreshCcw class="size-4" /> Retry all failed</span
+                      >
+                      {#if failedCount > 0}<span class="text-xs text-muted-foreground tabular-nums"
+                          >{failedCount}</span
+                        >{/if}
+                    </Button>
+                  </div>
                 </div>
               </div>
-              <Separator />
-                  <div class="space-y-2">
-                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Current view</p>
-                    <div class="grid gap-2">
-                      <Button type="button" variant="outline" class="justify-between" disabled={startableFiltered === 0} onclick={() => { startAllFiltered(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><Play class="size-4" /> Start filtered</span>
-                        {#if startableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableFiltered}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableFiltered === 0} onclick={() => { cancelAllFiltered(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel filtered</span>
-                        {#if cancelableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableFiltered}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={deletableFiltered === 0} onclick={() => { deleteFiltered(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete filtered</span>
-                        {#if deletableFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{deletableFiltered}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={failedFiltered === 0} onclick={() => { retryFailedFiltered(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry failed (filtered)</span>
-                        {#if failedFiltered > 0}<span class="text-xs text-muted-foreground tabular-nums">{failedFiltered}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="ghost" class="justify-between" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><FileDown class="size-4" /> Export CSV</span>
-                      </Button>
-                    </div>
-                  </div>
-                  <Separator />
-                  <div class="space-y-2">
-                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
-                    <div class="grid gap-2">
-                      <Button type="button" variant="outline" class="justify-between" disabled={startableSelected === 0} onclick={() => { startSelected(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><Play class="size-4" /> Start selected</span>
-                        {#if startableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{startableSelected}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={cancelableSelected === 0} onclick={() => { cancelSelected(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><XCircle class="size-4" /> Cancel selected</span>
-                        {#if cancelableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{cancelableSelected}</span>{/if}
-                      </Button>
-                      <Button type="button" variant="outline" class="justify-between" disabled={deletableSelected === 0} onclick={() => { deleteSelected(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete selected</span>
-                        {#if deletableSelected > 0}<span class="text-xs text-muted-foreground tabular-nums">{deletableSelected}</span>{/if}
-                      </Button>
-                      <div class="grid grid-cols-2 gap-2">
-                        <Button type="button" variant="outline" class="justify-center" disabled={selectedCompletedCount === 0} onclick={() => { openSelectedCompleted(); actionsOpen = false; }}>
-                          <Eye class="size-4" />
-                          <span class="ml-2">Open</span>
-                        </Button>
-                        <Button type="button" variant="outline" class="justify-center" disabled={selectedCompletedCount === 0} onclick={() => { showSelectedCompleted(); actionsOpen = false; }}>
-                          <FolderOpen class="size-4" />
-                          <span class="ml-2">Show</span>
-                        </Button>
-                      </div>
-                      <div class="grid grid-cols-2 gap-2">
-                        <Button type="button" variant="ghost" class="justify-center" disabled={selectedIds.size === 0} onclick={() => { copySelectedLinks(); actionsOpen = false; }}>
-                          <ClipboardIcon class="size-4" />
-                          <span class="ml-2">Copy links</span>
-                        </Button>
-                        <Button type="button" variant="ghost" class="justify-center" onclick={() => { exportFilteredCSV(); actionsOpen = false; }}>
-                          <FileDown class="size-4" />
-                          <span class="ml-2">Export</span>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                  <Separator />
-                  <div class="space-y-2">
-                    <p class="text-xs uppercase tracking-wide text-muted-foreground">Failed</p>
-                    <div class="grid gap-2">
-                      <Button type="button" variant="outline" class="justify-between" disabled={failedCount === 0} onclick={() => { retryAllFailed(); actionsOpen = false; }}>
-                        <span class="flex items-center gap-2"><RefreshCcw class="size-4" /> Retry all failed</span>
-                        {#if failedCount > 0}<span class="text-xs text-muted-foreground tabular-nums">{failedCount}</span>{/if}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
-            
-            <Sheet bind:open={optionsOpen}>
-              <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
-                <SheetHeader class="space-y-1 p-0">
-                  <SheetTitle>Beta options</SheetTitle>
-                  <SheetDescription>Defaults for postâ€‘download behavior.</SheetDescription>
-                </SheetHeader>
-                <div class="mt-3 space-y-6 text-sm">
-                  <div class="space-y-2">
-                    <p class="font-medium">Install after download</p>
-                    <label class="inline-flex items-center gap-2">
-                      <input type="checkbox" bind:checked={autoInstall} class="h-4 w-4" />
-                      Auto install after download
-                    </label>
-                  </div>
-                  <div class="space-y-2">
-                    <p class="font-medium">Install mode</p>
-                    <Select type="single" bind:value={installMode}>
-                      <SelectTrigger class="w-44" placeholder="Silent" />
-                      <SelectContent>
-                        <SelectItem value="silent">Silent</SelectItem>
-                        <SelectItem value="normal">Normal</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div class="space-y-2">
-                    <p class="font-medium">Advanced</p>
-                    <label class="inline-flex items-center gap-2">
-                      <input type="checkbox" bind:checked={elevateInstall} class="h-4 w-4" />
-                      Run elevated (may prompt UAC)
-                    </label>
-                    <label class="inline-flex items-center gap-2">
-                      <input type="checkbox" bind:checked={fallbackOpen} class="h-4 w-4" />
-                      If silent fails, open installer normally
-                    </label>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showInstallInfo = true; }}>Silent install?</Button>
-                    <Button type="button" variant="secondary" size="sm" onclick={() => { returnToOptions = true; optionsOpen = false; showVerifyInfo = true; }}>Verify install?</Button>
-                  </div>
+            </SheetContent>
+          </Sheet>
 
-                  <div class="space-y-2">
-                    <p class="font-medium">Verification</p>
-                    <label class="inline-flex items-center gap-2">
-                      <input type="checkbox" bind:checked={verifyInstall} class="h-4 w-4" />
-                      Verify installation via system registry (Windows)
-                    </label>
-                    <p class="text-xs text-muted-foreground">Checks Uninstall entries after installer exits; helps confirm success.</p>
-                  </div>
+          <Sheet bind:open={optionsOpen}>
+            <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+              <SheetHeader class="space-y-1 p-0">
+                <SheetTitle>Beta options</SheetTitle>
+                <SheetDescription>Defaults for postâ€‘download behavior.</SheetDescription>
+              </SheetHeader>
+              <div class="mt-3 space-y-6 text-sm">
+                <div class="space-y-2">
+                  <p class="font-medium">Install after download</p>
+                  <label class="inline-flex items-center gap-2">
+                    <Checkbox bind:checked={autoInstall} class="h-4 w-4" />
+                    Auto install after download
+                  </label>
                 </div>
-              </SheetContent>
-            </Sheet>
-          </div>
+                <div class="space-y-2">
+                  <p class="font-medium">Install mode</p>
+                  <Select type="single" bind:value={installMode}>
+                    <SelectTrigger class="w-44">
+                      <p>
+                        {installMode === 'silent'
+                        ? 'Silent'
+                        : 'Normal'}
+                      </p>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="silent">Silent</SelectItem>
+                      <SelectItem value="normal">Normal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="space-y-2">
+                  <p class="font-medium">Advanced</p>
+                  <label class="inline-flex items-center gap-2">
+                    <Checkbox bind:checked={elevateInstall} class="h-4 w-4" />
+                    Run elevated (may prompt UAC)
+                  </label>
+                  <label class="inline-flex items-center gap-2">
+                    <Checkbox bind:checked={fallbackOpen} class="h-4 w-4" />
+                    If silent fails, open installer normally
+                  </label>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onclick={() => {
+                      returnToOptions = true;
+                      optionsOpen = false;
+                      showInstallInfo = true;
+                    }}>Silent install?</Button
+                  >
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onclick={() => {
+                      returnToOptions = true;
+                      optionsOpen = false;
+                      showVerifyInfo = true;
+                    }}>Verify install?</Button
+                  >
+                </div>
 
-          <!-- removed explicit sort controls; sorting available in table headers -->
+                <div class="space-y-2">
+                  <p class="font-medium">Verification</p>
+                  <label class="inline-flex items-center gap-2">
+                    <Checkbox bind:checked={verifyInstall} class="h-4 w-4" />
+                    Verify installation via system registry (Windows)
+                  </label>
+                  <p class="text-xs text-muted-foreground">
+                    Checks Uninstall entries after installer exits; helps confirm success.
+                  </p>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
 
         <div
           class="flex flex-wrap items-center gap-2"
@@ -1311,7 +1584,6 @@
         >
           {#each statusFilters as filter}
             <Button
-              type="button"
               variant={statusGroup === filter.value ? 'default' : 'outline'}
               size="sm"
               onclick={() => (statusGroup = filter.value)}
@@ -1346,9 +1618,14 @@
   </Sheet>
 
   <Card class="relative overflow-hidden border border-border/60">
-
     <CardContent class="p-0">
-      <div class="overflow-auto" style:max-height={`${maxListHeight || ''}px`} style:min-height={`${minListHeight || ''}px`} bind:this={downloadsScrollEl} onscroll={onDownloadsScroll}>
+      <div
+        class="overflow-auto"
+        style:max-height={`${maxListHeight || ''}px`}
+        style:min-height={`${minListHeight || ''}px`}
+        bind:this={downloadsScrollEl}
+        onscroll={onDownloadsScroll}
+      >
         <Table ref={tableEl} class="min-w-[960px]">
           <TableHeader>
             <TableRow>
@@ -1358,7 +1635,8 @@
                     bind:this={selectAllCheckbox}
                     type="checkbox"
                     class="h-4 w-4 rounded border-border bg-background text-primary focus:ring-ring"
-                    checked={filteredDownloads.length > 0 && filteredDownloads.every((d) => selectedIds.has(d.id))}
+                    checked={filteredDownloads.length > 0 &&
+                      filteredDownloads.every((d) => selectedIds.has(d.id))}
                     aria-checked={(() => {
                       const any = filteredDownloads.some((d) => selectedIds.has(d.id));
                       const all = any && filteredDownloads.every((d) => selectedIds.has(d.id));
@@ -1374,43 +1652,74 @@
               </TableHead>
               <TableHead>
                 <button
-                  type="button"
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('name')}
                   onkeydown={(event) => handleHeaderKey(event, 'name')}
                 >
                   <span>Name</span>
-                  {#if sortBy === 'name'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'name'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
               <TableHead>
-                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('size')} onkeydown={(event) => handleHeaderKey(event, 'size')}>
+                <button
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('size')}
+                  onkeydown={(event) => handleHeaderKey(event, 'size')}
+                >
                   <span>Size</span>
-                  {#if sortBy === 'size'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'size'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
               <TableHead>
-                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('fileType')} onkeydown={(event) => handleHeaderKey(event, 'fileType')}>
+                <button
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('fileType')}
+                  onkeydown={(event) => handleHeaderKey(event, 'fileType')}
+                >
                   <span>File Type</span>
-                  {#if sortBy === 'fileType'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'fileType'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
               <TableHead>
-                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('category')} onkeydown={(event) => handleHeaderKey(event, 'category')}>
+                <button
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('category')}
+                  onkeydown={(event) => handleHeaderKey(event, 'category')}
+                >
                   <span>Category</span>
-                  {#if sortBy === 'category'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'category'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
               <TableHead>
-                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('eta')} onkeydown={(event) => handleHeaderKey(event, 'eta')}>
+                <button
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('eta')}
+                  onkeydown={(event) => handleHeaderKey(event, 'eta')}
+                >
                   <span>ETA</span>
-                  {#if sortBy === 'eta'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'eta'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
               <TableHead class="w-[180px] pl-6 sm:pl-8">
-                <button type="button" class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none" onclick={() => setSort('status')} onkeydown={(event) => handleHeaderKey(event, 'status')}>
+                <button
+                  class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
+                  onclick={() => setSort('status')}
+                  onkeydown={(event) => handleHeaderKey(event, 'status')}
+                >
                   <span>Status</span>
-                  {#if sortBy === 'status'}<ArrowUpDown class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />{/if}
+                  {#if sortBy === 'status'}<ArrowUpDown
+                      class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
+                    />{/if}
                 </button>
               </TableHead>
             </TableRow>
@@ -1451,7 +1760,10 @@
             {:else}
               {#if downloadsStart > 0}
                 <tr aria-hidden="true">
-                  <td colspan="7" style={`height:${downloadsStart * DOWNLOAD_ROW_PX}px; padding:0; border:0;`}></td>
+                  <td
+                    colspan="7"
+                    style={`height:${downloadsStart * DOWNLOAD_ROW_PX}px; padding:0; border:0;`}
+                  ></td>
                 </tr>
               {/if}
               {#each windowedDownloads as download, i (download.id)}
@@ -1510,14 +1822,15 @@
               {/if}
             {/if}
           </TableBody>
-      </Table>
-      <!-- Sentinel for IntersectionObserver-based incremental loading -->
-      <div bind:this={downloadsSentinel} class="h-0" aria-hidden="true"></div>
+        </Table>
+        <div bind:this={downloadsSentinel} class="h-0" aria-hidden="true"></div>
       </div>
 
       {#if selectedIds.size > 0}
         <div class="pointer-events-none">
-          <div class="pointer-events-auto md:absolute md:bottom-4 md:right-4 fixed bottom-6 right-6 z-20 rounded-md border bg-card/95 backdrop-blur p-2 shadow-md flex items-center gap-2">
+          <div
+            class="pointer-events-auto md:absolute md:bottom-4 md:right-4 fixed bottom-6 right-6 z-20 rounded-md border bg-card/95 backdrop-blur p-2 shadow-md flex items-center gap-2"
+          >
             <Badge variant="secondary">{selectedIds.size} selected</Badge>
             <Button size="sm" onclick={startSelected}>Start</Button>
             <Button size="sm" variant="destructive" onclick={cancelSelected}>Cancel</Button>
@@ -1525,8 +1838,7 @@
           </div>
         </div>
       {/if}
-
-      </CardContent>
+    </CardContent>
   </Card>
 
   <Dialog bind:open={showHelp}>
@@ -1548,20 +1860,3 @@
     </DialogContent>
   </Dialog>
 </div>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

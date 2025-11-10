@@ -29,6 +29,4 @@
   >
     {@render children?.()}
   </DropdownMenuPrimitive.Content>
-  
 </DropdownMenuPrimitive.Portal>
-

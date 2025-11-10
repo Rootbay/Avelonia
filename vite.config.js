@@ -84,16 +84,7 @@ export default defineConfig(({ command, mode }) => {
       target: 'es2020',
       minify: 'esbuild',
       rollupOptions: {
-        external: ['@tauri-apps/api/tauri'],
-        output: {
-          /** @param {any} assetInfo */
-          assetFileNames: (assetInfo) => {
-            if (assetInfo.name.endsWith('.css')) {
-              return 'assets/app.[ext]';
-            }
-            return 'assets/[name].[ext]';
-          },
-        },
+        external: ['@tauri-apps/api/tauri']
       },
       esbuild: { drop: ['console', 'debugger'] },
     },

@@ -31,7 +31,10 @@ const initial: VtScanState = { phase: 'idle', items: [] };
 
 export const vtScan = writable<VtScanState>(initial);
 
-export function beginScan(source: VtScanSource, expected?: { startup?: number; registry?: number }) {
+export function beginScan(
+  source: VtScanSource,
+  expected?: { startup?: number; registry?: number }
+) {
   vtScan.set({
     phase: 'running',
     source,
@@ -52,7 +55,19 @@ export function endScan(counts?: { startup?: number; registry?: number }) {
   }));
 }
 
-export function pushReport(rep: { subject: string; source?: string; verdict?: string; positives?: number; malicious?: number; suspicious?: number; harmless?: number; undetected?: number; total_vendors?: number; reason?: string; permalink?: string }) {
+export function pushReport(rep: {
+  subject: string;
+  source?: string;
+  verdict?: string;
+  positives?: number;
+  malicious?: number;
+  suspicious?: number;
+  harmless?: number;
+  undetected?: number;
+  total_vendors?: number;
+  reason?: string;
+  permalink?: string;
+}) {
   const src = (rep.source === 'registry' ? 'registry' : 'startup') as 'startup' | 'registry';
   vtScan.update((s) => {
     const key = rep.subject.trim().toLowerCase();
@@ -71,7 +86,8 @@ export function pushReport(rep: { subject: string; source?: string; verdict?: st
       reason: rep.reason,
       permalink: rep.permalink,
     };
-    if (idx >= 0) items[idx] = next; else items.push(next);
+    if (idx >= 0) items[idx] = next;
+    else items.push(next);
     return { ...s, items };
   });
 }

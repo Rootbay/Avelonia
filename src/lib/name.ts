@@ -1,10 +1,4 @@
-const START_NOISE = [
-  'setup',
-  'installer',
-  'install',
-  'download',
-  'official',
-];
+const START_NOISE = ['setup', 'installer', 'install', 'download', 'official'];
 
 const END_NOISE = [
   'x64',
@@ -20,11 +14,51 @@ const END_NOISE = [
 ];
 
 const REGION_SUFFIX = [
-  'na','us','uk','eu','en','se','de','fr','es','pt','ru','jp','cn','br','it','nl','pl','tr','cz','sk','fi','no','dk',
-  'en-us','en-gb','es-es','pt-br','zh-cn','zh-tw'
+  'na',
+  'us',
+  'uk',
+  'eu',
+  'en',
+  'se',
+  'de',
+  'fr',
+  'es',
+  'pt',
+  'ru',
+  'jp',
+  'cn',
+  'br',
+  'it',
+  'nl',
+  'pl',
+  'tr',
+  'cz',
+  'sk',
+  'fi',
+  'no',
+  'dk',
+  'en-us',
+  'en-gb',
+  'es-es',
+  'pt-br',
+  'zh-cn',
+  'zh-tw',
 ];
 
-const STOP_WORDS = new Set(['of','and','the','for','to','a','an','in','on','at','by','with']);
+const STOP_WORDS = new Set([
+  'of',
+  'and',
+  'the',
+  'for',
+  'to',
+  'a',
+  'an',
+  'in',
+  'on',
+  'at',
+  'by',
+  'with',
+]);
 
 function stripExtension(name: string, ext?: string): string {
   if (ext) {
@@ -50,20 +84,16 @@ function titleCase(input: string): string {
 
 function removeNoise(raw: string): string {
   let s = raw.trim();
-  // leading noise like "Install:", "Setup -"
-  s = s.replace(new RegExp(`^(?:${START_NOISE.join('|')})[\s:,-]+`, 'i'), '');
-  // replace separators with spaces
+  s = s.replace(new RegExp(`^(?:${START_NOISE.join('|')})[\\s:,-]+`, 'i'), '');
   s = s.replace(/[._-]+/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
 
-  // remove trailing bracketed qualifiers if they are only short codes
-  s = s.replace(/\s*[([\{]\s*([\w-]{1,8})\s*[)\]\}]\s*$/i, (m, g1) => {
+  s = s.replace(/\s*(?:\(|\[|\{)\s*([\w-]{1,8})\s*(?:\)|\]|\})\s*$/i, (m, g1) => {
     const token = String(g1).toLowerCase();
     if (REGION_SUFFIX.includes(token) || END_NOISE.includes(token)) return '';
-    return m; // keep if not known noise
+    return m;
   });
 
-  // drop known trailing noise tokens
   const tokens = s.split(' ');
   while (tokens.length > 1) {
     const last = tokens[tokens.length - 1].toLowerCase();
@@ -86,4 +116,3 @@ export function prettifyDisplayName(raw: string, ext?: string): string {
   if (!base) base = 'download';
   return titleCase(base);
 }
-

@@ -11,17 +11,14 @@ const Portal = DropdownMenuPrimitive.Portal;
 const Group = DropdownMenuPrimitive.Group;
 
 export {
-  // primitives
   Root,
   Portal,
   Group,
-  // parts
   Trigger,
   Content,
   Item,
   Label,
   Separator,
-  // aliases
   Root as DropdownMenu,
   Portal as DropdownMenuPortal,
   Group as DropdownMenuGroup,
@@ -31,4 +28,3 @@ export {
   Label as DropdownMenuLabel,
   Separator as DropdownMenuSeparator,
 };
-

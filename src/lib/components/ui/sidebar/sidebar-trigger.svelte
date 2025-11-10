@@ -3,7 +3,7 @@
   import { cn } from '$lib/utils.js';
   import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
   import type { ComponentProps } from 'svelte';
-  import { useSidebar } from './context.svelte.js';
+import { useSidebar } from './context.ts';
 
   let {
     ref = $bindable(null),

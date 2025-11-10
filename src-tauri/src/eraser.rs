@@ -20,7 +20,6 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
             Err(e) => { eprintln!("metadata failed {}: {}", path_str, e); continue; }
         };
         let len = metadata.len();
-        // If size is zero, just delete
         if len == 0 {
             if let Err(e) = std::fs::remove_file(&path) { eprintln!("remove_file failed {}: {}", path_str, e); }
             else { erased += 1; }

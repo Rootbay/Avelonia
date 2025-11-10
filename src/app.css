@@ -40,47 +40,34 @@
 }
 
 .dark {
-  /* Dark theme tuned to user palette:
-     main: #0F0F0F, sidebar: #121212, nav selected: #151516 */
-  --background: oklch(0.14 0 0); /* #0F0F0F */
-  --foreground: oklch(0.98 0 0); /* near-white neutral */
-  --card: oklch(0.17 0 0);      /* #121212 */
+  --background: oklch(0.14 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.98 0 0);
-  --popover: #121212; /* popup background */
+  --popover: #121212;
   --popover-foreground: oklch(0.98 0 0);
-
-  /* Neutral primary to avoid blue tint */
-  --primary: oklch(0.88 0 0);           /* light gray for filled primary */
-  --primary-foreground: oklch(0.14 0 0); /* dark text on primary */
-
-  --secondary: oklch(0.22 0 0);           /* slightly above bg */
+  --primary: oklch(0.88 0 0);
+  --primary-foreground: oklch(0.14 0 0);
+  --secondary: oklch(0.22 0 0);
   --secondary-foreground: oklch(0.96 0 0);
-
   --muted: oklch(0.2 0 0);
   --muted-foreground: oklch(0.7 0 0);
-
-  --accent: oklch(0.2 0 0);               /* global hover/active surfaces */
+  --accent: oklch(0.2 0 0);
   --accent-foreground: oklch(0.88 0 0);
-
-  --destructive: oklch(0.7 0.19 22.216);  /* keep readable red */
-  /* Make borders ultra subtle in dark mode */
+  --destructive: oklch(0.7 0.19 22.216);
   --border: oklch(1 0 0 / 3%);
   --input: oklch(1 0 0 / 5%);
   --ring: oklch(0.6 0 0);
-
-  /* Keep charts as-is for now */
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-
-  /* Sidebar palette from user */
-  --sidebar: oklch(0.17 0 0);                /* #121212 */
-  --sidebar-foreground: oklch(0.98 0 0);     /* near-white */
-  --sidebar-primary: oklch(0.3 0 0);         /* utility tone if needed */
+  --sidebar: oklch(0.17 0 0);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.3 0 0);
   --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.195 0 0);        /* #151516 (selected/hover) */
+  --sidebar-accent: oklch(0.195 0 0);
   --sidebar-accent-foreground: oklch(0.85 0 0);
   --sidebar-border: oklch(1 0 0 / 3%);
   --sidebar-ring: oklch(0.6 0 0);
@@ -128,7 +115,6 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* Global custom scrollbar, matching ScrollArea look */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--color-border) transparent;
@@ -157,22 +143,20 @@
   }
 }
 
-/* Prevent unintentional horizontal scrollbars */
-html, body {
+html,
+body {
   overflow-x: hidden;
 }
 
-/* Normalize lucide icon stroke thickness across the app */
 :where(svg.lucide) {
   color: inherit;
   stroke-width: 1;
 }
 
-/* Ensure sidebar nav anchors and their icons match the active text color */
-[data-slot="sidebar-menu-button"] {
+[data-slot='sidebar-menu-button'] {
   color: inherit;
 }
-[data-slot="sidebar-menu-button"] svg {
+[data-slot='sidebar-menu-button'] svg {
   color: currentColor;
   stroke: currentColor;
   stroke-opacity: 1;
@@ -180,41 +164,41 @@ html, body {
   transition: stroke-width 0.15s ease;
 }
 
-/* Default nav icon stroke (matches global 1) */
-[data-slot="sidebar-menu-button"] > svg {
+[data-slot='sidebar-menu-button'] > svg {
   stroke-width: 1;
 }
 
-/* Increase stroke slightly when selected/active */
-[data-slot="sidebar-menu-button"][data-active="true"] svg,
-[data-slot="sidebar-menu-button"][aria-current="page"] svg {
+[data-slot='sidebar-menu-button'][data-active='true'] svg,
+[data-slot='sidebar-menu-button'][aria-current='page'] svg {
   stroke-width: 1.5;
 }
 
-/* Collapsed sidebar: ensure active color applies uniformly to icon and text */
-[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][data-active="true"],
-[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][aria-current="page"] {
+[data-slot='sidebar'][data-collapsible='icon']
+  [data-slot='sidebar-menu-button'][data-active='true'],
+[data-slot='sidebar'][data-collapsible='icon']
+  [data-slot='sidebar-menu-button'][aria-current='page'] {
   color: var(--sidebar-accent-foreground);
 }
-[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][data-active="true"] svg,
-[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"][aria-current="page"] svg {
+[data-slot='sidebar'][data-collapsible='icon']
+  [data-slot='sidebar-menu-button'][data-active='true']
+  svg,
+[data-slot='sidebar'][data-collapsible='icon']
+  [data-slot='sidebar-menu-button'][aria-current='page']
+  svg {
   color: currentColor;
   stroke: currentColor;
   stroke-width: 1.5;
 }
 
-/* Downloader table rows: disable default table row hover bg (from shadcn table-row) */
 [data-no-hover-bg]:hover td,
 [data-no-hover-bg]:hover th {
   background-color: transparent !important;
 }
-/* Also cover Svelte's internal wrapper used by shadcn table-row */
 [data-no-hover-bg]:hover svelte-css-wrapper td,
 [data-no-hover-bg]:hover svelte-css-wrapper th {
   background-color: transparent !important;
 }
 
-/* Provide a custom, subtle hover for rows that opt-in */
 [data-no-hover-bg][data-hover-soft]:hover td,
 [data-no-hover-bg][data-hover-soft]:hover th {
   background-color: color-mix(in oklch, var(--accent) 12%, transparent) !important;
@@ -224,7 +208,6 @@ html, body {
   background-color: color-mix(in oklch, var(--accent) 12%, transparent) !important;
 }
 
-/* Clickable-row affordance */
 [data-hover-soft] {
   cursor: pointer;
 }

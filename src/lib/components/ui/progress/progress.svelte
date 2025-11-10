@@ -22,7 +22,9 @@
 >
   {#if indeterminate || value == null}
     <div class="absolute inset-0 overflow-hidden">
-      <div class="h-full w-1/3 rounded-full bg-primary/70 will-change-transform animate-progress-indeterminate"></div>
+      <div
+        class="h-full w-1/3 rounded-full bg-primary/70 will-change-transform animate-progress-indeterminate"
+      ></div>
     </div>
   {:else}
     <div

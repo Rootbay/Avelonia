@@ -23,8 +23,8 @@
   data-slot="scroll-area"
   class={cn(
     'relative',
-    (orientation === 'vertical' || orientation === 'both') ? 'pr-2.5' : '',
-    (orientation === 'horizontal' || orientation === 'both') ? 'pb-2.5' : '',
+    orientation === 'vertical' || orientation === 'both' ? 'pr-2.5' : '',
+    orientation === 'horizontal' || orientation === 'both' ? 'pb-2.5' : '',
     className
   )}
   {...restProps}

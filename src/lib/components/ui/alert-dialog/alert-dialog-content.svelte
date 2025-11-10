@@ -27,7 +27,6 @@
     class={cn(
       'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed left-1/2 top-1/2 z-50 grid translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200',
       className,
-      // Balanced default sizing for alert dialogs (slightly narrower)
       'w-[min(90svw,40rem)] max-w-[90svw] max-h-[80svh] overflow-auto'
     )}
     {...restProps}

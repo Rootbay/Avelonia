@@ -5,8 +5,8 @@ export type DownloaderSettings = {
   installMode: 'silent' | 'normal';
   elevate: boolean;
   fallbackOpen: boolean;
-  verifyInstall: boolean; // verify installation via Uninstall registry (Windows)
-  preferWinget: boolean; // reserved for future
+  verifyInstall: boolean;
+  preferWinget: boolean;
 };
 
 export type AppSettings = {
@@ -17,11 +17,30 @@ const STORAGE_KEY = 'avelonia_settings_v1';
 
 function load(): AppSettings {
   if (typeof window === 'undefined') {
-    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
+    return {
+      downloader: {
+        autoInstall: false,
+        installMode: 'silent',
+        elevate: true,
+        fallbackOpen: true,
+        verifyInstall: false,
+        preferWinget: false,
+      },
+    };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
+    if (!raw)
+      return {
+        downloader: {
+          autoInstall: false,
+          installMode: 'silent',
+          elevate: true,
+          fallbackOpen: true,
+          verifyInstall: false,
+          preferWinget: false,
+        },
+      };
     const parsed = JSON.parse(raw);
     const d: DownloaderSettings = {
       autoInstall: !!parsed?.downloader?.autoInstall,
@@ -33,7 +52,16 @@ function load(): AppSettings {
     };
     return { downloader: d };
   } catch {
-    return { downloader: { autoInstall: false, installMode: 'silent', elevate: true, fallbackOpen: true, verifyInstall: false, preferWinget: false } };
+    return {
+      downloader: {
+        autoInstall: false,
+        installMode: 'silent',
+        elevate: true,
+        fallbackOpen: true,
+        verifyInstall: false,
+        preferWinget: false,
+      },
+    };
   }
 }
 
@@ -43,7 +71,7 @@ settings.subscribe((s) => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {}
+  } catch { /* noop */ }
 });
 
 export function updateDownloaderSettings(patch: Partial<DownloaderSettings>) {
