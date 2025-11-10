@@ -186,11 +186,16 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
     struct RespData {
         #[allow(dead_code)]
         id: String,
+        #[allow(dead_code)]
         links: Option<RespLinks>,
         attributes: Option<RespAttrs>,
     }
     #[derive(Deserialize)]
-    struct RespLinks { self_: Option<String> }
+    struct RespLinks {
+        #[serde(rename = "self")]
+        #[allow(dead_code)]
+        self_: Option<String>,
+    }
     #[derive(Deserialize)]
     struct RespAttrs { last_analysis_stats: Option<Stats> }
     #[derive(Deserialize)]

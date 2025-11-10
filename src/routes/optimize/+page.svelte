@@ -1561,7 +1561,9 @@
           <div class="flex items-center justify-between gap-2 pr-2">
             <div>Selected: {pendingRegistry.length}</div>
             <Select type="single" bind:value={regPreset}>
-              <SelectTrigger class="w-40" placeholder="Strategy" />
+              <SelectTrigger class="w-40">
+                <p>{regPreset}</p>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="basic">Basic</SelectItem>
                 <SelectItem value="force">Force only</SelectItem>
@@ -1576,12 +1578,12 @@
               {#each pendingRegistry.slice(0, 10) as it}
                 <li class="truncate">
                   {it.name}
-                  <span class="text-muted-foreground"> Ã¢â‚¬â€ {it.hive}\{it.key}</span>
+                  <span class="text-muted-foreground"> — {it.hive}\{it.key}</span>
                 </li>
               {/each}
               {#if pendingRegistry.length > 10}
                 <li class="text-muted-foreground">
-                  Ã¢â‚¬Â¦ and {pendingRegistry.length - 10} more
+                  … and {pendingRegistry.length - 10} more
                 </li>
               {/if}
             </ul>
@@ -1939,7 +1941,7 @@
                 <li class="truncate">{normalizeWinPath(p)}</li>
               {/each}
               {#if pendingStartup.length > 10}
-                <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingStartup.length - 10} more</li>
+                <li class="text-muted-foreground">… and {pendingStartup.length - 10} more</li>
               {/if}
             </ul>
           {/if}

@@ -1,8 +1,10 @@
 ﻿use futures_util::StreamExt;
 use reqwest::{Client, Url};
 use serde::{Serialize};
+use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
+use std::path::Path;
 use tauri::{AppHandle, State, Emitter};
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -260,13 +262,38 @@ async fn cancel_download(id: u64, state: State<'_, DownloadState>) -> Result<(),
     Ok(())
 }
 
-
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+fn read_download_catalog(path: String) -> Result<String, String> {
+    match fs::read_to_string(&path) {
+        Ok(content) => Ok(content),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Failed to read catalog {}: {}", path, e)),
+    }
 }
 
+#[tauri::command]
+fn write_download_catalog(path: String, contents: String) -> Result<(), String> {
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to ensure catalog directory {}: {}", parent.display(), e))?;
+    }
+    fs::write(&path, contents).map_err(|e| format!("Failed to write catalog {}: {}", path, e))
+}
 
+#[tauri::command]
+fn move_download_catalog(from: String, to: String) -> Result<(), String> {
+    if from.is_empty() || to.is_empty() || from == to {
+        return Ok(());
+    }
+    if let Some(parent) = Path::new(&to).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create catalog directory {}: {}", parent.display(), e))?;
+    }
+    if !Path::new(&from).exists() {
+        return Ok(());
+    }
+    fs::rename(&from, &to).map_err(|e| format!("Failed to move catalog from {} to {}: {}", from, to, e))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -276,11 +303,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             path_exists,
             download_file,
             cancel_download,
             probe_download,
+            read_download_catalog,
+            write_download_catalog,
+            move_download_catalog,
             cleaner::get_temp_files,
             cleaner::get_temp_files_stream,
             cleaner::cancel_temp_scan,

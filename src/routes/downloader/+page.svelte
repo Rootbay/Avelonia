@@ -563,6 +563,7 @@
   let lastVisible = $state(0);
   let skeletonIds = $state(new Set<number>());
   let _downloadsScrollTick = false;
+  let prevFilteredLength = -1;
 
   const windowedDownloads = $derived(
     filteredDownloads.slice(downloadsStart, Math.min(downloadsVisible, filteredDownloads.length))
@@ -611,6 +612,20 @@
 
   $effect(() => {
     const total = filteredDownloads.length;
+    if (total === 0) {
+      downloadsStart = 0;
+      downloadsVisible = 0;
+      skeletonIds = new Set();
+      lastVisible = 0;
+      prevFilteredLength = 0;
+      return;
+    }
+
+    if (prevFilteredLength === 0) {
+      downloadsStart = 0;
+      downloadsVisible = Math.min(VIEW_CHUNK, total);
+    }
+
     if (downloadsVisible > total) downloadsVisible = total;
     if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
       downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
@@ -618,6 +633,7 @@
     if (downloadsStart > downloadsVisible) downloadsStart = 0;
     skeletonIds = new Set();
     lastVisible = downloadsVisible;
+    prevFilteredLength = total;
   });
 
   const totalDownloads = $derived($downloads.length);
@@ -775,10 +791,12 @@
     }
   }
   function cancelSelected() {
+    const lookup = new Map(get(downloads).map((d) => [d.id, d]));
     let canceled = 0;
-    for (const d of filteredDownloads) {
+    for (const id of selectedIds) {
+      const d = lookup.get(id);
       if (
-        selectedIds.has(d.id) &&
+        d &&
         (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
       ) {
         cancelDownload(d.id);

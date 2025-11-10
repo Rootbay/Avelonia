@@ -7,6 +7,7 @@ export type DownloaderSettings = {
   fallbackOpen: boolean;
   verifyInstall: boolean;
   preferWinget: boolean;
+  downloadCatalogPath: string;
 };
 
 export type AppSettings = {
@@ -25,6 +26,7 @@ function load(): AppSettings {
         fallbackOpen: true,
         verifyInstall: false,
         preferWinget: false,
+        downloadCatalogPath: '',
       },
     };
   }
@@ -49,6 +51,9 @@ function load(): AppSettings {
       fallbackOpen: parsed?.downloader?.fallbackOpen ?? true,
       verifyInstall: parsed?.downloader?.verifyInstall ?? false,
       preferWinget: parsed?.downloader?.preferWinget ?? false,
+      downloadCatalogPath: typeof parsed?.downloader?.downloadCatalogPath === 'string'
+        ? parsed.downloader.downloadCatalogPath
+        : '',
     };
     return { downloader: d };
   } catch {
@@ -60,6 +65,7 @@ function load(): AppSettings {
         fallbackOpen: true,
         verifyInstall: false,
         preferWinget: false,
+        downloadCatalogPath: '',
       },
     };
   }

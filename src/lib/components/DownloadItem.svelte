@@ -18,11 +18,12 @@
 
   type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
 
-  const { download, selected, onToggleSelect, startDownload } = $props<{
+  const { download, selected, onToggleSelect, startDownload, cancelDownload } = $props<{
     download: Download;
     selected: boolean;
     onToggleSelect?: (payload: { checked: boolean; shiftKey: boolean }) => void;
     startDownload: (id: number) => void;
+    cancelDownload?: (id: number) => Promise<void>;
   }>();
 
   const statusTone = $derived.by(() => {

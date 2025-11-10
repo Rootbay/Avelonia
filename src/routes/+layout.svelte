@@ -56,6 +56,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
   import { openUrl as openExternal } from '@tauri-apps/plugin-opener';
+  import { save } from '@tauri-apps/plugin-dialog';
   import { vtVerdicts, setVerdictFromReport, setVerdict, reasonFor } from '$lib/vtVerdicts';
   import { vtScan, beginScan, endScan, pushReport as pushScanReport } from '$lib/scanStatus';
   import {
@@ -361,6 +362,7 @@
   let elevateInstall = $state($settings.downloader.elevate);
   let fallbackOpen = $state($settings.downloader.fallbackOpen);
   let verifyInstall = $state($settings.downloader.verifyInstall);
+  let catalogFilePath = $state($settings.downloader.downloadCatalogPath ?? '');
 
   $effect(() => {
     autoInstall = $settings.downloader.autoInstall;
@@ -368,6 +370,10 @@
     elevateInstall = $settings.downloader.elevate;
     fallbackOpen = $settings.downloader.fallbackOpen;
     verifyInstall = $settings.downloader.verifyInstall;
+  });
+
+  $effect(() => {
+    catalogFilePath = $settings.downloader.downloadCatalogPath ?? '';
   });
 
   $effect(() => {
@@ -406,6 +412,29 @@
     } finally {
       vtBusy = false;
     }
+  }
+
+  async function chooseCatalogFile() {
+    try {
+      const selected = await save({
+        title: 'Select catalog (JSON)',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+        defaultPath: catalogFilePath || 'avelonia-downloads.json',
+      });
+      if (typeof selected === 'string' && selected) {
+        updateDownloaderSettings({ downloadCatalogPath: selected });
+        toast.success('Download catalog file selected');
+      }
+    } catch (error) {
+      console.error('Failed to select catalog file', error);
+      toast.error('Unable to pick a catalog file');
+    }
+  }
+
+  function clearCatalogFile() {
+    if (!catalogFilePath) return;
+    updateDownloaderSettings({ downloadCatalogPath: '' });
+    toast.info('Download catalog cleared');
   }
 
   function applyVtBadges() {
@@ -885,6 +914,25 @@
                         <Checkbox bind:checked={verifyInstall} />
                         <span>Verify installation in Uninstall registry</span>
                       </label>
+                      <div class="space-y-2">
+                        <Label class="text-xs text-muted-foreground">Download catalog (.json)</Label>
+                        <Input
+                          value={catalogFilePath || 'Not configured'}
+                          readonly
+                          title={catalogFilePath || 'No catalog file selected'}
+                        />
+                        <div class="flex flex-wrap gap-2">
+                          <Button size="sm" variant="secondary" onclick={chooseCatalogFile}>
+                            Choose JSON file
+                          </Button>
+                          {#if catalogFilePath}
+                            <Button size="sm" variant="outline" onclick={clearCatalogFile}>Clear</Button>
+                          {/if}
+                        </div>
+                        <p class="text-xs text-muted-foreground">
+                          The selected JSON keeps the downloader catalog in sync with your saved paths.
+                        </p>
+                      </div>
                     </div>
                   </section>
 

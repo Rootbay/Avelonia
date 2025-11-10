@@ -1,6 +1,7 @@
-import { IsMobile } from '$lib/hooks/is-mobile.ts';
 import { getContext, setContext } from 'svelte';
-import { SIDEBAR_KEYBOARD_SHORTCUT } from './constants.js';
+import { writable, derived, type Readable, type Writable } from 'svelte/store';
+import { IsMobile } from '$lib/hooks/is-mobile';
+import { SIDEBAR_KEYBOARD_SHORTCUT } from './constants';
 
 export type SidebarStateProps = {
   open: () => boolean;
@@ -9,16 +10,19 @@ export type SidebarStateProps = {
 
 class SidebarState {
   readonly props: SidebarStateProps;
-  open = $derived.by(() => this.props.open());
-  openMobile = $state(false);
+  readonly open: Readable<boolean>;
+  readonly openMobile: Writable<boolean>;
+  readonly state: Readable<'expanded' | 'collapsed'>;
   setOpen: SidebarStateProps['setOpen'];
   #isMobile: IsMobile;
-  state = $derived.by(() => (this.open ? 'expanded' : 'collapsed'));
 
   constructor(props: SidebarStateProps) {
+    this.props = props;
     this.setOpen = props.setOpen;
     this.#isMobile = new IsMobile();
-    this.props = props;
+    this.open = derived([], () => this.props.open());
+    this.openMobile = writable(false);
+    this.state = derived(this.open, ($open) => ($open ? 'expanded' : 'collapsed'));
   }
 
   get isMobile() {
@@ -33,18 +37,24 @@ class SidebarState {
   };
 
   setOpenMobile = (value: boolean) => {
-    this.openMobile = value;
+    this.openMobile.set(value);
   };
 
   toggle = () => {
-    return this.#isMobile.current ? (this.openMobile = !this.openMobile) : this.setOpen(!this.open);
+    if (this.#isMobile.current) {
+      this.openMobile.update((v) => !v);
+    } else {
+      this.setOpen(!this.props.open());
+    }
   };
 }
 
 const SYMBOL_KEY = 'scn-sidebar';
 
 export function setSidebar(props: SidebarStateProps): SidebarState {
-  return setContext(Symbol.for(SYMBOL_KEY), new SidebarState(props));
+  const sidebar = new SidebarState(props);
+  setContext(Symbol.for(SYMBOL_KEY), sidebar);
+  return sidebar;
 }
 
 export function useSidebar(): SidebarState {
