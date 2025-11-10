@@ -395,7 +395,7 @@
   const UNIFIED_PREBUFFER = 3;
   const UNIFIED_MAX_DOM = 600;
   let unifiedVirtualize = $state(true);
-  let unifiedAutoFallback = $state(true);
+  let unifiedAutoFallback = $state(false);
 
   $effect(() => {
     unifiedVirtualize = !unifiedAutoFallback && (scanning || getAllItemsList().length > 1500);
@@ -456,10 +456,13 @@
     setTimeout(() => {
       try {
         const el = unifiedContainer as HTMLElement | null;
-        if (!el || unifiedAutoFallback) return;
+        if (!el) return;
         const rowsVis = Math.ceil((el.clientHeight || 0) / UNIFIED_ROW_PX) + 5;
-        if (_len > rowsVis && el.scrollHeight <= el.clientHeight + 1) {
-          unifiedAutoFallback = true;
+        const needsVirtualization = _len > rowsVis;
+        const hasScrollSpace = el.scrollHeight > el.clientHeight + 1;
+        const shouldFallback = needsVirtualization && !hasScrollSpace;
+        if (unifiedAutoFallback !== shouldFallback) {
+          unifiedAutoFallback = shouldFallback;
         }
       } catch { /* noop */ }
     }, 0);
@@ -943,7 +946,7 @@
           <table class="w-full text-sm text-foreground">
             <thead class="bg-muted/40 text-xs">
               <tr>
-                <th class="px-3 py-2 text-left w-[36px]">
+                <th class="px-3 py-2 text-left w-9">
                   <Checkbox
                     checked={selectedPaths.size > 0 &&
                       selectedPaths.size === getAllItemsList().length &&
@@ -954,8 +957,8 @@
                 </th>
                 <th class="px-3 py-2 text-left">Path</th>
                 <th class="px-3 py-2 text-left">Type</th>
-                <th class="px-3 py-2 text-left w-[120px]">Size</th>
-                <th class="px-3 py-2 text-left w-[160px]">Actions</th>
+                <th class="px-3 py-2 text-left w-30">Size</th>
+                <th class="px-3 py-2 text-left w-40">Actions</th>
               </tr>
             </thead>
             <tbody>
