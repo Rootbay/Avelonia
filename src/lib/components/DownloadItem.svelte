@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Download } from '$lib/downloadManager';
-  import { getDownloadPath } from '$lib/downloadManager';
+  import type { Download, DownloadRelease } from '$lib/downloadManager';
+  import { getDownloadPath, setDownloadRelease } from '$lib/downloadManager';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import { Button } from '$lib/components/ui/button';
   import { Checkbox } from '$lib/components/ui/checkbox';
@@ -84,6 +84,21 @@
     startDownload(download.id);
     toast.success(`Retrying ${download.name ?? 'download'}`);
   }
+
+  function handleReleaseChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    if (value && value !== activeReleaseLabel) {
+      setDownloadRelease(download.id, value);
+    }
+  }
+
+  const releaseOptions = $derived.by(() => download.releases ?? []);
+  const defaultReleaseLabel = $derived.by(
+    () => releaseOptions[0]?.label ?? ''
+  );
+  const activeReleaseLabel = $derived.by(
+    () => download.selectedReleaseLabel ?? defaultReleaseLabel
+  );
 </script>
 
 {#snippet DetailsTrigger({ props }: ButtonSnippetContext)}
@@ -156,6 +171,20 @@
         {#if download.category}<span>- {download.category}</span>{/if}
         {#if download.eta}<span>- {download.eta}</span>{/if}
       </div>
+      {#if releaseOptions.length > 1}
+        <div class="flex flex-wrap items-center gap-2 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+          <span>Version</span>
+          <select
+            class="rounded border border-input bg-transparent px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            value={activeReleaseLabel}
+            onchange={handleReleaseChange}
+          >
+            {#each releaseOptions as release}
+              <option value={release.label}>{release.label}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
     </div>
   </TableCell>
 
@@ -174,7 +203,7 @@
       {/if}
       {#if download.status === 'downloading' && download.speed}
         <span
-          class="ml-1 text-muted-foreground whitespace-nowrap max-w-[10rem] overflow-hidden text-ellipsis hidden md:inline"
+          class="ml-1 text-muted-foreground whitespace-nowrap max-w-40 overflow-hidden text-ellipsis hidden md:inline"
           >- {download.speed}
         </span>
       {/if}

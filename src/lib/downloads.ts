@@ -3,78 +3,12 @@ import type { Download } from './downloadManager';
 import { settings, updateDownloaderSettings } from '$lib/settings';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
+import { BUILT_IN_DOWNLOADS } from './builtInDownloads';
+import { resolveBuiltInDownloadSizes } from './downloadSizeResolver';
 
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
 const DEFAULT_CATALOG_FILENAME = 'avelonia-downloads.json';
 let defaultCatalogPathPromise: Promise<string> | null = null;
-
-const BUILT_IN_DOWNLOADS: Download[] = [
-  {
-    id: 1,
-    name: 'Discord',
-    description: 'Voice & chat client for communities',
-    size: '105 MB',
-    fileType: 'exe',
-    category: 'Communication',
-    tags: ['Chat', 'Community'],
-    downloadLink: 'https://discord.com/api/download?platform=win',
-    eta: 'N/A',
-    status: 'available',
-    progress: 0,
-  },
-  {
-    id: 2,
-    name: 'Spotify',
-    description: 'Music streaming desktop app',
-    size: '120 MB',
-    fileType: 'exe',
-    category: 'Music',
-    tags: ['Streaming', 'Music'],
-    downloadLink: 'https://download.scdn.co/SpotifyFullSetup.exe',
-    eta: 'N/A',
-    status: 'available',
-    progress: 0,
-  },
-  {
-    id: 3,
-    name: 'Zoom',
-    description: 'Video conferencing client',
-    size: '90 MB',
-    fileType: 'exe',
-    category: 'Collaboration',
-    tags: ['Video', 'Meetings'],
-    downloadLink: 'https://zoom.us/client/latest/ZoomInstaller.exe',
-    eta: 'N/A',
-    status: 'available',
-    progress: 0,
-  },
-  {
-    id: 4,
-    name: 'Visual Studio Code',
-    description: 'Lightweight code editor',
-    size: '120 MB',
-    fileType: 'exe',
-    category: 'Development',
-    tags: ['Editor', 'IDE'],
-    downloadLink: 'https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user',
-    eta: 'N/A',
-    status: 'available',
-    progress: 0,
-  },
-  {
-    id: 5,
-    name: 'Slack',
-    description: 'Team messaging app',
-    size: '160 MB',
-    fileType: 'exe',
-    category: 'Collaboration',
-    tags: ['Chat', 'Productivity'],
-    downloadLink: 'https://downloads.slack-edge.com/releases/windows/5.37.150/prod/x64/SlackSetup.exe',
-    eta: 'N/A',
-    status: 'available',
-    progress: 0,
-  },
-];
 
 export type NewDownloadEntry = {
   name: string;
@@ -87,7 +21,13 @@ export type NewDownloadEntry = {
 };
 
 function cloneDownload(dl: Download): Download {
-  return { ...dl, tags: dl.tags ? [...dl.tags] : undefined };
+  return {
+    ...dl,
+    tags: dl.tags ? [...dl.tags] : undefined,
+    releases: dl.releases
+      ? dl.releases.map((release) => ({ ...release }))
+      : undefined,
+  };
 }
 
 function defaultDownloads(): Download[] {
@@ -122,6 +62,29 @@ function loadDownloads(): Download[] {
 
 export const downloads = writable<Download[]>(loadDownloads());
 
+async function refreshBuiltInDownloadSizes() {
+  if (typeof window === 'undefined') return;
+  try {
+    const sizeMap = await resolveBuiltInDownloadSizes();
+    const links = Object.keys(sizeMap);
+    if (!links.length) return;
+    downloads.update((current) => {
+      let hasChange = false;
+      const next = current.map((item) => {
+        const nextSize = sizeMap[item.downloadLink];
+        if (!nextSize || item.size === nextSize) {
+          return item;
+        }
+        hasChange = true;
+        return { ...item, size: nextSize };
+      });
+      return hasChange ? next : current;
+    });
+  } catch (error) {
+    console.warn('Failed to refresh built-in download sizes', error);
+  }
+}
+
 downloads.subscribe((currentDownloads) => {
   if (typeof window === 'undefined') return;
   try {
@@ -150,6 +113,7 @@ if (typeof window !== 'undefined') {
   });
 
   void ensureDefaultCatalogPath(initialCatalogPath);
+  void refreshBuiltInDownloadSizes();
 }
 
 function scheduleCatalogPersist(list: Download[]) {

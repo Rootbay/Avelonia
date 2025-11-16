@@ -1,5 +1,4 @@
 ﻿<script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/ui/button';
   import {
@@ -55,8 +54,57 @@
   import TweaksPanel from './components/TweaksPanel.svelte';
   import StartupPanel from './components/StartupPanel.svelte';
 
+  import {
+    listRegistryRun,
+    removeRegistryRun,
+    forceRemoveRegistryRun,
+    listServices,
+    stopServices,
+    disableServices,
+    blockProcessIfeo,
+    scheduleDeleteOnReboot,
+    purgeStartupApproved,
+    deleteTasksByMatch,
+    removeWmiSubscriptionsByMatch,
+    runPostCleanupDiagnostics,
+    isProcessRunning,
+    openRegistryKey,
+    regId,
+  } from './services/registry';
+  import type {
+    StartupRegItem,
+    CleanupDiagnostics,
+    RegistryAttempt,
+  } from './services/registry';
+  import {
+    listScheduledTasks,
+    listSuspiciousTasks,
+    getTaskDetails,
+    executeTaskAction,
+  } from './services/tasks';
+  import type { ScheduledTask, TaskAction } from './services/tasks';
+  import {
+    NETWORK_PRESETS,
+    flushDns as flushDnsCommand,
+    getNetworkSummary,
+    renewIp as renewIpCommand,
+    resetWinsock as resetWinsockCommand,
+    runDnsLookup as runDnsLookupCommand,
+    runPing as runPingCommand,
+    runTraceroute as runTracerouteCommand,
+  } from './services/network';
+  import type { NetworkPresetId, NetworkSummary } from './services/network';
+  import { getBootTime, restartSystem } from './services/system';
+  import {
+    extractExeFromCommand,
+    extractExePathFromCommand,
+    isCommandSuspicious,
+    isHardCommandSuspicious,
+    splitTaskName,
+    isUnderMicrosoft,
+  } from './utils/heuristics';
+
   let message = $state('');
-  type StartupRegItem = { hive: string; key: string; name: string; command: string };
   let startupRegItems = $state<StartupRegItem[]>([]);
   let selectedReg = $state(new Set<string>());
   let registryQuery = $state('');
@@ -66,7 +114,6 @@
   let registryStart = $state(0);
   let registryScrollEl = $state<HTMLElement | null>(null);
   let registrySentinel: HTMLElement | null = null;
-  const regId = (it: StartupRegItem) => `${it.hive}|${it.key}|${it.name}`;
   let registryQueryDeb = $state('');
   let showRegistryConfirm = $state(false);
   let pendingRegistry: StartupRegItem[] = $state([]);
@@ -86,14 +133,6 @@
   const REGISTRY_ROW_PX = 56;
   const TASKS_MAX_DOM = 600;
   const TASKS_ROW_PX = 64;
-
-  type CleanupDiagnostics = {
-    removedRegistry: { ok: string[]; stillPresent: string[] };
-    runningImages: { running: string[]; stopped: string[] };
-    taskMatches: { remaining: string[] };
-    serviceMatches: { running: string[]; disabled: string[] };
-    rebootRecommended: boolean;
-  };
 
   function applyRegPreset(p: 'basic' | 'force' | 'aggressive' | 'full') {
     if (p === 'basic') {
@@ -137,26 +176,6 @@
     return () => clearTimeout(t);
   });
 
-  type RegistryAttempt = {
-    attempts: number;
-    rebootConfirmed: boolean;
-    lastOptions: {
-      force: boolean;
-      ifeo: boolean;
-      dor: boolean;
-      purge: boolean;
-      tasks: boolean;
-      wmi: boolean;
-    };
-    lastStrategy?: 'basic' | 'force' | 'aggressive' | 'full';
-    fullCleanupUsed?: boolean;
-    pendingVerification?: boolean;
-    suspicious?: boolean;
-    suspiciousReason?: string;
-    lastImages?: string[];
-    lastPaths?: string[];
-    lastSeenAt?: number;
-  };
   let registryHistory = $state<Record<string, RegistryAttempt>>({});
   const REG_HISTORY_KEY = 'avelonia_registry_history_v1';
   $effect(() => {
@@ -174,7 +193,7 @@
   let rebootDetected = $state(false);
   async function initBootCheck() {
     try {
-      const nowBoot = (await invoke('get_boot_time')) as number;
+      const nowBoot = await getBootTime();
       const key = 'avelonia_boot_time_v1';
       const prev = Number(localStorage.getItem(key) || '0');
       localStorage.setItem(key, String(nowBoot));
@@ -235,10 +254,9 @@
     showRegistryConfirm = false;
     try {
       const strategyUsed = regPreset;
-      const removed: number = await invoke(
-        registryForce ? 'force_remove_registry_run' : 'remove_registry_run',
-        { entries: pendingRegistry }
-      );
+      const removed = registryForce
+        ? await forceRemoveRegistryRun(pendingRegistry)
+        : await removeRegistryRun(pendingRegistry);
       message = `Removed ${removed} registry startup entr${removed === 1 ? 'y' : 'ies'}.`;
       if (removed > 0) {
         toast.success(message);
@@ -270,13 +288,7 @@
         )
       );
       try {
-        const services = (await invoke('list_services')) as Array<{
-          name: string;
-          display_name: string;
-          state: string;
-          start_mode: string;
-          path: string;
-        }>;
+        const services = await listServices();
         const lower = (s: string) => s?.toLowerCase?.() ?? '';
         const suspects = new Set(
           services
@@ -292,10 +304,10 @@
         if (suspects.size > 0) {
           const names = Array.from(suspects);
           try {
-            await invoke('stop_services', { names });
+            await stopServices(names);
           } catch { /* noop */ }
           try {
-            const n = (await invoke('disable_services', { names })) as number;
+            const n = await disableServices(names);
             if (n > 0) toast.message(`Disabled ${n} related service${n === 1 ? '' : 's'}.`);
           } catch (e) {
             console.warn('disable_services failed', e);
@@ -306,7 +318,7 @@
       }
       if (registryBlockIFEO && images.length) {
         try {
-          const n = (await invoke('block_process_ifeo', { images, enable: true })) as number;
+          const n = await blockProcessIfeo(images, true);
           if (n > 0) toast.success(`Blocked ${n} process${n === 1 ? '' : 'es'} via IFEO.`);
         } catch (e) {
           console.warn('block_process_ifeo failed', e);
@@ -315,7 +327,7 @@
       let dorScheduled = false;
       if (registryDeleteOnReboot && paths.length) {
         try {
-          const n = (await invoke('schedule_delete_on_reboot', { paths })) as number;
+          const n = await scheduleDeleteOnReboot(paths);
           if (n > 0) {
             toast.message(`Scheduled delete on reboot for ${n} file${n === 1 ? '' : 's'}.`);
             dorScheduled = true;
@@ -327,7 +339,7 @@
       if (registryPurgeStartupApproved) {
         try {
           const names = pendingRegistry.map((r) => r.name);
-          const n = (await invoke('purge_startup_approved', { names })) as number;
+          const n = await purgeStartupApproved(names);
           if (n > 0) toast.message(`Purged StartupApproved for ${n} entr${n === 1 ? 'y' : 'ies'}.`);
         } catch (e) {
           console.warn('purge_startup_approved failed', e);
@@ -335,7 +347,7 @@
       }
       if (registryDeleteTasksByMatch && (images.length || paths.length)) {
         try {
-          const n = (await invoke('delete_tasks_by_match', { images, paths })) as number;
+          const n = await deleteTasksByMatch(images, paths);
           if (n > 0) toast.message(`Deleted ${n} related scheduled task${n === 1 ? '' : 's'}.`);
         } catch (e) {
           console.warn('delete_tasks_by_match failed', e);
@@ -343,10 +355,7 @@
       }
       if (registryRemoveWMIByMatch && (images.length || paths.length)) {
         try {
-          const n = (await invoke('remove_wmi_subscriptions_by_match', {
-            images,
-            paths,
-          })) as number;
+          const n = await removeWmiSubscriptionsByMatch(images, paths);
           if (n > 0) toast.message('Removed WMI event subscriptions matching target.');
         } catch (e) {
           console.warn('remove_wmi_subscriptions_by_match failed', e);
@@ -438,114 +447,6 @@
     }
   }
 
-  async function runPostCleanupDiagnostics(
-    targets: StartupRegItem[],
-    opts: { images: string[]; paths: string[]; rebootRecommended?: boolean }
-  ): Promise<CleanupDiagnostics> {
-    const diag: CleanupDiagnostics = {
-      removedRegistry: { ok: [], stillPresent: [] },
-      runningImages: { running: [], stopped: [] },
-      taskMatches: { remaining: [] },
-      serviceMatches: { running: [], disabled: [] },
-      rebootRecommended: !!opts.rebootRecommended,
-    };
-
-    try {
-      const list = (await invoke('list_registry_run')) as StartupRegItem[];
-      const present = new Set(list.map(regId));
-      for (const t of targets) {
-        const id = regId(t);
-        const label = `${t.hive} \\ ${t.key} -> ${t.name}`;
-        if (present.has(id)) diag.removedRegistry.stillPresent.push(label);
-        else diag.removedRegistry.ok.push(label);
-      }
-    } catch (e) {
-      console.warn('diagnostics: list_registry_run failed', e);
-    }
-
-    for (const img of opts.images) {
-      try {
-        const running = (await invoke('is_process_running', { image: img })) as boolean;
-        if (running) diag.runningImages.running.push(img);
-        else diag.runningImages.stopped.push(img);
-      } catch { /* noop */ }
-    }
-
-    try {
-      const tasks = (await invoke('list_scheduled_tasks')) as Array<{
-        name: string;
-        task_to_run?: string;
-      }>;
-      const matches: string[] = [];
-      for (const t of tasks) {
-        let cmd = (t as any)?.task_to_run || '';
-        if (!cmd) {
-          try {
-            const details = (await invoke('get_task_details', { task_name: t.name })) as
-              | [string, string]
-              | any;
-            cmd = Array.isArray(details) ? (details[0] ?? '') : (details?.task_to_run ?? '');
-          } catch { /* noop */ }
-        }
-        const lower = (cmd || '').toLowerCase();
-        if (!lower) continue;
-        const hit =
-          opts.images.some((i) => lower.includes(i.toLowerCase())) ||
-          opts.paths.some((p) => lower.includes(p.toLowerCase()));
-        if (hit) matches.push(t.name);
-      }
-      diag.taskMatches.remaining = Array.from(new Set(matches));
-    } catch (e) {
-      console.warn('diagnostics: list_scheduled_tasks failed', e);
-    }
-
-    try {
-      const services = (await invoke('list_services')) as Array<{
-        name: string;
-        state: string;
-        start_mode: string;
-        path: string;
-      }>;
-      for (const s of services) {
-        const p = (s.path || '').toLowerCase();
-        if (!p) continue;
-        const hit =
-          opts.images.some((i) => p.includes(i.toLowerCase())) ||
-          opts.paths.some((q) => p.includes(q.toLowerCase()));
-        if (!hit) continue;
-        const state = (s.state || '').toLowerCase();
-        const mode = (s.start_mode || '').toLowerCase();
-        if (state.includes('running') || mode === 'auto' || mode === 'automatic')
-          diag.serviceMatches.running.push(s.name);
-        else diag.serviceMatches.disabled.push(s.name);
-      }
-      diag.serviceMatches.running = Array.from(new Set(diag.serviceMatches.running));
-      diag.serviceMatches.disabled = Array.from(new Set(diag.serviceMatches.disabled));
-    } catch (e) {
-      console.warn('diagnostics: list_services failed', e);
-    }
-
-    return diag;
-  }
-
-  function extractExeFromCommand(cmd: string): string | null {
-    if (!cmd) return null;
-    const quoted = cmd.match(/"([^"\\]+?\.exe)"/i);
-    if (quoted?.[1]) return quoted[1].split('\\').pop() || quoted[1];
-    const bare = cmd.match(/\b([\w .-]+\.exe)\b/i);
-    if (bare?.[1]) return bare[1].split('\\').pop() || bare[1];
-    return null;
-  }
-
-  function extractExePathFromCommand(cmd: string): string | null {
-    if (!cmd) return null;
-    const q = cmd.match(/"([^"\\]+?\.exe)"/i);
-    if (q?.[1]) return q[1];
-    const b = cmd.match(/\b([a-zA-Z]:\\[^\s"]+?\.exe)\b/);
-    if (b?.[1]) return b[1];
-    return null;
-  }
-
   async function monitorRegistryWatchdog(targets: StartupRegItem[]) {
     try {
       const ids = new Set(targets.map(regId));
@@ -559,7 +460,7 @@
       let restarted: string[] = [];
       for (let i = 0; i < 6; i++) {
         try {
-          const list = (await invoke('list_registry_run')) as StartupRegItem[];
+          const list = await listRegistryRun();
           const set = new Set(list.map(regId));
           const back = [...ids].some((k) => set.has(k));
           if (back) {
@@ -571,7 +472,7 @@
 
         try {
           for (const img of images) {
-            const running = (await invoke('is_process_running', { image: img })) as boolean;
+            const running = await isProcessRunning(img);
             if (running && !restarted.includes(img)) restarted.push(img);
           }
         } catch { /* noop */ }
@@ -601,7 +502,7 @@
     if (loadingRegistry || registryLoaded) return;
     loadingRegistry = true;
     try {
-      const res = (await invoke('list_registry_run')) as StartupRegItem[];
+      const res = await listRegistryRun();
       startupRegItems = Array.isArray(res) ? res : [];
       try {
         console.debug(
@@ -630,7 +531,7 @@
     if (!registryLoaded || _registryPollBusy) return;
     _registryPollBusy = true;
     try {
-      const res = (await invoke('list_registry_run')) as StartupRegItem[];
+      const res = await listRegistryRun();
       const next = Array.isArray(res) ? res : [];
       const id = (it: StartupRegItem) => `${it.hive}|${it.key}|${it.name}`;
       const curSet = new Set(startupRegItems.map(id));
@@ -719,7 +620,7 @@
     const entries = startupRegItems.filter((it) => selectedReg.has(regId(it)));
     if (entries.length === 0) return;
     try {
-      await invoke('remove_registry_run', { entries });
+      await removeRegistryRun(entries);
       pushLog(
         'SUCCESS',
         `Removed ${entries.length} registry startup entr${entries.length === 1 ? 'y' : 'ies'}`,
@@ -732,14 +633,6 @@
     }
   }
 
-  type ScheduledTask = {
-    name: string;
-    next_run_time: string;
-    status: string;
-    task_to_run: string;
-    author: string;
-    is_sus: boolean;
-  };
   let tasks = $state<ScheduledTask[]>([]);
   let tasksQuery = $state('');
   let taskFilter = $state<'all' | 'sus'>('all');
@@ -759,7 +652,6 @@
   let enriching = $state(new Set<string>());
   let tasksQueryDeb = $state('');
   let selectedTasks = $state(new Set<string>());
-  type TaskAction = 'disable' | 'enable' | 'delete' | 'run' | 'end' | '';
   let taskAction = $state<TaskAction>('');
   let showTaskConfirm = $state(false);
   let pendingAction = $state<TaskAction>('');
@@ -770,37 +662,6 @@
     return () => clearTimeout(t);
   });
 
-  function isCommandSuspicious(cmd: string): boolean {
-    const c = (cmd || '').toLowerCase();
-    return (
-      c.includes('powershell') ||
-      c.includes('wscript') ||
-      c.includes('cscript') ||
-      c.includes('mshta') ||
-      c.includes('regsvr32') ||
-      c.includes('rundll32') ||
-      c.includes('cmd.exe /c') ||
-      c.includes('/b64') ||
-      c.includes(' -enc ') ||
-      c.includes('%temp%') ||
-      c.includes('appdata') ||
-      c.includes('http://') ||
-      c.includes('https://')
-    );
-  }
-
-  function isHardCommandSuspicious(cmd: string): boolean {
-    const c = (cmd || '').toLowerCase();
-    return (
-      c.includes(' -enc ') || c.includes('/b64') || c.includes('http://') || c.includes('https://')
-    );
-  }
-
-  function isUnderMicrosoft(name: string): boolean {
-    const parts = splitTaskName(name);
-    return (parts.folder || '').startsWith('\\Microsoft\\Windows');
-  }
-
   async function enrichTaskByName(name: string) {
     if (enriching.has(name)) return;
     enriching.add(name);
@@ -810,9 +671,7 @@
     }
     enrichInFlight += 1;
     try {
-      const result = (await invoke('get_task_details', { task_name: name })) as
-        | [string, string]
-        | any;
+      const result = await getTaskDetails(name);
       let task_to_run = '';
       let author = '';
       if (Array.isArray(result)) {
@@ -855,15 +714,6 @@
     queueEnrichVisibleTasks(20);
   });
 
-  function splitTaskName(full: string): { base: string; folder: string } {
-    if (!full) return { base: '', folder: '' };
-    const idx = full.lastIndexOf('\\');
-    if (idx <= 0) return { base: full.replace(/^\\+/, ''), folder: '\\' };
-    const folder = full.slice(0, idx) || '\\';
-    const base = full.slice(idx + 1);
-    return { base, folder };
-  }
-
   async function runSelectedTasks() {
     const names = Array.from(selectedTasks);
     if (!taskAction || names.length === 0) {
@@ -871,12 +721,7 @@
       return;
     }
     try {
-      let res: any = null;
-      if (taskAction === 'disable') res = await invoke('disable_scheduled_tasks', { names });
-      else if (taskAction === 'enable') res = await invoke('enable_scheduled_tasks', { names });
-      else if (taskAction === 'delete') res = await invoke('delete_scheduled_tasks', { names });
-      else if (taskAction === 'run') res = await invoke('run_scheduled_tasks', { names });
-      else if (taskAction === 'end') res = await invoke('end_scheduled_tasks', { names });
+      const res = await executeTaskAction(taskAction, names);
       const success = Number((res as any)?.success ?? (res as any) ?? 0);
       const elevated = Number((res as any)?.elevated ?? 0);
       const stopped = Number((res as any)?.stopped ?? 0);
@@ -913,12 +758,12 @@
     if (loadingTasks || tasksLoaded) return;
     loadingTasks = true;
     try {
-      const res = (await invoke('list_scheduled_tasks')) as ScheduledTask[];
+      const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
       tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
       try {
-        const susNames = (await invoke('list_suspicious_tasks')) as string[];
+        const susNames = await listSuspiciousTasks();
         if (Array.isArray(susNames) && susNames.length) {
           const initial = includeMicrosoftInSus
             ? susNames
@@ -1091,24 +936,6 @@
     confirmRunAction();
   }
 
-  type NetworkAdapterInfo = {
-    name: string;
-    status?: string | null;
-    linkSpeed?: string | null;
-    mac?: string | null;
-    media?: string | null;
-    linkState?: string | null;
-  };
-
-  type NetworkSummary = {
-    primaryAdapter?: string | null;
-    ipv4?: string | null;
-    ipv6?: string | null;
-    dnsServers: string[];
-    gateways: string[];
-    adapters: NetworkAdapterInfo[];
-  };
-
   type NetworkHistoryEntry = {
     id: string;
     label: string;
@@ -1116,29 +943,6 @@
     success: boolean;
     timestamp: number;
   };
-
-  const NETWORK_PRESETS = [
-    {
-      id: 'refresh',
-      label: 'Quick refresh',
-      description: 'Flush DNS and renew DHCP to recover connectivity quickly.',
-      actions: ['flush_dns', 'renew_ip'] as const,
-    },
-    {
-      id: 'full',
-      label: 'Full reset',
-      description: 'Flush DNS, reset Winsock, and renew IP to clear stubborn issues.',
-      actions: ['flush_dns', 'reset_winsock', 'renew_ip'] as const,
-    },
-    {
-      id: 'winsock',
-      label: 'Winsock focus',
-      description: 'Reset Winsock and renew IP without flushing DNS for driver resets.',
-      actions: ['reset_winsock', 'renew_ip'] as const,
-    },
-  ] as const;
-  type NetworkPresetId = (typeof NETWORK_PRESETS)[number]['id'];
-  type NetworkPreset = (typeof NETWORK_PRESETS)[number];
 
   let activeNetworkPreset = $state<NetworkPresetId>(NETWORK_PRESETS[0].id);
   let networkSummary = $state<NetworkSummary | null>(null);
@@ -1171,7 +975,7 @@
   async function refreshNetworkStatus() {
     networkInfoLoading = true;
     try {
-      networkSummary = await invoke<NetworkSummary>('get_network_summary');
+      networkSummary = await getNetworkSummary();
     } catch (error: unknown) {
       console.error('network summary failed', error);
       const text =
@@ -1204,17 +1008,15 @@
   }
 
   async function runPingTest() {
-    await runNetworkTest('Ping', () =>
-      invoke<string>('run_ping', { host: pingTarget, count: 4 })
-    );
+    await runNetworkTest('Ping', () => runPingCommand(pingTarget, 4));
   }
 
   async function runTracerouteTest() {
-    await runNetworkTest('Traceroute', () => invoke<string>('run_traceroute', { host: tracerouteTarget }));
+    await runNetworkTest('Traceroute', () => runTracerouteCommand(tracerouteTarget));
   }
 
   async function runDnsLookupTest() {
-    await runNetworkTest('DNS Lookup', () => invoke<string>('run_dns_lookup', { host: dnsLookupTarget }));
+    await runNetworkTest('DNS Lookup', () => runDnsLookupCommand(dnsLookupTarget));
   }
 
   const selectedPreset = $derived(
@@ -1262,15 +1064,15 @@
   }
 
   async function flushDns() {
-    return runNetworkAction('Flush DNS', () => invoke<string>('flush_dns'));
+    return runNetworkAction('Flush DNS', flushDnsCommand);
   }
 
   async function resetWinsock() {
-    return runNetworkAction('Reset Winsock', () => invoke<string>('reset_winsock'));
+    return runNetworkAction('Reset Winsock', resetWinsockCommand);
   }
 
   async function renewIp() {
-    return runNetworkAction('Renew IP', () => invoke<string>('renew_ip'));
+    return runNetworkAction('Renew IP', renewIpCommand);
   }
 
   onMount(() => {
@@ -1557,7 +1359,7 @@
               <Button
                 onclick={async () => {
                   try {
-                    await invoke('restart_system');
+                    await restartSystem();
                   } catch (e) {
                     console.error(e);
                     toast.error('Could not restart the system');
@@ -1702,7 +1504,7 @@
                           title="Open in Registry"
                           aria-label="Open in Registry"
                           onclick={() => {
-                            void invoke('open_registry_key', { hive: it.hive, key: it.key });
+                            void openRegistryKey(it.hive, it.key);
                           }}
                         >
                           <FolderOpen class="size-4" />

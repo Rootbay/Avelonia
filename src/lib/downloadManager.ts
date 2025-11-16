@@ -8,6 +8,13 @@ import { pushLog, type LogLevel } from '$lib/logStore';
 import { settings } from '$lib/settings';
 import { openPath } from '@tauri-apps/plugin-opener';
 
+export type DownloadRelease = {
+  label: string;
+  downloadLink: string;
+  size?: string;
+  fileType?: string;
+};
+
 export interface Download {
   id: number;
   name: string;
@@ -17,6 +24,8 @@ export interface Download {
   category: string;
   tags?: string[];
   downloadLink: string;
+  releases?: DownloadRelease[];
+  selectedReleaseLabel?: string;
   eta: string;
   status:
     | 'available'
@@ -630,4 +639,21 @@ export async function cancelDownload(id: number) {
     const snap = getDownloadSnapshot(id);
     if (snap) await appLog('WARN', 'Canceled download: ' + snap.name);
   })();
+}
+
+export function setDownloadRelease(id: number, releaseLabel: string) {
+  updateDownloadById(id, (draft) => {
+    const releases = draft.releases;
+    if (!releases || releases.length === 0) return;
+    const next = releases.find((release) => release.label === releaseLabel);
+    if (!next) return;
+    draft.selectedReleaseLabel = releaseLabel;
+    draft.downloadLink = next.downloadLink;
+    if (next.size) {
+      draft.size = next.size;
+    }
+    if (next.fileType) {
+      draft.fileType = next.fileType;
+    }
+  });
 }
