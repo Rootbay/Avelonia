@@ -60,6 +60,50 @@ const STOP_WORDS = new Set([
   'with',
 ]);
 
+const NOISE_DELIMITERS = new Set([' ', '\t', '\n', '\r', ':', ',', '-']);
+const CLOSING_TO_OPENING_BRACKET: Record<string, string> = {
+  ')': '(',
+  ']': '[',
+  '}': '{',
+};
+
+function trimNoiseDelimiters(value: string): string {
+  let index = 0;
+  while (index < value.length && NOISE_DELIMITERS.has(value[index])) {
+    index += 1;
+  }
+  return value.slice(index);
+}
+
+function dropLeadingNoise(value: string): string {
+  const lower = value.toLowerCase();
+  for (const noise of START_NOISE) {
+    if (lower.startsWith(noise)) {
+      return trimNoiseDelimiters(value.slice(noise.length));
+    }
+  }
+  return value;
+}
+
+function stripBracketSuffix(value: string): string {
+  const trimmed = value.trimEnd();
+  if (!trimmed) return trimmed;
+  const closing = trimmed.charAt(trimmed.length - 1);
+  const opening = CLOSING_TO_OPENING_BRACKET[closing];
+  if (!opening) return trimmed;
+  const openIndex = trimmed.lastIndexOf(opening);
+  if (openIndex === -1) return trimmed;
+  const between = trimmed.slice(openIndex + 1, trimmed.length - 1).trim();
+  if (!/^[\w-]{1,8}$/i.test(between)) {
+    return trimmed;
+  }
+  const token = between.toLowerCase();
+  if (REGION_SUFFIX.includes(token) || END_NOISE.includes(token)) {
+    return trimmed.slice(0, openIndex).trimEnd();
+  }
+  return trimmed;
+}
+
 function stripExtension(name: string, ext?: string): string {
   if (ext) {
     const norm = ext.replace(/^\./, '').toLowerCase();
@@ -84,15 +128,10 @@ function titleCase(input: string): string {
 
 function removeNoise(raw: string): string {
   let s = raw.trim();
-  s = s.replace(new RegExp(`^(?:${START_NOISE.join('|')})[\\s:,-]+`, 'i'), '');
+  s = dropLeadingNoise(s);
   s = s.replace(/[._-]+/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
-
-  s = s.replace(/\s*(?:\(|\[|\{)\s*([\w-]{1,8})\s*(?:\)|\]|\})\s*$/i, (m, g1) => {
-    const token = String(g1).toLowerCase();
-    if (REGION_SUFFIX.includes(token) || END_NOISE.includes(token)) return '';
-    return m;
-  });
+  s = stripBracketSuffix(s);
 
   const tokens = s.split(' ');
   while (tokens.length > 1) {

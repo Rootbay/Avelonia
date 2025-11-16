@@ -71,10 +71,16 @@ type VerifyInstallResult = {
     display_version?: string;
   };
 };
+
+function logIgnoredError(context: string, error: unknown) {
+  console.debug(`[Downloader:${context}] Ignored error:`, error);
+}
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
-  } catch { /* noop */ }
+  } catch (error) {
+    logIgnoredError('appLog', error);
+  }
 }
 
 async function maybeAutoInstall(id: number) {
@@ -84,7 +90,9 @@ async function maybeAutoInstall(id: number) {
     if (autoInstallTried.has(id)) return;
     installQueue.push(id);
     void processInstallQueue();
-  } catch { /* noop */ }
+  } catch (error) {
+    logIgnoredError('maybeAutoInstall', error);
+  }
 }
 
 async function processInstallQueue() {
@@ -162,7 +170,9 @@ async function processInstallQueue() {
             );
           }
         }
-      } catch { /* noop */ }
+      } catch (error) {
+        logIgnoredError('processInstallQueue verify', error);
+      }
     }
   } finally {
     installBusy = false;
@@ -190,7 +200,9 @@ async function checkAndMarkInstalled(id: number) {
         await appLog('SUCCESS', `Installed (verified): ${dl.name}`);
       }
     }
-  } catch { /* noop */ }
+  } catch (error) {
+    logIgnoredError('checkAndMarkInstalled', error);
+  }
 }
 
 function schedulePostCompleteCheck(id: number, delayMs = 5000) {
@@ -201,7 +213,9 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
       void checkAndMarkInstalled(id);
     }, delayMs) as unknown as number;
     postCompleteTimers.set(id, timer);
-  } catch { /* noop */ }
+  } catch (error) {
+    logIgnoredError('schedulePostCompleteCheck', error);
+  }
 }
 
 function seedUsedPaths() {
@@ -328,7 +342,9 @@ async function performDownload(download: Download): Promise<void> {
       void (async () => {
         try {
           await appLog('ERROR', 'Download failed to start: ' + download.name);
-        } catch { /* noop */ }
+        } catch (innerError) {
+          logIgnoredError('performDownload appLog', innerError);
+        }
       })();
       updateDownloadById(download.id, (draft) => {
         draft.status = 'failed';
@@ -452,8 +468,8 @@ export async function disposeDownloadListener() {
   try {
     const unlisten = await progressUnlisten;
     unlisten();
-  } catch {
-    /* noop */
+  } catch (error) {
+    logIgnoredError('disposeDownloadListener', error);
   } finally {
     progressUnlisten = null;
   }
@@ -479,7 +495,9 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Uninstalled detected: ${d.name}`);
             }
-          } catch { /* noop */ }
+          } catch (error) {
+            logIgnoredError('installPresenceWatch is_installed', error);
+          }
         } else if (d.status === 'completed' && isLikelyInstaller(d)) {
           try {
             const p = d.targetPath;
@@ -497,10 +515,14 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Installer file missing; reset to available: ${d.name}`);
             }
-          } catch { /* noop */ }
+          } catch (error) {
+            logIgnoredError('installPresenceWatch path_exists', error);
+          }
         }
       }
-    } catch { /* noop */ }
+    } catch (error) {
+      logIgnoredError('installPresenceWatch', error);
+    }
   }, intervalMs) as unknown as number;
 }
 
@@ -554,7 +576,8 @@ export async function getDownloadPath(dl: Download): Promise<string | null> {
 
     const fallback = await join(downloadsPath, `${baseName}-${Date.now()}${extension}`);
     return fallback;
-  } catch {
+  } catch (error) {
+    logIgnoredError('getDownloadPath', error);
     return null;
   }
 }
