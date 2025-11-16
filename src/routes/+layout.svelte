@@ -725,7 +725,7 @@
                         class={cn(
                           'size-5 shrink-0',
                           collapsed && $page.url.pathname === item.href
-                            ? 'text-[var(--sidebar-accent-foreground)]'
+                            ? 'text-sidebar-accent-foreground'
                             : 'text-current'
                         )}
                         style={$page.url.pathname === item.href
@@ -785,10 +785,10 @@
                       aria-label="Toggle theme"
                     >
                       <Sun
-                        class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 !transition-all dark:-rotate-90 dark:scale-0"
+                        class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"
                       />
                       <Moon
-                        class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 !transition-all dark:rotate-0 dark:scale-100"
+                        class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 transition-all! dark:rotate-0 dark:scale-100"
                       />
                     </Button>
                   {/snippet}
@@ -852,10 +852,10 @@
                     aria-label="Toggle theme"
                   >
                     <Sun
-                      class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 !transition-all dark:-rotate-90 dark:scale-0"
+                      class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"
                     />
                     <Moon
-                      class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 !transition-all dark:rotate-0 dark:scale-100"
+                      class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 transition-all! dark:rotate-0 dark:scale-100"
                     />
                   </Button>
                 </div>
@@ -1066,7 +1066,7 @@
       <div class="max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/10">
         <table class="w-full text-sm">
           <thead
-            class="sticky top-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70"
+            class="sticky top-0 bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70"
           >
             <tr>
               <th class="text-left px-2 py-1">Subject</th>

@@ -8,7 +8,7 @@
     SIDEBAR_WIDTH,
     SIDEBAR_WIDTH_ICON,
   } from './constants.js';
-import { setSidebar } from './context.ts';
+  import { setSidebar } from './context';
 
   let {
     ref = $bindable(null),
@@ -31,6 +31,10 @@ import { setSidebar } from './context.ts';
 
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${open}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
     },
+  });
+
+  $effect(() => {
+    sidebar.syncOpen(open);
   });
 </script>
 

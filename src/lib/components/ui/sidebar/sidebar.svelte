@@ -3,7 +3,7 @@
   import { cn, type WithElementRef } from '$lib/utils.js';
   import type { HTMLAttributes } from 'svelte/elements';
   import { SIDEBAR_WIDTH_MOBILE } from './constants.js';
-import { useSidebar } from './context.ts';
+  import { useSidebar } from './context';
 
   let {
     ref = $bindable(null),
@@ -20,6 +20,8 @@ import { useSidebar } from './context.ts';
   } = $props();
 
   const sidebar = useSidebar();
+  const sidebarState = sidebar.state;
+  const sidebarOpenMobile = sidebar.openMobile;
 </script>
 
 {#if collapsible === 'none'}
@@ -34,7 +36,7 @@ import { useSidebar } from './context.ts';
     {@render children?.()}
   </div>
 {:else if sidebar.isMobile}
-  <Sheet.Root bind:open={() => sidebar.openMobile, (v) => sidebar.setOpenMobile(v)} {...restProps}>
+  <Sheet.Root bind:open={$sidebarOpenMobile} {...restProps}>
     <Sheet.Content
       data-sidebar="sidebar"
       data-slot="sidebar"
@@ -56,8 +58,8 @@ import { useSidebar } from './context.ts';
   <div
     bind:this={ref}
     class="text-sidebar-foreground group peer hidden md:block"
-    data-state={sidebar.state}
-    data-collapsible={sidebar.state === 'collapsed' ? collapsible : ''}
+      data-state={$sidebarState}
+      data-collapsible={$sidebarState === 'collapsed' ? collapsible : ''}
     data-variant={variant}
     data-side={side}
     data-slot="sidebar"

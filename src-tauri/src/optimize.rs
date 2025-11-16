@@ -45,6 +45,20 @@ pub struct OpResult {
     pub failures: Vec<TaskFailure>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct TweakApplyRequest {
+    pub tweaks: Vec<String>,
+    pub configs: Vec<String>,
+    pub update_profile: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TweakApplyResponse {
+    pub tweaks_applied: usize,
+    pub configs_applied: usize,
+    pub profile_applied: Option<String>,
+}
+
 #[tauri::command]
 pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
     let mut items: Vec<StartupShortcut> = Vec::new();
@@ -1358,3 +1372,55 @@ pub fn restart_system() -> Result<(), String> {
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub fn restart_system() -> Result<(), String> { Err("Only available on Windows".into()) }
+
+#[cfg(target_os = "windows")]
+fn run_fix_action_impl(action_id: &str) -> Result<String, String> {
+    println!("[fix] queued action: {}", action_id);
+    Ok(format!("Fix '{}' queued (stub)", action_id))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_fix_action_impl(_action_id: &str) -> Result<String, String> {
+    Err("Only on Windows".into())
+}
+
+#[cfg(target_os = "windows")]
+fn apply_update_profile_impl(profile: &str) -> Result<String, String> {
+    println!("[update profile] {}", profile);
+    Ok(format!("Update profile '{}' queued (stub)", profile))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_update_profile_impl(_profile: &str) -> Result<String, String> {
+    Err("Only on Windows".into())
+}
+
+#[tauri::command]
+pub fn apply_tweaks(payload: TweakApplyRequest) -> Result<TweakApplyResponse, String> {
+    if !payload.tweaks.is_empty() {
+        println!("[tweaks] requested: {:?}", payload.tweaks);
+    }
+    if !payload.configs.is_empty() {
+        println!("[configs] requested: {:?}", payload.configs);
+    }
+    if let Some(ref profile) = payload.update_profile {
+        if let Err(err) = apply_update_profile_impl(profile) {
+            eprintln!("[apply_tweaks] update profile failed: {}", err);
+        }
+    }
+    Ok(TweakApplyResponse {
+        tweaks_applied: payload.tweaks.len(),
+        configs_applied: payload.configs.len(),
+        profile_applied: payload.update_profile,
+    })
+}
+
+#[tauri::command]
+pub fn run_fix_action(action_id: String) -> Result<String, String> {
+    run_fix_action_impl(&action_id)
+}
+
+#[tauri::command]
+pub fn apply_update_profile(profile: String) -> Result<String, String> {
+    apply_update_profile_impl(&profile)
+}

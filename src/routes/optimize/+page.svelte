@@ -1,7 +1,6 @@
 ﻿<script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import { Button } from '$lib/components/ui/button';
   import {
     Card,
@@ -52,180 +51,11 @@
     Flag,
   } from '@lucide/svelte';
 
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+  import TweaksPanel from './components/TweaksPanel.svelte';
+  import StartupPanel from './components/StartupPanel.svelte';
+
   let message = $state('');
-  type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
-  type StartupItem = { path: string; name: string };
-  let startupItems = $state<StartupItem[]>([]);
-  let selectedStartup = $state(new Set<string>());
-  let startupQuery = $state('');
-  let startupLoaded = $state(false);
-  let loadingStartup = $state(false);
-  let startupVisible = $state(50);
-  let startupSentinel: HTMLElement | null = null;
-
-  const STARTUP_MAX_DOM = 300;
-  const REGISTRY_MAX_DOM = 300;
-  const TASKS_MAX_DOM = 600;
-  const STARTUP_ROW_PX = 56;
-  const REGISTRY_ROW_PX = 56;
-  const TASKS_ROW_PX = 64;
-
-  let startupStart = $state(0);
-  let registryStart = $state(0);
-  let tasksStart = $state(0);
-  let startupScrollEl = $state<HTMLElement | null>(null);
-  let registryScrollEl = $state<HTMLElement | null>(null);
-  let tasksScrollEl = $state<HTMLElement | null>(null);
-  let startupQueryDeb = $state('');
-
-  $effect(() => {
-    const t = setTimeout(() => (startupQueryDeb = startupQuery), 180);
-    return () => clearTimeout(t);
-  });
-
-  async function loadStartupItems() {
-    if (loadingStartup || startupLoaded) return;
-    loadingStartup = true;
-    try {
-      const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
-      startupItems = Array.isArray(items) ? items : [];
-      try {
-        console.debug(
-          '[VT] startup items loaded:',
-          startupItems.length,
-          startupItems.map((i) => i.name).slice(0, 10)
-        );
-      } catch { /* noop */ }
-      selectedStartup = new Set();
-      startupLoaded = true;
-      startupVisible = Math.min(startupItems.length, 50);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      loadingStartup = false;
-    }
-  }
-
-  async function reloadStartupItems() {
-    startupLoaded = false;
-    await loadStartupItems();
-  }
-
-  let _startupPollTimer: number | null = null;
-  let _startupPollBusy = false;
-  async function pollStartupOnce() {
-    if (!startupLoaded || _startupPollBusy) return;
-    _startupPollBusy = true;
-    try {
-      const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
-      const next = Array.isArray(items) ? items : [];
-      const curSet = new Set(startupItems.map((i) => i.path));
-      const nextSet = new Set(next.map((i) => i.path));
-      let changed = curSet.size !== nextSet.size;
-      if (!changed) {
-        for (const p of nextSet) {
-          if (!curSet.has(p)) {
-            changed = true;
-            break;
-          }
-        }
-      }
-      if (changed) {
-        const keep = new Set(selectedStartup);
-        startupItems = next;
-        selectedStartup = new Set(Array.from(keep).filter((p) => nextSet.has(p)));
-        startupVisible = Math.min(Math.max(50, startupVisible), startupItems.length);
-      }
-    } catch { /* noop */ } finally {
-      _startupPollBusy = false;
-    }
-  }
-
-  function normalizeWinPath(p: string) {
-    try {
-      return p.replace(/\//g, '\\');
-    } catch {
-      return p;
-    }
-  }
-  async function copyText(txt: string) {
-    try {
-      await navigator.clipboard.writeText(txt);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-  function toggleStartup(p: string) {
-    if (selectedStartup.has(p)) selectedStartup.delete(p);
-    else selectedStartup.add(p);
-    selectedStartup = new Set(selectedStartup);
-  }
-  let _startupScrollTick = false;
-  function onStartupScroll(event: Event) {
-    if (_startupScrollTick) return;
-    _startupScrollTick = true;
-    const target = event.currentTarget as HTMLElement | null;
-    requestAnimationFrame(() => {
-      const el = (target as HTMLElement | null) || startupScrollEl;
-      if (!el) {
-        _startupScrollTick = false;
-        return;
-      }
-      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
-        startupVisible = Math.min(startupVisible + 100, filteredStartupItems.length);
-        if (startupVisible - startupStart > STARTUP_MAX_DOM) {
-          startupStart = Math.max(0, startupVisible - STARTUP_MAX_DOM);
-        }
-      }
-      _startupScrollTick = false;
-    });
-  }
-
-  let showStartupConfirm = $state(false);
-  let pendingStartup: string[] = $state([]);
-  function requestRemoveSelectedStartup() {
-    if (selectedStartup.size === 0) return;
-    pendingStartup = Array.from(selectedStartup);
-    showStartupConfirm = true;
-  }
-
-  async function confirmRemoveStartup() {
-    showStartupConfirm = false;
-    try {
-      const removed: number = await invoke('remove_startup_shortcuts', { files: pendingStartup });
-      message = `Removed ${removed} startup shortcut${removed === 1 ? '' : 's'}.`;
-      if (removed > 0) {
-        toast.success(message);
-        pushLog('SUCCESS', message, 'Optimize');
-      } else {
-        toast.info('No startup shortcuts removed');
-        pushLog('INFO', 'No startup shortcuts removed', 'Optimize');
-      }
-      selectedStartup = new Set();
-      await reloadStartupItems();
-    } catch (e) {
-      console.error(e);
-      message = `Failed to remove startup items: ${e}`;
-      toast.error('Failed to remove startup items');
-      pushLog('ERROR', `Failed to remove startup items: ${String(e)}`, 'Optimize');
-    } finally {
-      pendingStartup = [];
-    }
-  }
-
-  async function openStartupFolders() {
-    try {
-      const folders: string[] = await invoke('get_startup_folders');
-      for (const f of folders) {
-        try {
-          await openPath(f);
-        } catch { /* noop */ }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   type StartupRegItem = { hive: string; key: string; name: string; command: string };
   let startupRegItems = $state<StartupRegItem[]>([]);
   let selectedReg = $state(new Set<string>());
@@ -233,6 +63,8 @@
   let registryLoaded = $state(false);
   let loadingRegistry = $state(false);
   let registryVisible = $state(50);
+  let registryStart = $state(0);
+  let registryScrollEl = $state<HTMLElement | null>(null);
   let registrySentinel: HTMLElement | null = null;
   const regId = (it: StartupRegItem) => `${it.hive}|${it.key}|${it.name}`;
   let registryQueryDeb = $state('');
@@ -249,6 +81,11 @@
   let postDiagLoading = $state(false);
   let postDiag: CleanupDiagnostics | null = $state(null);
   let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
+
+  const REGISTRY_MAX_DOM = 300;
+  const REGISTRY_ROW_PX = 56;
+  const TASKS_MAX_DOM = 600;
+  const TASKS_ROW_PX = 64;
 
   type CleanupDiagnostics = {
     removedRegistry: { ok: string[]; stillPresent: string[] };
@@ -752,6 +589,14 @@
     }
   }
 
+  async function copyText(txt: string) {
+    try {
+      await navigator.clipboard.writeText(txt);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   async function loadRegistryItems() {
     if (loadingRegistry || registryLoaded) return;
     loadingRegistry = true;
@@ -907,6 +752,8 @@
   let tasksLoaded = $state(false);
   let loadingTasks = $state(false);
   let tasksVisible = $state(50);
+  let tasksStart = $state(0);
+  let tasksScrollEl = $state<HTMLElement | null>(null);
   let tasksSentinel: HTMLElement | null = null;
   let enrichInFlight = $state(0);
   let enriching = $state(new Set<string>());
@@ -1097,33 +944,6 @@
     }
   }
 
-  const filteredStartupItems = $derived(
-    startupItems.filter((it) => {
-      const q = startupQueryDeb.trim().toLowerCase();
-      if (q === '') return true;
-      return it.name.toLowerCase().includes(q) || it.path.toLowerCase().includes(q);
-    })
-  );
-  const allStartupSelected = $derived(
-    filteredStartupItems.length > 0 &&
-      filteredStartupItems.every((it) => selectedStartup.has(it.path))
-  );
-  function toggleAllStartup() {
-    if (filteredStartupItems.length === 0) return;
-    selectedStartup = allStartupSelected
-      ? new Set()
-      : new Set(filteredStartupItems.map((it) => it.path));
-  }
-
-  $effect(() => {
-    const total = filteredStartupItems.length;
-    if (startupVisible > total) startupVisible = total;
-    if (startupVisible - startupStart > STARTUP_MAX_DOM) {
-      startupStart = Math.max(0, startupVisible - STARTUP_MAX_DOM);
-    }
-    if (startupStart > startupVisible) startupStart = 0;
-  });
-
   const filteredRegistryItems = $derived(
     startupRegItems.filter((it) => {
       const q = registryQueryDeb.trim().toLowerCase();
@@ -1176,7 +996,7 @@
       const status = (t.status || '').toLowerCase();
       if (!includeDisabled && status.includes('disable')) return false;
       const next = (t.next_run_time || '').trim().toLowerCase();
-      const hasNext = next !== '' && next !== 'n/a' && next !== 'Ã¢â‚¬â€' && next !== '-';
+      const hasNext = next !== '' && next !== 'n/a' && next !== '—' && next !== '-';
       if (!includeNoNext && !hasNext) return false;
       if (q === '') return true;
       return (
@@ -1198,7 +1018,7 @@
     } else if (taskSort === 'next') {
       const toTime = (s?: string) => {
         const v = (s || '').trim();
-        if (!v || v.toLowerCase() === 'n/a' || v === 'Ã¢â‚¬â€' || v === '-')
+        if (!v || v.toLowerCase() === 'n/a' || v === '—' || v === '-')
           return Number.POSITIVE_INFINITY;
         const t = Date.parse(v);
         return isNaN(t) ? Number.POSITIVE_INFINITY : t;
@@ -1313,31 +1133,22 @@
       (entries) => {
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
-          if (startupSentinel && entry.target === startupSentinel) loadStartupItems();
           if (registrySentinel && entry.target === registrySentinel) loadRegistryItems();
           if (tasksSentinel && entry.target === tasksSentinel) loadTasks();
         }
       },
       { root: null, rootMargin: '0px', threshold: 0.1 }
     );
-    if (startupSentinel) io.observe(startupSentinel);
     if (registrySentinel) io.observe(registrySentinel);
     if (tasksSentinel) io.observe(tasksSentinel);
-    try {
-      _startupPollTimer = setInterval(pollStartupOnce, 5000) as unknown as number;
-    } catch { /* noop */ }
     try {
       _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number;
     } catch { /* noop */ }
     return () => {
       io.disconnect();
       try {
-        if (_startupPollTimer) clearInterval(_startupPollTimer as unknown as number);
-      } catch { /* noop */ }
-      try {
         if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number);
       } catch { /* noop */ }
-      _startupPollTimer = null;
       _registryPollTimer = null;
     };
   });
@@ -1353,923 +1164,762 @@
   <Card>
     <CardHeader>
       <CardTitle class="text-2xl">Optimize</CardTitle>
-      <CardDescription
-        >Manage startup items, registry Run keys, and scheduled tasks.</CardDescription>
+      <CardDescription>Manage startup items, registry Run keys, and scheduled tasks.</CardDescription>
     </CardHeader>
   </Card>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <Card class="gap-4 py-4">
-      <CardHeader>
-        <CardTitle class="flex items-center gap-2">
-          <Trash2 class="size-5" /> Startup Apps
-        </CardTitle>
-        <CardDescription>Disable unwanted startup items (Startup folders).</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-2">
-        <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Refresh"
-            aria-label="Refresh"
-            onclick={reloadStartupItems}
-          >
-            <RefreshCw class="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Open Startup Folders"
-            aria-label="Open Startup Folders"
-            onclick={openStartupFolders}
-          >
-            <FolderOpen class="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Disable Selected"
-            aria-label="Disable Selected"
-            onclick={requestRemoveSelectedStartup}
-            disabled={selectedStartup.size === 0}
-          >
-            <Trash2 class="size-4" />
-          </Button>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="relative flex-1">
-            <SearchIcon
-              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
-            />
-            <Input class="pl-9" placeholder="Filter by name or path..." bind:value={startupQuery} />
-          </div>
-          <div class="flex gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onclick={toggleAllStartup}
-              disabled={filteredStartupItems.length === 0}
-              >{allStartupSelected ? 'Deselect All' : 'Select All'}</Button
-            >
-          </div>
-        </div>
-        <div bind:this={startupSentinel} class="h-0" aria-hidden="true"></div>
-        {#if loadingStartup && startupItems.length === 0}
-          <div
-            role="status"
-            aria-busy="true"
-            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
-          >
-            <ul class="divide-y divide-border/60">
-              {#each Array.from({ length: 8 }) as _, i}
-                <li class="px-2 py-2">
-                  <div class="flex items-center gap-3">
-                    <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton class="h-3 w-2/3" aria-hidden="true" />
-                      <Skeleton class="h-3 w-5/6" aria-hidden="true" />
-                    </div>
-                    <Skeleton class="h-4 w-10" aria-hidden="true" />
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {:else if filteredStartupItems.length > 0}
-          <div
-            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
-            bind:this={startupScrollEl}
-            data-vt-scope="startup-list"
-            onscroll={onStartupScroll}
-          >
-            <ul class="divide-y divide-border/60">
-              {#if startupStart > 0}
-                <li style={`height:${startupStart * STARTUP_ROW_PX}px`} aria-hidden="true"></li>
-              {/if}
-              {#each filteredStartupItems.slice(startupStart, startupVisible) as item (item.path)}
-                <li class="px-2 py-2 rounded-sm hover:bg-muted/30 transition-colors">
-                  <label class="flex items-start justify-between gap-3">
-                    <div class="flex items-start gap-3 min-w-0 flex-1">
-                      <Checkbox
-                        checked={selectedStartup.has(item.path)}
-                        onCheckedChange={() => toggleStartup(item.path)}
-                      />
-                      <div class="min-w-0">
-                        <div class="font-semibold truncate">{item.name}</div>
-                        <div class="text-xs text-muted-foreground font-mono truncate max-w-[60ch]">
-                          {normalizeWinPath(item.path)}
-                        </div>
-                      </div>
-                    </div>
-                    <div class="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Open"
-                        aria-label="Open"
-                        onclick={() => openPath(normalizeWinPath(item.path))}
-                        ><Eye class="size-4" /></Button
-                      >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Show in Explorer"
-                        aria-label="Show in Explorer"
-                        onclick={() => revealItemInDir(normalizeWinPath(item.path))}
-                        ><FolderOpen class="size-4" /></Button
-                      >
-                    </div>
-                  </label>
-                </li>
-              {/each}
-              {#if startupVisible < filteredStartupItems.length}
-                <li class="px-2 py-2"><Skeleton class="h-[20px] w-full" aria-hidden="true" /></li>
-              {/if}
-            </ul>
-          </div>
-        {:else if startupLoaded}
-          <p class="text-sm text-muted-foreground">No startup items found.</p>
-        {:else}
-          <div
-            role="status"
-            aria-busy="true"
-            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
-          >
-            <ul class="divide-y divide-border/60">
-              {#each Array.from({ length: 6 }) as _, i}
-                <li class="px-2 py-2">
-                  <div class="flex items-center gap-3">
-                    <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton class="h-3 w-2/3" aria-hidden="true" />
-                      <Skeleton class="h-3 w-5/6" aria-hidden="true" />
-                    </div>
-                    <Skeleton class="h-4 w-10" aria-hidden="true" />
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/if}
-      </CardContent>
-    </Card>
+  <Tabs value="tweaks" class="space-y-4">
+    <TabsList class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 h-auto *:cursor-pointer">
+      <TabsTrigger value="tweaks">Tweaks</TabsTrigger>
+      <TabsTrigger value="startup">Startup items</TabsTrigger>
+      <TabsTrigger value="registry">Registry</TabsTrigger>
+      <TabsTrigger value="tasks">Scheduled tasks</TabsTrigger>
+      <TabsTrigger value="network">Network</TabsTrigger>
+    </TabsList>
 
-    <AlertDialog open={showRegistryConfirm} onOpenChange={(v) => (showRegistryConfirm = !!v)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove Registry Startup</AlertDialogTitle>
-          <AlertDialogDescription>
-            This removes selected Run/RunOnce entries. The app will attempt forced removal if needed
-            (may prompt for admin).
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {#if regPreset === 'full'}
-          <Alert class="mb-2">
-            <AlertDescription>
-              Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and
-              delete-on-reboot, purging StartupApproved and removing related Scheduled Tasks and WMI
-              subscriptions You may get UAC prompts. Save your work and close unnecessary apps
-              before continuing.
-            </AlertDescription>
-          </Alert>
-        {:else if regPreset === 'aggressive'}
-          <Alert class="mb-2">
-            <AlertDescription>
-              Aggressive: tries forced removal, blocks execution via IFEO (if an exe image is
-              found), and schedules delete-on-reboot when a full path exists. Does not purge
-              StartupApproved, Scheduled Tasks, or WMI automatically. May prompt UAC.
-            </AlertDescription>
-          </Alert>
-        {:else if regPreset === 'force'}
-          <Alert class="mb-2">
-            <AlertDescription>
-              Force only: takes ownership/permissions on the key and removes the value with
-              elevation. Does not use IFEO, delete-on-reboot or workarounds. Good when a simple
-              removal is denied.
-            </AlertDescription>
-          </Alert>
-        {:else}
-          <Alert class="mb-2">
-            <AlertDescription>
-              Basic: attempts normal removal without elevation. Fastest path when nothing is locking
-              the entry. If it fails, try Force or Aggressive.
-            </AlertDescription>
-          </Alert>
-        {/if}
-        <div class="space-y-4 text-sm">
-          <div class="flex items-center justify-between gap-2 pr-2">
-            <div>Selected: {pendingRegistry.length}</div>
-            <Select type="single" bind:value={regPreset}>
-              <SelectTrigger class="w-40">
-                <p>{regPreset}</p>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="basic">Basic</SelectItem>
-                <SelectItem value="force">Force only</SelectItem>
-                <SelectItem value="aggressive">Aggressive</SelectItem>
-                <SelectItem value="full">Full cleanup</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+    <TabsContent value="tweaks" class="space-y-4">
+      <TweaksPanel />
+    </TabsContent>
 
-          {#if pendingRegistry.length}
-            <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
-              {#each pendingRegistry.slice(0, 10) as it}
-                <li class="truncate">
-                  {it.name}
-                  <span class="text-muted-foreground"> — {it.hive}\{it.key}</span>
-                </li>
-              {/each}
-              {#if pendingRegistry.length > 10}
-                <li class="text-muted-foreground">
-                  … and {pendingRegistry.length - 10} more
-                </li>
-              {/if}
-            </ul>
+    <TabsContent value="startup" class="space-y-4">
+      <StartupPanel on:message={(event) => (message = event.detail)} />
+    </TabsContent>
+
+    <TabsContent value="registry" class="space-y-4">
+      <AlertDialog open={showRegistryConfirm} onOpenChange={(v) => (showRegistryConfirm = !!v)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Registry Startup</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes selected Run/RunOnce entries. The app will attempt forced removal if needed
+              (may prompt for admin).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {#if regPreset === 'full'}
+            <Alert class="mb-2">
+              <AlertDescription>
+                Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and
+                delete-on-reboot, purging StartupApproved and removing related Scheduled Tasks and WMI
+                subscriptions You may get UAC prompts. Save your work and close unnecessary apps
+                before continuing.
+              </AlertDescription>
+            </Alert>
+          {:else if regPreset === 'aggressive'}
+            <Alert class="mb-2">
+              <AlertDescription>
+                Aggressive: tries forced removal, blocks execution via IFEO (if an exe image is
+                found), and schedules delete-on-reboot when a full path exists. Does not purge
+                StartupApproved, Scheduled Tasks, or WMI automatically. May prompt UAC.
+              </AlertDescription>
+            </Alert>
+          {:else if regPreset === 'force'}
+            <Alert class="mb-2">
+              <AlertDescription>
+                Force only: takes ownership/permissions on the key and removes the value with
+                elevation. Does not use IFEO, delete-on-reboot or workarounds. Good when a simple
+                removal is denied.
+              </AlertDescription>
+            </Alert>
+          {:else}
+            <Alert class="mb-2">
+              <AlertDescription>
+                Basic: attempts normal removal without elevation. Fastest path when nothing is locking
+                the entry. If it fails, try Force or Aggressive.
+              </AlertDescription>
+            </Alert>
           {/if}
-        </div>
-        <AlertDialogFooter class="pr-2">
-          <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onclick={confirmRemoveRegistry}>Continue</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
-      <DialogContent class="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Suspicious Entries (Registry Startup)</DialogTitle>
-          <DialogDescription
-            >Entries that reappeared after Full cleanup and reboot.</DialogDescription
-          >
-        </DialogHeader>
-        {#if suspectEntries.length === 0}
-          <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
-        {:else}
-          <div class="max-h-[50vh] overflow-y-auto space-y-3">
-            {#each suspectEntries as s}
-              <div class="rounded-md border p-3 bg-muted/10">
-                <div class="flex items-center gap-2">
-                  <Badge variant="destructive">Suspicious</Badge>
-                  <span class="font-medium">{s.name}</span>
-                  {#if s.lastStrategy}
-                    <Badge variant="secondary" class="ml-auto">{s.lastStrategy}</Badge>
-                  {/if}
-                </div>
-                <div class="mt-1 text-xs text-muted-foreground font-mono break-all">
-                  {s.hive}\{s.key}
-                </div>
-                <p class="mt-2 text-sm">{s.reason}</p>
-              </div>
-            {/each}
-          </div>
-        {/if}
-        <DialogFooter>
-          <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
-      <DialogContent class="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Action Complete</DialogTitle>
-          <DialogDescription>Quick system check and recommended next steps.</DialogDescription>
-        </DialogHeader>
-
-        {#if postDiagLoading}
-          <div class="text-sm text-muted-foreground">Running system checkâ€¦</div>
-        {:else if postDiag}
           <div class="space-y-4 text-sm">
-            <div>
-              <p class="font-medium">Registry Entries</p>
-              {#if postDiag.removedRegistry.stillPresent.length === 0}
-                <p class="text-emerald-600 dark:text-emerald-400">
-                  All selected entries appear removed.
-                </p>
-              {:else}
-                <p class="text-destructive">Some entries remain:</p>
-                <ul class="list-disc pl-5 mt-1">
-                  {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
-                    <li class="break-all">{r}</li>
-                  {/each}
-                  {#if postDiag.removedRegistry.stillPresent.length > 6}
-                    <li>â€¦and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
-                  {/if}
-                </ul>
-              {/if}
+            <div class="flex items-center justify-between gap-2 pr-2">
+              <div>Selected: {pendingRegistry.length}</div>
+              <Select type="single" bind:value={regPreset}>
+                <SelectTrigger class="w-40">
+                  <p>{regPreset}</p>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="basic">Basic</SelectItem>
+                  <SelectItem value="force">Force only</SelectItem>
+                  <SelectItem value="aggressive">Aggressive</SelectItem>
+                  <SelectItem value="full">Full cleanup</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div>
-              <p class="font-medium">Processes</p>
-              {#if postDiag.runningImages.running.length === 0}
-                <p class="text-emerald-600 dark:text-emerald-400">
-                  No related processes are running.
-                </p>
-              {:else}
-                <p class="text-destructive">Processes still running:</p>
-                <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
-              {/if}
-            </div>
-
-            <div>
-              <p class="font-medium">Scheduled Tasks</p>
-              {#if postDiag.taskMatches.remaining.length === 0}
-                <p class="text-emerald-600 dark:text-emerald-400">No related tasks found.</p>
-              {:else}
-                <p class="text-destructive">Related tasks remaining:</p>
-                <ul class="list-disc pl-5 mt-1">
-                  {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
-                    <li class="break-all">{t}</li>
-                  {/each}
-                  {#if postDiag.taskMatches.remaining.length > 8}
-                    <li>â€¦and {postDiag.taskMatches.remaining.length - 8} more</li>
-                  {/if}
-                </ul>
-              {/if}
-            </div>
-
-            <div>
-              <p class="font-medium">Services</p>
-              {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
-                <p class="text-emerald-600 dark:text-emerald-400">
-                  Inga related services hittades.
-                </p>
-              {:else}
-                {#if postDiag.serviceMatches.running.length > 0}
-                  <p class="text-destructive">
-                    Running services: {postDiag.serviceMatches.running.join(', ')}
-                  </p>
-                {/if}
-                {#if postDiag.serviceMatches.disabled.length > 0}
-                  <p class="text-muted-foreground">
-                    Disabled: {postDiag.serviceMatches.disabled.join(', ')}
-                  </p>
-                {/if}
-              {/if}
-            </div>
-
-            <div class="space-y-2">
-              <p class="font-medium">Recommended Next Steps</p>
-              <ul class="list-disc pl-5">
-                {#if postDiag.rebootRecommended}
-                  <li>Restart your computer to complete delete-on-reboot.</li>
-                {/if}
-                {#if postDiag.runningImages.running.length > 0}
-                  <li>
-                    Close or uninstall the processes still running: {postDiag.runningImages.running.join(
-                      ', '
-                    )}.
+            {#if pendingRegistry.length}
+              <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
+                {#each pendingRegistry.slice(0, 10) as it}
+                  <li class="truncate">
+                    {it.name}
+                    <span class="text-muted-foreground"> - {it.hive}\{it.key}</span>
+                  </li>
+                {/each}
+                {#if pendingRegistry.length > 10}
+                  <li class="text-muted-foreground">
+                    . and {pendingRegistry.length - 10} more
                   </li>
                 {/if}
-                {#if postDiag.taskMatches.remaining.length > 0}
-                  <li>Open Task Scheduler and remove the remaining tasks above.</li>
-                {/if}
-                {#if postDiag.serviceMatches.running.length > 0}
-                  <li>Stop/Disable related services and verify nothing re-enables them.</li>
-                {/if}
-                <li>Run an antivirus/antimalware scan if the entries were malicious.</li>
               </ul>
-            </div>
+            {/if}
           </div>
-        {/if}
+          <AlertDialogFooter class="pr-2">
+            <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onclick={confirmRemoveRegistry}>Continue</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-        <DialogFooter class="flex flex-wrap gap-2">
-          {#if postDiag?.rebootRecommended}
-            <Button
-              onclick={async () => {
-                try {
-                  await invoke('restart_system');
-                } catch (e) {
-                  console.error(e);
-                  toast.error('Could not restart the system');
-                }
-              }}
+      <Dialog open={showSuspectLog} onOpenChange={(v) => (showSuspectLog = !!v)}>
+        <DialogContent class="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Suspicious Entries (Registry Startup)</DialogTitle>
+            <DialogDescription
+              >Entries that reappeared after Full cleanup and reboot.</DialogDescription
             >
-              Starta om
-            </Button>
+          </DialogHeader>
+          {#if suspectEntries.length === 0}
+            <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
+          {:else}
+            <div class="max-h-[50vh] overflow-y-auto space-y-3">
+              {#each suspectEntries as s}
+                <div class="rounded-md border p-3 bg-muted/10">
+                  <div class="flex items-center gap-2">
+                    <Badge variant="destructive">Suspicious</Badge>
+                    <span class="font-medium">{s.name}</span>
+                    {#if s.lastStrategy}
+                      <Badge variant="secondary" class="ml-auto">{s.lastStrategy}</Badge>
+                    {/if}
+                  </div>
+                  <div class="mt-1 text-xs text-muted-foreground font-mono break-all">
+                    {s.hive}\{s.key}
+                  </div>
+                  <p class="mt-2 text-sm">{s.reason}</p>
+                </div>
+              {/each}
+            </div>
           {/if}
-          <Button variant="outline" onclick={() => (showPostCleanup = false)}>Senare</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="secondary" onclick={() => (showSuspectLog = false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-    <Card class="gap-4 py-4">
-      <CardHeader>
-        <CardTitle class="flex items-center gap-2">
-          <Settings class="size-5" /> Registry Startup (Run keys)
-        </CardTitle>
-        <CardDescription>Entries from HKCU/HKLM Run and RunOnce keys.</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-2">
-        <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Refresh"
-            aria-label="Refresh"
-            onclick={reloadRegistryItems}
-          >
-            <RefreshCw class="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Disable Selected"
-            aria-label="Disable Selected"
-            onclick={requestRemoveSelectedRegistry}
-            disabled={selectedReg.size === 0}
-          >
-            <Trash2 class="size-4" />
-          </Button>
-          {#if Object.values(registryHistory).some((r: any) => r?.suspicious)}
+      <Dialog open={showPostCleanup} onOpenChange={(v) => (showPostCleanup = !!v)}>
+        <DialogContent class="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Action Complete</DialogTitle>
+            <DialogDescription>Quick system check and recommended next steps.</DialogDescription>
+          </DialogHeader>
+
+          {#if postDiagLoading}
+            <div class="text-sm text-muted-foreground">Running system check…</div>
+          {:else if postDiag}
+            <div class="space-y-4 text-sm">
+              <div>
+                <p class="font-medium">Registry Entries</p>
+                {#if postDiag.removedRegistry.stillPresent.length === 0}
+                  <p class="text-emerald-600 dark:text-emerald-400">
+                    All selected entries appear removed.
+                  </p>
+                {:else}
+                  <p class="text-destructive">Some entries remain:</p>
+                  <ul class="list-disc pl-5 mt-1">
+                    {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
+                      <li class="break-all">{r}</li>
+                    {/each}
+                    {#if postDiag.removedRegistry.stillPresent.length > 6}
+                      <li>…and {postDiag.removedRegistry.stillPresent.length - 6} more</li>
+                    {/if}
+                  </ul>
+                {/if}
+              </div>
+
+              <div>
+                <p class="font-medium">Processes</p>
+                {#if postDiag.runningImages.running.length === 0}
+                  <p class="text-emerald-600 dark:text-emerald-400">
+                    No related processes are running.
+                  </p>
+                {:else}
+                  <p class="text-destructive">Processes still running:</p>
+                  <p class="font-mono">{postDiag.runningImages.running.join(', ')}</p>
+                {/if}
+              </div>
+
+              <div>
+                <p class="font-medium">Scheduled Tasks</p>
+                {#if postDiag.taskMatches.remaining.length === 0}
+                  <p class="text-emerald-600 dark:text-emerald-400">No related tasks found.</p>
+                {:else}
+                  <p class="text-destructive">Related tasks remaining:</p>
+                  <ul class="list-disc pl-5 mt-1">
+                    {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
+                      <li class="break-all">{t}</li>
+                    {/each}
+                    {#if postDiag.taskMatches.remaining.length > 8}
+                      <li>…and {postDiag.taskMatches.remaining.length - 8} more</li>
+                    {/if}
+                  </ul>
+                {/if}
+              </div>
+
+              <div>
+                <p class="font-medium">Services</p>
+                {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
+                  <p class="text-emerald-600 dark:text-emerald-400">
+                    Inga related services hittades.
+                  </p>
+                {:else}
+                  {#if postDiag.serviceMatches.running.length > 0}
+                    <p class="text-destructive">
+                      Running services: {postDiag.serviceMatches.running.join(', ')}
+                    </p>
+                  {/if}
+                  {#if postDiag.serviceMatches.disabled.length > 0}
+                    <p class="text-muted-foreground">
+                      Disabled: {postDiag.serviceMatches.disabled.join(', ')}
+                    </p>
+                  {/if}
+                {/if}
+              </div>
+
+              <div class="space-y-2">
+                <p class="font-medium">Recommended Next Steps</p>
+                <ul class="list-disc pl-5">
+                  {#if postDiag.rebootRecommended}
+                    <li>Restart your computer to complete delete-on-reboot.</li>
+                  {/if}
+                  {#if postDiag.runningImages.running.length > 0}
+                    <li>
+                      Close or uninstall the processes still running: {postDiag.runningImages.running.join(
+                        ', '
+                      )}.
+                    </li>
+                  {/if}
+                  {#if postDiag.taskMatches.remaining.length > 0}
+                    <li>Open Task Scheduler and remove the remaining tasks above.</li>
+                  {/if}
+                  {#if postDiag.serviceMatches.running.length > 0}
+                    <li>Stop/Disable related services and verify nothing re-enables them.</li>
+                  {/if}
+                  <li>Run an antivirus/antimalware scan if the entries were malicious.</li>
+                </ul>
+              </div>
+            </div>
+          {/if}
+
+          <DialogFooter class="flex flex-wrap gap-2">
+            {#if postDiag?.rebootRecommended}
+              <Button
+                onclick={async () => {
+                  try {
+                    await invoke('restart_system');
+                  } catch (e) {
+                    console.error(e);
+                    toast.error('Could not restart the system');
+                  }
+                }}
+              >
+                Starta om
+              </Button>
+            {/if}
+            <Button variant="outline" onclick={() => (showPostCleanup = false)}>Senare</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card class="gap-4 py-4">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2">
+            <Settings class="size-5" /> Registry Startup (Run keys)
+          </CardTitle>
+          <CardDescription>Entries from HKCU/HKLM Run and RunOnce keys.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-2">
+          <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
             <Button
               variant="ghost"
               size="icon"
-              title="Show suspicious log"
-              aria-label="Show suspicious log"
-              onclick={() => (showSuspectLog = true)}
+              title="Refresh"
+              aria-label="Refresh"
+              onclick={reloadRegistryItems}
             >
-              <Flag class="size-4 text-destructive" />
+              <RefreshCw class="size-4" />
             </Button>
-          {/if}
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="relative flex-1">
-            <SearchIcon
-              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
-            />
-            <Input
-              class="pl-9"
-              placeholder="Filter by name, command, or key..."
-              bind:value={registryQuery}
-            />
-          </div>
-          <div class="flex gap-1">
             <Button
-              size="sm"
               variant="ghost"
-              onclick={toggleAllRegistry}
-              disabled={filteredRegistryItems.length === 0}
+              size="icon"
+              title="Disable Selected"
+              aria-label="Disable Selected"
+              onclick={requestRemoveSelectedRegistry}
+              disabled={selectedReg.size === 0}
             >
-              {allRegistrySelected ? 'Deselect All' : 'Select All'}
+              <Trash2 class="size-4" />
             </Button>
+            {#if Object.values(registryHistory).some((r: any) => r?.suspicious)}
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Show suspicious log"
+                aria-label="Show suspicious log"
+                onclick={() => (showSuspectLog = true)}
+              >
+                <Flag class="size-4 text-destructive" />
+              </Button>
+            {/if}
           </div>
-        </div>
-        <div bind:this={registrySentinel} class="h-0" aria-hidden="true"></div>
-        {#if loadingRegistry && startupRegItems.length === 0}
-          <div
-            role="status"
-            aria-busy="true"
-            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
-          >
-            <ul class="divide-y divide-border/60">
-              {#each Array.from({ length: 8 }) as _, i}
-                <li class="px-2 py-2">
-                  <div class="flex items-center gap-3">
-                    <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton class="h-3 w-1/2" aria-hidden="true" />
-                      <Skeleton class="h-3 w-4/5" aria-hidden="true" />
-                    </div>
-                    <Skeleton class="h-4 w-10" aria-hidden="true" />
-                  </div>
-                </li>
-              {/each}
-            </ul>
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <SearchIcon
+                class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+              />
+              <Input
+                class="pl-9"
+                placeholder="Filter by name, command, or key..."
+                bind:value={registryQuery}
+              />
+            </div>
+            <div class="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onclick={toggleAllRegistry}
+                disabled={filteredRegistryItems.length === 0}
+              >
+                {allRegistrySelected ? 'Deselect All' : 'Select All'}
+              </Button>
+            </div>
           </div>
-        {:else if filteredRegistryItems.length > 0}
-          <div
-            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
-            bind:this={registryScrollEl}
-            data-vt-scope="registry-list"
-            onscroll={onRegistryScroll}
-          >
-            <ul class="divide-y divide-border/60">
-              {#if registryStart > 0}
-                <li style={`height:${registryStart * REGISTRY_ROW_PX}px`} aria-hidden="true"></li>
-              {/if}
-              {#each filteredRegistryItems.slice(registryStart, registryVisible) as it (regId(it))}
-                <li class="px-2 py-2 space-y-1 rounded-sm hover:bg-muted/30 transition-colors">
-                  <label class="flex items-center gap-3">
-                    <Checkbox
-                      checked={selectedReg.has(regId(it))}
-                      onCheckedChange={() => toggleReg(it)}
-                    />
-                    <span class="font-semibold">
-                      {it.name}
-                      {#if (registryHistory[regId(it)] as any)?.suspicious}
-                        <Badge variant="destructive" class="ml-2">Suspicious</Badge>
-                      {/if}
-                    </span>
-                  </label>
-                  <div class="text-xs text-muted-foreground">{it.hive}\{it.key}</div>
-                  <div
-                    class="flex items-center justify-between gap-3 text-xs text-muted-foreground"
-                  >
-                    <span class="font-mono truncate max-w-[52ch]">{it.command}</span>
-                    <div class="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Copy command"
-                        aria-label="Copy command"
-                        onclick={() => copyText(it.command)}><CopyIcon class="size-4" /></Button
-                      >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Open in Registry"
-                        aria-label="Open in Registry"
-                        onclick={() => {
-                          void invoke('open_registry_key', { hive: it.hive, key: it.key });
-                        }}
-                      >
-                        <FolderOpen class="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </li>
-              {/each}
-              {#if registryVisible < filteredRegistryItems.length}
-                <li class="px-2 py-2"><Skeleton class="h-[20px] w-full" aria-hidden="true" /></li>
-              {/if}
-            </ul>
-          </div>
-        {:else if registryLoaded}
-          <p class="text-sm text-muted-foreground">No registry startup entries found.</p>
-        {:else}
-          <div
-            role="status"
-            aria-busy="true"
-            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
-          >
-            <ul class="divide-y divide-border/60">
-              {#each Array.from({ length: 6 }) as _, i}
-                <li class="px-2 py-2">
-                  <div class="flex items-center gap-3">
-                    <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton class="h-3 w-1/2" aria-hidden="true" />
-                      <Skeleton class="h-3 w-4/5" aria-hidden="true" />
-                    </div>
-                    <Skeleton class="h-4 w-10" aria-hidden="true" />
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/if}
-      </CardContent>
-    </Card>
-
-    <AlertDialog open={showStartupConfirm} onOpenChange={(v) => (showStartupConfirm = !!v)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove Startup Shortcuts</AlertDialogTitle>
-          <AlertDialogDescription>
-            This disables selected startup apps by removing their shortcuts. The app will attempt
-            forced removal if needed (may prompt for admin).
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <div class="space-y-2 text-sm">
-          <div>Selected: {pendingStartup.length}</div>
-          {#if pendingStartup.length}
-            <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
-              {#each pendingStartup.slice(0, 10) as p}
-                <li class="truncate">{normalizeWinPath(p)}</li>
-              {/each}
-              {#if pendingStartup.length > 10}
-                <li class="text-muted-foreground">… and {pendingStartup.length - 10} more</li>
-              {/if}
-            </ul>
-          {/if}
-        </div>
-        <AlertDialogFooter>
-          <AlertDialogCancel onclick={() => (showStartupConfirm = false)}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onclick={confirmRemoveStartup}>Continue</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <Card class="gap-4 py-4">
-      <CardHeader>
-        <CardTitle class="flex items-center gap-2">
-          <NetworkIcon class="size-5" /> Network
-        </CardTitle>
-        <CardDescription>Quick network tune-ups.</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-2">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={flushDns}
-              title="Flush DNS Cache"
-              aria-label="Flush DNS Cache"
-              ><RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span
-              ></Button
+          <div bind:this={registrySentinel} class="h-0" aria-hidden="true"></div>
+          {#if loadingRegistry && startupRegItems.length === 0}
+            <div
+              role="status"
+              aria-busy="true"
+              class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
             >
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={resetWinsock}
-              title="Reset Winsock"
-              aria-label="Reset Winsock"
-              ><RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span
-              ></Button
-            >
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={renewIp}
-              title="Renew IP"
-              aria-label="Renew IP"
-              ><RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span
-              ></Button
-            >
-          </div>
-        </div>
-        <p class="text-xs text-muted-foreground">
-          Actions may briefly interrupt connectivity. Some changes can require a reboot.
-        </p>
-      </CardContent>
-    </Card>
-
-    <Card class="gap-4 py-4">
-      <CardHeader>
-        <CardTitle class="flex items-center gap-2"
-          ><ListChecks class="size-5" /> Scheduled Tasks</CardTitle
-        >
-        <CardDescription
-          >Inspect Task Scheduler entries and highlight suspicious ones.</CardDescription
-        >
-      </CardHeader>
-      <CardContent class="space-y-2">
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="relative flex-1">
-            <SearchIcon
-              class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
-            />
-            <Input
-              class="pl-9"
-              placeholder="Search name, command, status or author..."
-              bind:value={tasksQuery}
-            />
-          </div>
-          <div class="flex items-center gap-2 flex-wrap">
-            <Select type="single" bind:value={taskSort}>
-              <SelectTrigger class="w-40">
-                <p>
-                  {taskSort === 'suspicious'
-                    ? 'Suspicious first'
-                    : taskSort === 'name'
-                    ? 'Name'
-                    : taskSort === 'next'
-                    ? 'Next run'
-                    : taskSort === 'status'
-                    ? 'Status'
-                    : taskSort === 'author'
-                    ? 'Author'
-                    : taskSort === 'command'
-                    ? 'Command'
-                    : 'Sort by'}
-                </p>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="suspicious">Suspicious first</SelectItem>
-                <SelectItem value="name">Name</SelectItem>
-                <SelectItem value="next">Next run</SelectItem>
-                <SelectItem value="status">Status</SelectItem>
-                <SelectItem value="author">Author</SelectItem>
-                <SelectItem value="command">Command</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select type="single">
-              <SelectTrigger class="w-40">
-                <p>
-                  {taskFilter === 'sus' && !includeDisabled && !includeNoNext && !includeMicrosoftInSus
-                    ? 'Suspicious only'
-                    : taskFilter === 'sus' && (includeDisabled || includeNoNext || includeMicrosoftInSus)
-                    ? 'Suspicious + extras'
-                    : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
-                    ? 'Custom filters'
-                    : 'Filters'}
-                </p>
-              </SelectTrigger>
-              <SelectContent>
-                <div class="p-2 space-y-2 min-w-[16rem]">
-                  <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox
-                      checked={taskFilter === 'sus'}
-                      onCheckedChange={() => (taskFilter = taskFilter === 'sus' ? 'all' : 'sus')}
-                    />
-                    <span class="flex items-center gap-1"
-                      ><Flag class="size-4 text-destructive" /> Suspicious only</span
-                    >
-                  </label>
-                  <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox
-                      checked={includeDisabled}
-                      onCheckedChange={() => (includeDisabled = !includeDisabled)}
-                    />
-                    <span>Show disabled</span>
-                  </label>
-                  <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox
-                      checked={includeNoNext}
-                      onCheckedChange={() => (includeNoNext = !includeNoNext)}
-                    />
-                    <span>Show 'No next run'</span>
-                  </label>
-                  <label class="flex items-center gap-2 text-sm whitespace-nowrap">
-                    <Checkbox
-                      checked={includeMicrosoftInSus}
-                      onCheckedChange={() => (includeMicrosoftInSus = !includeMicrosoftInSus)}
-                    />
-                    <span>Include Microsoft system tasks in SUS</span>
-                  </label>
-                </div>
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              variant="secondary"
-              onclick={loadTasks}
-              title="Refresh tasks"
-              aria-label="Refresh tasks"><RefreshCw class="mr-2 size-4" /> Refresh</Button
-            >
-            <Select type="single" bind:value={taskAction}>
-              <SelectTrigger class="w-40">
-                <p>
-                  {taskAction === 'disable'
-                    ? 'Disable'
-                    : taskAction === 'enable'
-                    ? 'Enable'
-                    : taskAction === 'delete'
-                    ? 'Delete'
-                    : taskAction === 'run'
-                    ? 'Run now'
-                    : taskAction === 'end'
-                    ? 'End'
-                    : 'Action'}
-                </p>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="disable">Disable</SelectItem>
-                <SelectItem value="enable">Enable</SelectItem>
-                <SelectItem value="delete">Delete</SelectItem>
-                <SelectItem value="run">Run now</SelectItem>
-                <SelectItem value="end">End</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              onclick={requestRunSelected}
-              disabled={!taskAction || selectedTasks.size === 0}
-              title="Run action"
-              aria-label="Run action">Run</Button
-            >
-            <Button
-              size="sm"
-              variant="ghost"
-              onclick={toggleAllTasks}
-              disabled={sortedTasks.length === 0}
-              >{allTasksSelected ? 'Deselect All' : 'Select All'}</Button
-            >
-          </div>
-        </div>
-        <div bind:this={tasksSentinel} class="h-0" aria-hidden="true"></div>
-        {#if loadingTasks && tasks.length === 0}
-          <div
-            role="status"
-            aria-busy="true"
-            class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
-          >
-            <ul class="divide-y divide-border/60">
-              {#each Array.from({ length: 10 }) as _, i}
-                <li class="px-3 py-2">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2">
-                        <Skeleton class="h-4 w-60" aria-hidden="true" />
-                        <Skeleton class="h-4 w-10 rounded-sm" aria-hidden="true" />
+              <ul class="divide-y divide-border/60">
+                {#each Array.from({ length: 8 }) as _, i}
+                  <li class="px-2 py-2">
+                    <div class="flex items-center gap-3">
+                      <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
+                      <div class="flex-1 space-y-2">
+                        <Skeleton class="h-3 w-1/2" aria-hidden="true" />
+                        <Skeleton class="h-3 w-4/5" aria-hidden="true" />
                       </div>
-                      <Skeleton class="mt-2 h-3 w-5/6" aria-hidden="true" />
+                      <Skeleton class="h-4 w-10" aria-hidden="true" />
                     </div>
-                    <div class="shrink-0 text-right space-y-2">
-                      <Skeleton class="h-3 w-16" aria-hidden="true" />
-                      <Skeleton class="h-3 w-24" aria-hidden="true" />
-                    </div>
-                  </div>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {:else}
-          <div
-            class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
-            bind:this={tasksScrollEl}
-            onscroll={onTasksScroll}
-          >
-            <ul class="divide-y divide-border/60">
-              {#if tasksStart > 0}
-                <li style={`height:${tasksStart * TASKS_ROW_PX}px`} aria-hidden="true"></li>
-              {/if}
-              {#each sortedTasks.slice(tasksStart, tasksVisible) as t, i (t.name + '|' + (t.task_to_run || '') + '|' + i)}
-                {@const parts = splitTaskName(t.name)}
-                <li class="px-3 py-2 hover:bg-muted/30 transition-colors">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="flex items-start gap-3 min-w-0 flex-1">
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {:else if filteredRegistryItems.length > 0}
+            <div
+              class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+              bind:this={registryScrollEl}
+              data-vt-scope="registry-list"
+              onscroll={onRegistryScroll}
+            >
+              <ul class="divide-y divide-border/60">
+                {#if registryStart > 0}
+                  <li style={`height:${registryStart * REGISTRY_ROW_PX}px`} aria-hidden="true"></li>
+                {/if}
+                {#each filteredRegistryItems.slice(registryStart, registryVisible) as it (regId(it))}
+                  <li class="px-2 py-2 space-y-1 rounded-sm hover:bg-muted/30 transition-colors">
+                    <label class="flex items-center gap-3">
                       <Checkbox
-                        checked={selectedTasks.has(t.name)}
-                        onCheckedChange={() => toggleTask(t.name)}
+                        checked={selectedReg.has(regId(it))}
+                        onCheckedChange={() => toggleReg(it)}
                       />
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span class="font-semibold truncate max-w-[60ch]"
-                            >{parts.base || t.name}</span
-                          >
-                          {#if t.is_sus}<Badge
-                              variant="outline"
-                              class="text-[10px] border-red-500/30 text-red-600 bg-red-500/10"
-                              >SUS</Badge
-                            >{/if}
-                        </div>
-                        <div
-                          class="mt-1 text-xs text-muted-foreground font-mono truncate max-w-[80ch]"
+                      <span class="font-semibold">
+                        {it.name}
+                        {#if (registryHistory[regId(it)] as any)?.suspicious}
+                          <Badge variant="destructive" class="ml-2">Suspicious</Badge>
+                        {/if}
+                      </span>
+                    </label>
+                    <div class="text-xs text-muted-foreground">{it.hive}\{it.key}</div>
+                    <div
+                      class="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    >
+                      <span class="font-mono truncate max-w-[52ch]">{it.command}</span>
+                      <div class="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Copy command"
+                          aria-label="Copy command"
+                          onclick={() => copyText(it.command)}
                         >
-                          {parts.folder}
+                          <CopyIcon class="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Open in Registry"
+                          aria-label="Open in Registry"
+                          onclick={() => {
+                            void invoke('open_registry_key', { hive: it.hive, key: it.key });
+                          }}
+                        >
+                          <FolderOpen class="size-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                {/each}
+                {#if registryVisible < filteredRegistryItems.length}
+                  <li class="px-2 py-2"><Skeleton class="h-5 w-full" aria-hidden="true" /></li>
+                {/if}
+              </ul>
+            </div>
+          {:else if registryLoaded}
+            <p class="text-sm text-muted-foreground">No registry startup entries found.</p>
+          {:else}
+            <div
+              role="status"
+              aria-busy="true"
+              class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+            >
+              <ul class="divide-y divide-border/60">
+                {#each Array.from({ length: 6 }) as _, i}
+                  <li class="px-2 py-2">
+                    <div class="flex items-center gap-3">
+                      <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
+                      <div class="flex-1 space-y-2">
+                        <Skeleton class="h-3 w-1/2" aria-hidden="true" />
+                        <Skeleton class="h-3 w-4/5" aria-hidden="true" />
+                      </div>
+                      <Skeleton class="h-4 w-10" aria-hidden="true" />
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+    </TabsContent>
+
+    <TabsContent value="tasks" class="space-y-4">
+      <Card class="gap-4 py-4">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2">
+            <ListChecks class="size-5" /> Scheduled Tasks
+          </CardTitle>
+          <CardDescription
+            >Inspect Task Scheduler entries and highlight suspicious ones.</CardDescription
+          >
+        </CardHeader>
+        <CardContent class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="relative flex-1">
+              <SearchIcon
+                class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+              />
+              <Input
+                class="pl-9"
+                placeholder="Search name, command, status or author..."
+                bind:value={tasksQuery}
+              />
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <Select type="single" bind:value={taskSort}>
+                <SelectTrigger class="w-40">
+                  <p>
+                    {taskSort === 'suspicious'
+                      ? 'Suspicious first'
+                      : taskSort === 'name'
+                      ? 'Name'
+                      : taskSort === 'next'
+                      ? 'Next run'
+                      : taskSort === 'status'
+                      ? 'Status'
+                      : taskSort === 'author'
+                      ? 'Author'
+                      : taskSort === 'command'
+                      ? 'Command'
+                      : 'Sort by'}
+                  </p>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="suspicious">Suspicious first</SelectItem>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="next">Next run</SelectItem>
+                  <SelectItem value="status">Status</SelectItem>
+                  <SelectItem value="author">Author</SelectItem>
+                  <SelectItem value="command">Command</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select type="single">
+                <SelectTrigger class="w-40">
+                  <p>
+                    {taskFilter === 'sus' && !includeDisabled && !includeNoNext && !includeMicrosoftInSus
+                      ? 'Suspicious only'
+                      : taskFilter === 'sus' && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                      ? 'Suspicious + extras'
+                      : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                      ? 'Custom filters'
+                      : 'Filters'}
+                  </p>
+                </SelectTrigger>
+                <SelectContent>
+                  <div class="p-2 space-y-2 min-w-[16rem]">
+                    <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <Checkbox
+                        checked={taskFilter === 'sus'}
+                        onCheckedChange={() => (taskFilter = taskFilter === 'sus' ? 'all' : 'sus')}
+                      />
+                      <span class="flex items-center gap-1"
+                        ><Flag class="size-4 text-destructive" /> Suspicious only</span
+                      >
+                    </label>
+                    <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <Checkbox
+                        checked={includeDisabled}
+                        onCheckedChange={() => (includeDisabled = !includeDisabled)}
+                      />
+                      <span>Show disabled</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <Checkbox
+                        checked={includeNoNext}
+                        onCheckedChange={() => (includeNoNext = !includeNoNext)}
+                      />
+                      <span>Show 'No next run'</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <Checkbox
+                        checked={includeMicrosoftInSus}
+                        onCheckedChange={() => (includeMicrosoftInSus = !includeMicrosoftInSus)}
+                      />
+                      <span>Include Microsoft system tasks in SUS</span>
+                    </label>
+                  </div>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="secondary"
+                onclick={loadTasks}
+                title="Refresh tasks"
+                aria-label="Refresh tasks"
+                ><RefreshCw class="mr-2 size-4" /> Refresh</Button
+              >
+              <Select type="single" bind:value={taskAction}>
+                <SelectTrigger class="w-40">
+                  <p>
+                    {taskAction === 'disable'
+                      ? 'Disable'
+                      : taskAction === 'enable'
+                      ? 'Enable'
+                      : taskAction === 'delete'
+                      ? 'Delete'
+                      : taskAction === 'run'
+                      ? 'Run now'
+                      : taskAction === 'end'
+                      ? 'End'
+                      : 'Action'}
+                  </p>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="disable">Disable</SelectItem>
+                  <SelectItem value="enable">Enable</SelectItem>
+                  <SelectItem value="delete">Delete</SelectItem>
+                  <SelectItem value="run">Run now</SelectItem>
+                  <SelectItem value="end">End</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                onclick={requestRunSelected}
+                disabled={!taskAction || selectedTasks.size === 0}
+                title="Run action"
+                aria-label="Run action"
+                >Run</Button
+              >
+              <Button
+                size="sm"
+                variant="ghost"
+                onclick={toggleAllTasks}
+                disabled={sortedTasks.length === 0}
+                >{allTasksSelected ? 'Deselect All' : 'Select All'}</Button
+              >
+            </div>
+          </div>
+          <div bind:this={tasksSentinel} class="h-0" aria-hidden="true"></div>
+          {#if loadingTasks && tasks.length === 0}
+            <div
+              role="status"
+              aria-busy="true"
+              class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+            >
+              <ul class="divide-y divide-border/60">
+                {#each Array.from({ length: 10 }) as _, i}
+                  <li class="px-3 py-2">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                          <Skeleton class="h-4 w-60" aria-hidden="true" />
+                          <Skeleton class="h-4 w-10 rounded-sm" aria-hidden="true" />
+                        </div>
+                        <Skeleton class="mt-2 h-3 w-5/6" aria-hidden="true" />
+                      </div>
+                      <div class="shrink-0 text-right space-y-2">
+                        <Skeleton class="h-3 w-16" aria-hidden="true" />
+                        <Skeleton class="h-3 w-24" aria-hidden="true" />
+                      </div>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {:else}
+            <div
+              class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+              bind:this={tasksScrollEl}
+              onscroll={onTasksScroll}
+            >
+              <ul class="divide-y divide-border/60">
+                {#if tasksStart > 0}
+                  <li style={`height:${tasksStart * TASKS_ROW_PX}px`} aria-hidden="true"></li>
+                {/if}
+                {#each sortedTasks.slice(tasksStart, tasksVisible) as t, i (t.name + '|' + (t.task_to_run || '') + '|' + i)}
+                  {@const parts = splitTaskName(t.name)}
+                  <li class="px-3 py-2 hover:bg-muted/30 transition-colors">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="flex items-start gap-3 min-w-0 flex-1">
+                        <Checkbox
+                          checked={selectedTasks.has(t.name)}
+                          onCheckedChange={() => toggleTask(t.name)}
+                        />
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <span class="font-semibold truncate max-w-[60ch]"
+                              >{parts.base || t.name}</span
+                            >
+                            {#if t.is_sus}
+                              <Badge
+                                variant="outline"
+                                class="text-[10px] border-red-500/30 text-red-600 bg-red-500/10"
+                                >SUS</Badge
+                            >{/if}
+                          </div>
+                          <div
+                            class="mt-1 text-xs text-muted-foreground font-mono truncate max-w-[80ch]"
+                          >
+                            {parts.folder}
+                          </div>
+                        </div>
+                      </div>
+                      <div class="shrink-0 text-right">
+                        <div class="text-xs text-muted-foreground">{t.status || '-'}</div>
+                        <div class="text-[10px] text-muted-foreground">
+                          Next: {t.next_run_time || '-'}
                         </div>
                       </div>
                     </div>
-                    <div class="shrink-0 text-right">
-                      <div class="text-xs text-muted-foreground">{t.status || 'Ã¢â‚¬â€'}</div>
-                      <div class="text-[10px] text-muted-foreground">
-                        Next: {t.next_run_time || 'Ã¢â‚¬â€'}
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              {/each}
-              {#if tasksVisible < sortedTasks.length}
-                <li class="px-2 py-2"><Skeleton class="h-[20px] w-full" aria-hidden="true" /></li>
+                  </li>
+                {/each}
+                {#if tasksVisible < sortedTasks.length}
+                  <li class="px-2 py-2"><Skeleton class="h-5 w-full" aria-hidden="true" /></li>
+                {/if}
+                {#if sortedTasks.length === 0 && tasksLoaded}
+                  <li class="px-3 py-8 text-center text-xs text-muted-foreground">No tasks match.</li>
+                {/if}
+              </ul>
+            </div>
+          {/if}
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={showTaskConfirm} onOpenChange={(v) => (showTaskConfirm = !!v)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Task Action</AlertDialogTitle>
+            <AlertDialogDescription>
+              This may require administrator permissions (UAC).
+              {#if pendingAction === 'delete'}
+                <br />Deleting protected system tasks often fails. Disabling is safer.
               {/if}
-              {#if sortedTasks.length === 0 && tasksLoaded}
-                <li class="px-3 py-8 text-center text-xs text-muted-foreground">No tasks match.</li>
-              {/if}
-            </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div class="space-y-2 text-sm">
+            <div>Action: <span class="font-semibold uppercase">{pendingAction}</span></div>
+            <div>Selected: {pendingNames.length}</div>
+            {#if pendingNames.length}
+              <ul class="max-h-32 overflow-auto rounded bg-muted/10 p-2 text-xs">
+                {#each pendingNames.slice(0, 8) as nm}
+                  {@const p = splitTaskName(nm)}
+                  <li class="truncate">
+                    {p.base}
+                    <span class="text-muted-foreground">{p.folder}</span>{#if isLikelyProtected(nm)}
+                      <span class="ml-1 text-[10px] text-destructive">protected</span>{/if}
+                  </li>
+                {/each}
+                {#if pendingNames.length > 8}
+                  <li class="text-muted-foreground">. and {pendingNames.length - 8} more</li>
+                {/if}
+              </ul>
+            {/if}
           </div>
-        {/if}
-      </CardContent>
-    </Card>
-  </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onclick={() => (showTaskConfirm = false)}>Cancel</AlertDialogCancel>
+            {#if pendingAction === 'delete'}
+              <AlertDialogAction onclick={switchToDisableAndRun}>Switch to Disable</AlertDialogAction>
+            {/if}
+            <AlertDialogAction onclick={confirmRunAction}>Continue</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </TabsContent>
+
+    <TabsContent value="network" class="space-y-4">
+      <Card class="gap-4 py-4">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2">
+            <NetworkIcon class="size-5" /> Network
+          </CardTitle>
+          <CardDescription>Quick network tune-ups.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={flushDns}
+                title="Flush DNS Cache"
+                aria-label="Flush DNS Cache"
+              >
+                <RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={resetWinsock}
+                title="Reset Winsock"
+                aria-label="Reset Winsock"
+              >
+                <RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={renewIp}
+                title="Renew IP"
+                aria-label="Renew IP"
+              >
+                <RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span>
+              </Button>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Actions may briefly interrupt connectivity. Some changes can require a reboot.
+          </p>
+        </CardContent>
+      </Card>
+    </TabsContent>
+  </Tabs>
 
   {#if message}
-    <div class="lg:col-span-2">
-      <Alert><AlertDescription>{message}</AlertDescription></Alert>
-    </div>
+    <Alert><AlertDescription>{message}</AlertDescription></Alert>
   {/if}
 </div>
-
-<AlertDialog open={showTaskConfirm} onOpenChange={(v) => (showTaskConfirm = !!v)}>
-  <AlertDialogContent>
-    <AlertDialogHeader>
-      <AlertDialogTitle>Confirm Task Action</AlertDialogTitle>
-      <AlertDialogDescription>
-        This may require administrator permissions (UAC).
-        {#if pendingAction === 'delete'}
-          <br />Deleting protected system tasks often fails. Disabling is safer.
-        {/if}
-      </AlertDialogDescription>
-    </AlertDialogHeader>
-    <div class="space-y-2 text-sm">
-      <div>Action: <span class="font-semibold uppercase">{pendingAction}</span></div>
-      <div>Selected: {pendingNames.length}</div>
-      {#if pendingNames.length}
-        <ul class="max-h-32 overflow-auto rounded bg-muted/10 p-2 text-xs">
-          {#each pendingNames.slice(0, 8) as nm}
-            {@const p = splitTaskName(nm)}
-            <li class="truncate">
-              {p.base}
-              <span class="text-muted-foreground">{p.folder}</span>{#if isLikelyProtected(nm)}
-                <span class="ml-1 text-[10px] text-destructive">protected</span>{/if}
-            </li>
-          {/each}
-          {#if pendingNames.length > 8}
-            <li class="text-muted-foreground">Ã¢â‚¬Â¦ and {pendingNames.length - 8} more</li>
-          {/if}
-        </ul>
-      {/if}
-    </div>
-    <AlertDialogFooter>
-      <AlertDialogCancel onclick={() => (showTaskConfirm = false)}>Cancel</AlertDialogCancel>
-      {#if pendingAction === 'delete'}
-        <AlertDialogAction onclick={switchToDisableAndRun}>Switch to Disable</AlertDialogAction>
-      {/if}
-      <AlertDialogAction onclick={confirmRunAction}>Continue</AlertDialogAction>
-    </AlertDialogFooter>
-  </AlertDialogContent>
-</AlertDialog>

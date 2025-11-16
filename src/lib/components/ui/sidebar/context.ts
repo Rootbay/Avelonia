@@ -10,7 +10,7 @@ export type SidebarStateProps = {
 
 class SidebarState {
   readonly props: SidebarStateProps;
-  readonly open: Readable<boolean>;
+  readonly open: Writable<boolean>;
   readonly openMobile: Writable<boolean>;
   readonly state: Readable<'expanded' | 'collapsed'>;
   setOpen: SidebarStateProps['setOpen'];
@@ -18,9 +18,12 @@ class SidebarState {
 
   constructor(props: SidebarStateProps) {
     this.props = props;
-    this.setOpen = props.setOpen;
+    this.setOpen = (value: boolean) => {
+      props.setOpen(value);
+      this.open.set(value);
+    };
     this.#isMobile = new IsMobile();
-    this.open = derived([], () => this.props.open());
+    this.open = writable(this.props.open());
     this.openMobile = writable(false);
     this.state = derived(this.open, ($open) => ($open ? 'expanded' : 'collapsed'));
   }
@@ -38,6 +41,10 @@ class SidebarState {
 
   setOpenMobile = (value: boolean) => {
     this.openMobile.set(value);
+  };
+
+  syncOpen = (value: boolean) => {
+    this.open.set(value);
   };
 
   toggle = () => {
