@@ -30,7 +30,8 @@ export function loadCleanerCache(): CleanerCache | null {
       dupGroups: ensureArr(parsed.dupGroups),
       timestamp: Number(parsed.timestamp) || Date.now(),
     } as CleanerCache;
-  } catch {
+  } catch (error) {
+    console.warn('[CleanerCache] unable to load cache', error);
     return null;
   }
 }
@@ -39,5 +40,7 @@ export function saveCleanerCache(cache: CleanerCache): void {
   if (typeof window === 'undefined') return;
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
-  } catch { /* noop */ }
+  } catch (error) {
+    console.warn('[CleanerCache] unable to persist cache', error);
+  }
 }

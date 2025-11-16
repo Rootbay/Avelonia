@@ -78,7 +78,7 @@ function logIgnoredError(context: string, error: unknown) {
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('appLog', error);
   }
 }
@@ -90,7 +90,7 @@ async function maybeAutoInstall(id: number) {
     if (autoInstallTried.has(id)) return;
     installQueue.push(id);
     void processInstallQueue();
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('maybeAutoInstall', error);
   }
 }
@@ -121,8 +121,11 @@ async function processInstallQueue() {
         try {
           await invoke('launch_installer', { path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Installer launched: ${snap.name}`);
-        } catch (e) {
-          await appLog('ERROR', `Failed to launch installer for ${snap.name}: ${String(e)}`);
+        } catch (installerLaunchError: unknown) {
+          await appLog(
+            'ERROR',
+            `Failed to launch installer for ${snap.name}: ${String(installerLaunchError)}`
+          );
         } finally {
           autoInstallTried.add(id);
         }
@@ -135,15 +138,21 @@ async function processInstallQueue() {
           await invoke('silent_install', { path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
           autoInstallTried.add(id);
-        } catch (e) {
-          await appLog('WARN', `Silent install failed for ${snap.name}: ${String(e)}`);
+        } catch (silentInstallError: unknown) {
+          await appLog(
+            'WARN',
+            `Silent install failed for ${snap.name}: ${String(silentInstallError)}`
+          );
           autoInstallTried.add(id);
           if (downloader.fallbackOpen) {
             try {
               await appLog('INFO', `Opening installer normally for ${snap.name}`);
               await openPath(path);
-            } catch (e2) {
-              await appLog('ERROR', `Failed to open installer for ${snap.name}: ${String(e2)}`);
+            } catch (fallbackError: unknown) {
+              await appLog(
+                'ERROR',
+                `Failed to open installer for ${snap.name}: ${String(fallbackError)}`
+              );
             }
           }
         }
@@ -170,7 +179,7 @@ async function processInstallQueue() {
             );
           }
         }
-      } catch (error) {
+      } catch (error: unknown) {
         logIgnoredError('processInstallQueue verify', error);
       }
     }
@@ -200,7 +209,7 @@ async function checkAndMarkInstalled(id: number) {
         await appLog('SUCCESS', `Installed (verified): ${dl.name}`);
       }
     }
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('checkAndMarkInstalled', error);
   }
 }
@@ -213,7 +222,7 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
       void checkAndMarkInstalled(id);
     }, delayMs) as unknown as number;
     postCompleteTimers.set(id, timer);
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('schedulePostCompleteCheck', error);
   }
 }
@@ -336,7 +345,7 @@ async function performDownload(download: Download): Promise<void> {
       url: download.downloadLink,
       path: filePath,
     });
-  } catch (error) {
+  } catch (error: unknown) {
     if (activeDownloads.has(download.id)) {
       console.error(`Failed to start download for ${download.name}:`, error);
       void (async () => {
@@ -468,7 +477,7 @@ export async function disposeDownloadListener() {
   try {
     const unlisten = await progressUnlisten;
     unlisten();
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('disposeDownloadListener', error);
   } finally {
     progressUnlisten = null;
@@ -495,7 +504,7 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Uninstalled detected: ${d.name}`);
             }
-          } catch (error) {
+          } catch (error: unknown) {
             logIgnoredError('installPresenceWatch is_installed', error);
           }
         } else if (d.status === 'completed' && isLikelyInstaller(d)) {
@@ -515,12 +524,12 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
               });
               await appLog('INFO', `Installer file missing; reset to available: ${d.name}`);
             }
-          } catch (error) {
+          } catch (error: unknown) {
             logIgnoredError('installPresenceWatch path_exists', error);
           }
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       logIgnoredError('installPresenceWatch', error);
     }
   }, intervalMs) as unknown as number;
@@ -576,7 +585,7 @@ export async function getDownloadPath(dl: Download): Promise<string | null> {
 
     const fallback = await join(downloadsPath, `${baseName}-${Date.now()}${extension}`);
     return fallback;
-  } catch (error) {
+  } catch (error: unknown) {
     logIgnoredError('getDownloadPath', error);
     return null;
   }
@@ -641,7 +650,7 @@ export async function cancelDownload(id: number) {
   if (wasActive) {
     try {
       await invoke('cancel_download', { id });
-    } catch (error) {
+    } catch (error: unknown) {
       console.warn('cancel_download failed', error);
     }
   }

@@ -27,6 +27,10 @@ function nowTs(): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function logStorageError(context: string, error: unknown) {
+  console.warn(`[LogStore:${context}]`, error);
+}
+
 function load(): LogEntry[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -34,7 +38,8 @@ function load(): LogEntry[] {
     const arr = raw ? (JSON.parse(raw) as LogEntry[]) : [];
     if (!Array.isArray(arr)) return [];
     return arr.filter((e) => !!e && typeof e.message === 'string');
-  } catch {
+  } catch (error) {
+    logStorageError('load', error);
     return [];
   }
 }
@@ -46,7 +51,9 @@ systemLogs.subscribe((list) => {
   try {
     const trimmed = list.slice(0, MAX_LOG_ENTRIES);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-  } catch { /* noop */ }
+  } catch (error) {
+    logStorageError('persist', error);
+  }
 });
 
 function friendlyMap(
@@ -141,5 +148,7 @@ export function clearLogs() {
   try {
     systemLogs.set([]);
     if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY);
-  } catch { /* noop */ }
+  } catch (error) {
+    logStorageError('clear', error);
+  }
 }

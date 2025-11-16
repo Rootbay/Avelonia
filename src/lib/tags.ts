@@ -2,6 +2,10 @@ import { writable } from 'svelte/store';
 
 const STORAGE_KEY = 'avelonia_tags_custom';
 
+function logTagsError(context: string, error: unknown) {
+  console.warn(`[Tags] ${context}`, error);
+}
+
 export const BUILT_IN_TAGS = [
   'Browser',
   'Utility',
@@ -23,7 +27,8 @@ function loadCustom(): string[] {
     if (!raw) return [];
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : [];
-  } catch {
+  } catch (error) {
+    logTagsError('loadCustom', error);
     return [];
   }
 }
@@ -35,7 +40,9 @@ tags.subscribe((list) => {
   try {
     const uniq = Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(uniq));
-  } catch { /* noop */ }
+  } catch (error) {
+    logTagsError('persist', error);
+  }
 });
 
 export function addTag(name: string) {

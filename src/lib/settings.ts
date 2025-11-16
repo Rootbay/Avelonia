@@ -16,6 +16,10 @@ export type AppSettings = {
 
 const STORAGE_KEY = 'avelonia_settings_v1';
 
+function logSettingsError(context: string, error: unknown) {
+  console.warn(`[Settings] ${context}`, error);
+}
+
 function load(): AppSettings {
   if (typeof window === 'undefined') {
     return {
@@ -41,6 +45,7 @@ function load(): AppSettings {
           fallbackOpen: true,
           verifyInstall: false,
           preferWinget: false,
+          downloadCatalogPath: '',
         },
       };
     const parsed = JSON.parse(raw);
@@ -56,7 +61,8 @@ function load(): AppSettings {
         : '',
     };
     return { downloader: d };
-  } catch {
+  } catch (error) {
+    logSettingsError('load', error);
     return {
       downloader: {
         autoInstall: false,
@@ -77,7 +83,9 @@ settings.subscribe((s) => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch { /* noop */ }
+  } catch (error) {
+    logSettingsError('persist', error);
+  }
 });
 
 export function updateDownloaderSettings(patch: Partial<DownloaderSettings>) {

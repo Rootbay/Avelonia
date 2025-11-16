@@ -17,11 +17,16 @@ export type VtReport = {
   reason?: string;
 };
 
+function logVtError(context: string, error: unknown) {
+  console.warn(`[VT] ${context}`, error);
+}
+
 function normalizeKey(s: string): string {
   try {
     return s.trim().toLowerCase();
-  } catch {
-    return s as unknown as string;
+  } catch (error) {
+    logVtError('normalizeKey', error);
+    return String(s).trim().toLowerCase();
   }
 }
 
@@ -40,7 +45,8 @@ function loadPersisted(): Map<string, VerdictLabel> {
       if (v === 'Safe' || v === 'Sus' || v === 'Not') m.set(k, v as VerdictLabel);
     }
     return m;
-  } catch {
+  } catch (error) {
+    logVtError('loadPersisted', error);
     return new Map();
   }
 }
@@ -50,8 +56,10 @@ function persist(map: Map<string, VerdictLabel>) {
   try {
     const obj: Record<string, VerdictLabel> = {};
     for (const [k, v] of map.entries()) obj[k] = v;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-  } catch { /* noop */ }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+  } catch (error) {
+    logVtError('persist', error);
+  }
 }
 
 export const vtVerdicts = writable<Map<string, VerdictLabel>>(loadPersisted());
@@ -72,7 +80,8 @@ function loadReasons(): Map<string, string> {
       if (typeof v === 'string') m.set(k, v);
     }
     return m;
-  } catch {
+  } catch (error) {
+    logVtError('loadReasons', error);
     return new Map();
   }
 }
@@ -83,7 +92,9 @@ function persistReasons(map: Map<string, string>) {
     const obj: Record<string, string> = {};
     for (const [k, v] of map.entries()) obj[k] = v;
     localStorage.setItem(REASONS_KEY, JSON.stringify(obj));
-  } catch { /* noop */ }
+  } catch (error) {
+    logVtError('persistReasons', error);
+  }
 }
 
 export const vtReasons = writable<Map<string, string>>(loadReasons());

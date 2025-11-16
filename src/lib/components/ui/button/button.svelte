@@ -53,19 +53,16 @@
     children,
     ...restProps
   }: ButtonProps = $props();
-  const resolvedHref = $derived(() =>
-    href ? resolve(href as Parameters<typeof resolve>[0]) : undefined
-  );
-  const linkHref = $derived(() => (disabled ? undefined : resolvedHref()));
-
 </script>
 
 {#if href}
-    <a
-      bind:this={ref}
-      data-slot="button"
-      class={cn(buttonVariants({ variant, size }), className)}
-      href={linkHref()}
+  <a
+    bind:this={ref}
+    data-slot="button"
+    class={cn(buttonVariants({ variant, size }), className)}
+    href={
+      href && !disabled ? resolve(href as Parameters<typeof resolve>[0]) : undefined
+    }
     aria-disabled={disabled}
     role={disabled ? 'link' : undefined}
     tabindex={disabled ? -1 : undefined}

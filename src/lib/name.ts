@@ -66,6 +66,8 @@ const CLOSING_TO_OPENING_BRACKET: Record<string, string> = {
   ']': '[',
   '}': '{',
 };
+const WHITESPACE_BLOCK = /[ \t\r\n]+/g;
+const MULTI_WHITESPACE = /[ \t\r\n]{2,}/g;
 
 function trimNoiseDelimiters(value: string): string {
   let index = 0;
@@ -116,7 +118,7 @@ function stripExtension(name: string, ext?: string): string {
 }
 
 function titleCase(input: string): string {
-  const parts = input.split(/\s+/).filter(Boolean);
+  const parts = input.split(WHITESPACE_BLOCK).filter(Boolean);
   return parts
     .map((w, i) => {
       const lower = w.toLowerCase();
@@ -130,7 +132,7 @@ function removeNoise(raw: string): string {
   let s = raw.trim();
   s = dropLeadingNoise(s);
   s = s.replace(/[._-]+/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(WHITESPACE_BLOCK, ' ').trim();
   s = stripBracketSuffix(s);
 
   const tokens = s.split(' ');
@@ -150,8 +152,8 @@ export function prettifyDisplayName(raw: string, ext?: string): string {
   let base = stripExtension(raw ?? '', ext);
   base = base.normalize('NFKC');
   base = removeNoise(base);
-  base = base.replace(/^\s+|\s+$/g, '');
-  base = base.replace(/\s{2,}/g, ' ');
+  base = base.trim();
+  base = base.replace(MULTI_WHITESPACE, ' ');
   if (!base) base = 'download';
   return titleCase(base);
 }
