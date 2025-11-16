@@ -2,11 +2,13 @@ use std::env;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use lnk::{ShellLink};
 use lnk::encoding::WINDOWS_1252;
 use std::process::{Command, Stdio};
 use std::str;
 use std::io;
+use std::net::IpAddr;
 use std::time::Duration;
 use rand::Rng;
 use sysinfo::System;
@@ -830,6 +832,309 @@ fn run_command_text(cmd: &str, args: &[&str]) -> Result<String, String> {
             suffix
         ))
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkAdapterInfo {
+    pub name: String,
+    pub status: Option<String>,
+    pub link_speed: Option<String>,
+    pub mac: Option<String>,
+    pub media: Option<String>,
+    pub link_state: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSummary {
+    pub primary_adapter: Option<String>,
+    pub ipv4: Option<String>,
+    pub ipv6: Option<String>,
+    pub dns_servers: Vec<String>,
+    pub gateways: Vec<String>,
+    pub adapters: Vec<NetworkAdapterInfo>,
+}
+
+#[cfg(target_os = "windows")]
+fn run_powershell_json(script: &str) -> Result<Vec<Value>, String> {
+    use std::process::Command;
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            script,
+        ])
+        .output()
+        .map_err(|e| format!("failed to run powershell: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("powershell failed: {}", stderr));
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parsed: Value =
+        serde_json::from_str(&text).map_err(|e| format!("failed to parse powershell output: {}", e))?;
+    let items = match parsed {
+        Value::Array(mut results) => {
+            if results.is_empty() {
+                Vec::new()
+            } else {
+                results
+            }
+        }
+        Value::Null => Vec::new(),
+        other => vec![other],
+    };
+    Ok(items)
+}
+
+#[cfg(target_os = "windows")]
+fn value_to_string(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(n) = value.as_u64() {
+        return Some(n.to_string());
+    }
+    if let Some(n) = value.as_i64() {
+        return Some(n.to_string());
+    }
+    if let Some(n) = value.as_f64() {
+        return Some(n.to_string());
+    }
+    if let Some(obj) = value.as_object() {
+        for key in ["IPAddress", "ServerAddress", "Address", "NextHop"] {
+            if let Some(entry) = obj.get(key) {
+                if let Some(s) = entry.as_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn push_candidate_value(result: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() || is_com_instance_string(trimmed) {
+        return;
+    }
+    if let Some(ip) = sanitize_ip_candidate(trimmed) {
+        if !result.contains(&ip) {
+            result.push(ip);
+        }
+        return;
+    }
+    let normalized = trimmed.to_string();
+    if !normalized.is_empty() && !result.contains(&normalized) {
+        result.push(normalized);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn collect_string_values(value: Option<&Value>, keys: &[&str]) -> Vec<String> {
+    let mut result = Vec::new();
+    if let Some(val) = value {
+        if let Some(arr) = val.as_array() {
+            for entry in arr {
+                for &key in keys {
+                    if let Some(item) = entry.get(key).and_then(|v| v.as_str()) {
+                        push_candidate_value(&mut result, item);
+                        break;
+                    }
+                }
+                if let Some(item) = value_to_string(entry) {
+                    push_candidate_value(&mut result, &item);
+                }
+            }
+        } else if let Some(item) = value_to_string(val) {
+            push_candidate_value(&mut result, &item);
+        }
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn format_link_speed(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    if let Some(speed) = value.as_u64() {
+        let mbps = speed as f64 / 1_000_000.0;
+        let formatted = if (mbps - mbps.round()).abs() < 1e-3 {
+            format!("{:.0} Mbps", mbps)
+        } else {
+            format!("{:.1} Mbps", mbps)
+        };
+        return Some(formatted);
+    }
+    None
+}
+
+fn sanitize_ip_candidate(input: &str) -> Option<String> {
+    let mut candidate = input.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    candidate = candidate.trim_matches('"');
+    candidate = candidate.trim_matches('\'');
+    candidate = candidate.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    if let Some(pos) = candidate.find('%') {
+        let base = candidate[..pos].trim();
+        if !base.is_empty() {
+            if base.parse::<IpAddr>().is_ok() {
+                return Some(base.to_string());
+            }
+        }
+    }
+    if candidate.parse::<IpAddr>().is_ok() {
+        return Some(candidate.to_string());
+    }
+    if let Some(idx) = candidate.find(' ') {
+        let first = candidate[..idx].trim();
+        if first.parse::<IpAddr>().is_ok() {
+            return Some(first.to_string());
+        }
+    }
+    None
+}
+
+fn is_com_instance_string(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with("MSFT_") && trimmed.contains("Name =") {
+        return true;
+    }
+    false
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn get_network_summary() -> Result<NetworkSummary, String> {
+    let ip_script = "Get-NetIPConfiguration | Select InterfaceAlias,IPv4Address,IPv6Address,DnsServer,IPv4DefaultGateway | ConvertTo-Json";
+    let adapter_script = "Get-NetAdapter | Select InterfaceAlias,Status,LinkSpeed,MacAddress,MediaType,InterfaceDescription,LinkState | ConvertTo-Json";
+    let ip_data = run_powershell_json(ip_script)?;
+    let adapter_data = run_powershell_json(adapter_script)?;
+    let mut summary = NetworkSummary {
+        primary_adapter: None,
+        ipv4: None,
+        ipv6: None,
+        dns_servers: Vec::new(),
+        gateways: Vec::new(),
+        adapters: Vec::new(),
+    };
+    for entry in &ip_data {
+        let alias = entry.get("InterfaceAlias").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let ipv4_list = collect_string_values(entry.get("IPv4Address"), &["IPAddress"]);
+        if summary.ipv4.is_none() && !ipv4_list.is_empty() {
+            summary.ipv4 = Some(ipv4_list[0].clone());
+            if let Some(name) = alias.clone() {
+                summary.primary_adapter = Some(name);
+            }
+        }
+        let ipv6_list = collect_string_values(entry.get("IPv6Address"), &["IPAddress"]);
+        if summary.ipv6.is_none() && !ipv6_list.is_empty() {
+            summary.ipv6 = Some(ipv6_list[0].clone());
+        }
+        if summary.primary_adapter.is_none() {
+            if let Some(name) = alias.clone() {
+                summary.primary_adapter = Some(name);
+            }
+        }
+        for dns in collect_string_values(entry.get("DnsServer"), &["IPAddress", "ServerAddress"]) {
+            if !summary.dns_servers.contains(&dns) {
+                summary.dns_servers.push(dns);
+            }
+        }
+        for gw in collect_string_values(entry.get("IPv4DefaultGateway"), &["NextHop", "IPAddress"]) {
+            if !summary.gateways.contains(&gw) {
+                summary.gateways.push(gw);
+            }
+        }
+    }
+    let mut adapters = Vec::new();
+    for entry in &adapter_data {
+        let name = match entry.get("InterfaceAlias").and_then(|v| v.as_str()) {
+            Some(value) => value.to_string(),
+            None => continue,
+        };
+        let info = NetworkAdapterInfo {
+            name,
+            status: entry.get("Status").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            link_speed: entry.get("LinkSpeed").and_then(format_link_speed),
+            mac: entry.get("MacAddress").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            media: entry.get("MediaType").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            link_state: entry.get("LinkState").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        };
+        adapters.push(info);
+    }
+    summary.adapters = adapters;
+    Ok(summary)
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn get_network_summary() -> Result<NetworkSummary, String> {
+    Err("Network summary is only implemented on Windows".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn run_ping(host: String, count: Option<u8>) -> Result<String, String> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("Host is required".into());
+    }
+    let ping_count = count.unwrap_or(4).clamp(1, 8);
+    let count_arg = ping_count.to_string();
+    run_command_text("ping", &["-n", &count_arg, trimmed])
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn run_ping(_host: String, _count: Option<u8>) -> Result<String, String> {
+    Err("Ping is only implemented on Windows".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn run_traceroute(host: String) -> Result<String, String> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("Host is required".into());
+    }
+    run_command_text("tracert", &[trimmed])
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn run_traceroute(_host: String) -> Result<String, String> {
+    Err("Traceroute is only implemented on Windows".into())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub fn run_dns_lookup(host: String) -> Result<String, String> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err("Host is required".into());
+    }
+    run_command_text("nslookup", &[trimmed])
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub fn run_dns_lookup(_host: String) -> Result<String, String> {
+    Err("DNS lookup is only implemented on Windows".into())
 }
 
 #[tauri::command]

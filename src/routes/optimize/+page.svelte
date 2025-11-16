@@ -1091,18 +1091,162 @@
     confirmRunAction();
   }
 
+  type NetworkAdapterInfo = {
+    name: string;
+    status?: string | null;
+    linkSpeed?: string | null;
+    mac?: string | null;
+    media?: string | null;
+    linkState?: string | null;
+  };
+
+  type NetworkSummary = {
+    primaryAdapter?: string | null;
+    ipv4?: string | null;
+    ipv6?: string | null;
+    dnsServers: string[];
+    gateways: string[];
+    adapters: NetworkAdapterInfo[];
+  };
+
+  type NetworkHistoryEntry = {
+    id: string;
+    label: string;
+    result: string;
+    success: boolean;
+    timestamp: number;
+  };
+
+  const NETWORK_PRESETS = [
+    {
+      id: 'refresh',
+      label: 'Quick refresh',
+      description: 'Flush DNS and renew DHCP to recover connectivity quickly.',
+      actions: ['flush_dns', 'renew_ip'] as const,
+    },
+    {
+      id: 'full',
+      label: 'Full reset',
+      description: 'Flush DNS, reset Winsock, and renew IP to clear stubborn issues.',
+      actions: ['flush_dns', 'reset_winsock', 'renew_ip'] as const,
+    },
+    {
+      id: 'winsock',
+      label: 'Winsock focus',
+      description: 'Reset Winsock and renew IP without flushing DNS for driver resets.',
+      actions: ['reset_winsock', 'renew_ip'] as const,
+    },
+  ] as const;
+  type NetworkPresetId = (typeof NETWORK_PRESETS)[number]['id'];
+  type NetworkPreset = (typeof NETWORK_PRESETS)[number];
+
+  let activeNetworkPreset = $state<NetworkPresetId>(NETWORK_PRESETS[0].id);
+  let networkSummary = $state<NetworkSummary | null>(null);
+  let networkInfoLoading = $state(false);
+  let networkHistory = $state<NetworkHistoryEntry[]>([]);
+  let pingTarget = $state('1.1.1.1');
+  let tracerouteTarget = $state('1.1.1.1');
+  let dnsLookupTarget = $state('example.com');
+  let networkTestLoading = $state(false);
+  let networkTestResult = $state('');
+  let networkTestLabel = $state('');
+
+  function addNetworkHistory(label: string, result: string, success: boolean) {
+    const safe = result
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .slice(0, 6)
+      .join('\n')
+      .trim();
+    const entry: NetworkHistoryEntry = {
+      id: `${label}-${Date.now()}`,
+      label,
+      result: safe || 'No output was returned.',
+      success,
+      timestamp: Date.now(),
+    };
+    networkHistory = [entry, ...networkHistory].slice(0, 6);
+  }
+
+  async function refreshNetworkStatus() {
+    networkInfoLoading = true;
+    try {
+      networkSummary = await invoke<NetworkSummary>('get_network_summary');
+    } catch (error: unknown) {
+      console.error('network summary failed', error);
+      const text =
+        error instanceof Error ? error.message : 'Failed to refresh network summary';
+      toast.error(text);
+      networkSummary = null;
+    } finally {
+      networkInfoLoading = false;
+    }
+  }
+
+  async function runNetworkTest(label: string, action: () => Promise<string>) {
+    networkTestLoading = true;
+    networkTestLabel = label;
+    networkTestResult = '';
+    try {
+      const output = (await action()).trim();
+      const result = output || `${label} completed`;
+      networkTestResult = result;
+      addNetworkHistory(label, result, true);
+    } catch (error: unknown) {
+      const text =
+        error instanceof Error ? error.message : `${label} test failed`;
+      networkTestResult = text;
+      addNetworkHistory(label, text, false);
+      toast.error(text);
+    } finally {
+      networkTestLoading = false;
+    }
+  }
+
+  async function runPingTest() {
+    await runNetworkTest('Ping', () =>
+      invoke<string>('run_ping', { host: pingTarget, count: 4 })
+    );
+  }
+
+  async function runTracerouteTest() {
+    await runNetworkTest('Traceroute', () => invoke<string>('run_traceroute', { host: tracerouteTarget }));
+  }
+
+  async function runDnsLookupTest() {
+    await runNetworkTest('DNS Lookup', () => invoke<string>('run_dns_lookup', { host: dnsLookupTarget }));
+  }
+
+  const selectedPreset = $derived(
+    NETWORK_PRESETS.find((item) => item.id === activeNetworkPreset)
+  );
+
+  async function applyNetworkPreset(id: NetworkPresetId) {
+    const preset = NETWORK_PRESETS.find((item) => item.id === id);
+    if (!preset) return;
+    activeNetworkPreset = id;
+    for (const action of preset.actions) {
+      let ok = true;
+      if (action === 'flush_dns') ok = await flushDns();
+      else if (action === 'reset_winsock') ok = await resetWinsock();
+      else if (action === 'renew_ip') ok = await renewIp();
+      if (!ok) break;
+    }
+    await refreshNetworkStatus();
+  }
+
   async function runNetworkAction(
     label: string,
     action: () => Promise<string>
-  ) {
+  ): Promise<boolean> {
     try {
       const output = await action();
       const message = (output ?? '').trim();
-      if (message) {
-        toast.success(message);
-      } else {
-        toast.success(`${label} completed`);
-      }
+      const display = message || `${label} completed`;
+      toast.success(display);
+      addNetworkHistory(label, display, true);
+      await refreshNetworkStatus();
+      return true;
     } catch (error: unknown) {
       console.error(error);
       const text =
@@ -1112,23 +1256,26 @@
           ? error
           : `${label} failed`;
       toast.error(text);
+      addNetworkHistory(label, text, false);
+      return false;
     }
   }
 
   async function flushDns() {
-    await runNetworkAction('Flush DNS', () => invoke<string>('flush_dns'));
+    return runNetworkAction('Flush DNS', () => invoke<string>('flush_dns'));
   }
 
   async function resetWinsock() {
-    await runNetworkAction('Reset Winsock', () => invoke<string>('reset_winsock'));
+    return runNetworkAction('Reset Winsock', () => invoke<string>('reset_winsock'));
   }
 
   async function renewIp() {
-    await runNetworkAction('Renew IP', () => invoke<string>('renew_ip'));
+    return runNetworkAction('Renew IP', () => invoke<string>('renew_ip'));
   }
 
   onMount(() => {
     void initBootCheck();
+    void refreshNetworkStatus();
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -1365,7 +1512,7 @@
                 <p class="font-medium">Services</p>
                 {#if postDiag.serviceMatches.running.length === 0 && postDiag.serviceMatches.disabled.length === 0}
                   <p class="text-emerald-600 dark:text-emerald-400">
-                    Inga related services hittades.
+                    No related services were found.
                   </p>
                 {:else}
                   {#if postDiag.serviceMatches.running.length > 0}
@@ -1389,9 +1536,8 @@
                   {/if}
                   {#if postDiag.runningImages.running.length > 0}
                     <li>
-                      Close or uninstall the processes still running: {postDiag.runningImages.running.join(
-                        ', '
-                      )}.
+                      Close or uninstall the processes still running: 
+                      {postDiag.runningImages.running.join(', ')}.
                     </li>
                   {/if}
                   {#if postDiag.taskMatches.remaining.length > 0}
@@ -1604,9 +1750,9 @@
           <CardTitle class="flex items-center gap-2">
             <ListChecks class="size-5" /> Scheduled Tasks
           </CardTitle>
-          <CardDescription
-            >Inspect Task Scheduler entries and highlight suspicious ones.</CardDescription
-          >
+          <CardDescription>
+            Inspect Task Scheduler entries and highlight suspicious ones.
+          </CardDescription>
         </CardHeader>
         <CardContent class="space-y-2">
           <div class="flex items-center gap-2 flex-wrap">
@@ -1872,48 +2018,282 @@
     </TabsContent>
 
     <TabsContent value="network" class="space-y-4">
-      <Card class="gap-4 py-4">
-        <CardHeader>
-          <CardTitle class="flex items-center gap-2">
-            <NetworkIcon class="size-5" /> Network
-          </CardTitle>
-          <CardDescription>Quick network tune-ups.</CardDescription>
-        </CardHeader>
-        <CardContent class="space-y-2">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onclick={flushDns}
-                title="Flush DNS Cache"
-                aria-label="Flush DNS Cache"
-              >
-                <RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onclick={resetWinsock}
-                title="Reset Winsock"
-                aria-label="Reset Winsock"
-              >
-                <RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onclick={renewIp}
-                title="Renew IP"
-                aria-label="Renew IP"
-              >
-                <RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span>
-              </Button>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <Card class="space-y-3">
+          <CardHeader class="items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <NetworkIcon class="size-5" />
+              <CardTitle>Diagnostics</CardTitle>
             </div>
+            <CardDescription>Snapshot of adapters, IP ranges and DNS paths.</CardDescription>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="w-30"
+              disabled={networkInfoLoading}
+              onclick={refreshNetworkStatus}
+            >
+              Refresh
+            </Button>
+            
+          </CardHeader>
+          <CardContent>
+            {#if networkInfoLoading}
+              <div class="space-y-2">
+                <Skeleton class="h-4 w-32" aria-hidden="true" />
+                <Skeleton class="h-4 w-full" aria-hidden="true" />
+                <Skeleton class="h-4 w-5/6" aria-hidden="true" />
+              </div>
+            {:else if !networkSummary}
+              <p class="text-xs text-muted-foreground">Unable to read network information.</p>
+            {:else}
+              <div class="grid gap-2 sm:grid-cols-2 text-sm">
+                <div>
+                  <p class="text-[10px] uppercase text-muted-foreground">Adapter</p>
+                  <p class="text-base font-semibold">{networkSummary.primaryAdapter ?? '—'}</p>
+                </div>
+                <div>
+                  <p class="text-[10px] uppercase text-muted-foreground">IPv4</p>
+                  <p class="font-medium">{networkSummary.ipv4 ?? '—'}</p>
+                  <p class="text-[10px] uppercase text-muted-foreground mt-2">IPv6</p>
+                  <p class="font-medium">{networkSummary.ipv6 ?? '—'}</p>
+                </div>
+              </div>
+              <div class="mt-3 space-y-2 text-xs text-muted-foreground">
+                <div>
+                  <span class="font-semibold text-[11px] text-foreground">DNS</span>
+                  {#if networkSummary.dnsServers.length}
+                    <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
+                      {#each networkSummary.dnsServers as dns}
+                        <div>{dns}</div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <span class="ml-1">—</span>
+                  {/if}
+                </div>
+                <div>
+                  <span class="font-semibold text-[11px] text-foreground">Gateway</span>
+                  {#if networkSummary.gateways.length}
+                    <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
+                      {#each networkSummary.gateways as gateway}
+                        <div>{gateway}</div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <span class="ml-1">—</span>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </CardContent>
+        </Card>
+        <Card class="space-y-3">
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Badge variant="secondary" class="px-3 py-1 text-[10px] uppercase">Adapters</Badge>
+              <CardTitle class="m-0">Interfaces</CardTitle>
+            </div>
+            <CardDescription>Reported adapter status and media information.</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-3">
+            {#if networkInfoLoading}
+              <div class="space-y-2">
+                <Skeleton class="h-5 w-full" aria-hidden="true" />
+                <Skeleton class="h-5 w-full" aria-hidden="true" />
+              </div>
+            {:else if !networkSummary || networkSummary.adapters.length === 0}
+              <p class="text-xs text-muted-foreground">No adapters detected.</p>
+            {:else}
+              <div class="space-y-2">
+                {#each networkSummary.adapters as adapter}
+                  <div class="rounded-md border border-border/60 bg-muted/10 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <span class="font-semibold">{adapter.name}</span>
+                      {#if adapter.status}
+                        <Badge
+                          variant={adapter.status?.toLowerCase().includes('up') ? 'secondary' : 'outline'}
+                          class="text-[10px]"
+                          >{adapter.status}</Badge
+                        >
+                      {/if}
+                    </div>
+                    <div class="mt-1 grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-2">
+                      {#if adapter.linkSpeed}
+                        <div>
+                          Speed:
+                          <span class="font-mono text-foreground">{adapter.linkSpeed}</span>
+                        </div>
+                      {/if}
+                      {#if adapter.media}
+                        <div>Media: <span class="text-foreground">{adapter.media}</span></div>
+                      {/if}
+                      {#if adapter.mac}
+                        <div>MAC: <span class="font-mono text-foreground">{adapter.mac}</span></div>
+                      {/if}
+                      {#if adapter.linkState}
+                        <div>State: <span class="text-foreground">{adapter.linkState}</span></div>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </CardContent>
+        </Card>
+      </div>
+      <Card class="space-y-4">
+        <CardHeader class="items-start gap-2">
+          <CardTitle class="flex items-center gap-2">
+            <NetworkIcon class="size-5" /> Network tweaks
+          </CardTitle>
+          <CardDescription>Quick network tune-ups and presets.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div class="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={flushDns}
+              title="Flush DNS Cache"
+              aria-label="Flush DNS Cache"
+            >
+              <RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={resetWinsock}
+              title="Reset Winsock"
+              aria-label="Reset Winsock"
+            >
+              <RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={renewIp}
+              title="Renew IP"
+              aria-label="Renew IP"
+            >
+              <RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span>
+            </Button>
           </div>
           <p class="text-xs text-muted-foreground">
             Actions may briefly interrupt connectivity. Some changes can require a reboot.
           </p>
+          <div class="space-y-2 border-t border-border/60 pt-3">
+            <p class="text-xs uppercase text-muted-foreground">Automation presets</p>
+            <div class="flex flex-wrap gap-2">
+              {#each NETWORK_PRESETS as preset}
+                <Button
+                  size="sm"
+                  variant={activeNetworkPreset === preset.id ? 'secondary' : 'outline'}
+                  onclick={() => applyNetworkPreset(preset.id)}
+                  disabled={networkTestLoading}
+                >
+                  {preset.label}
+                </Button>
+              {/each}
+            </div>
+            {#if selectedPreset}
+              <p class="text-xs text-muted-foreground">{selectedPreset.description}</p>
+            {/if}
+          </div>
+        </CardContent>
+      </Card>
+      <Card class="space-y-3">
+        <CardHeader class="items-center gap-2">
+          <div class="flex items-center gap-2">
+            <SearchIcon class="size-5" />
+            <CardTitle>Quick tests</CardTitle>
+          </div>
+          <CardDescription>Ping, traceroute, and DNS lookups without leaving the app.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <div class="grid gap-3 md:grid-cols-3">
+            <div class="space-y-1">
+              <p class="text-xs text-muted-foreground">Ping target</p>
+              <div class="flex items-center gap-2">
+                <Input class="flex-1" placeholder="1.1.1.1" bind:value={pingTarget} />
+                <Button size="sm" variant="outline" onclick={runPingTest} disabled={networkTestLoading}>
+                  Ping
+                </Button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <p class="text-xs text-muted-foreground">Traceroute</p>
+              <div class="flex items-center gap-2">
+                <Input class="flex-1" placeholder="example.com" bind:value={tracerouteTarget} />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onclick={runTracerouteTest}
+                  disabled={networkTestLoading}
+                >
+                  Trace
+                </Button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <p class="text-xs text-muted-foreground">DNS lookup</p>
+              <div class="flex items-center gap-2">
+                <Input class="flex-1" placeholder="example.com" bind:value={dnsLookupTarget} />
+                <Button size="sm" variant="outline" onclick={runDnsLookupTest} disabled={networkTestLoading}>
+                  Lookup
+                </Button>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono whitespace-pre-wrap wrap-break-word max-h-40 overflow-auto">
+            {#if networkTestLoading}
+              <p class="text-muted-foreground">Running {networkTestLabel}...</p>
+            {:else if networkTestResult}
+              {networkTestResult}
+            {:else}
+              Results will appear here.
+            {/if}
+          </div>
+        </CardContent>
+      </Card>
+      <Card class="space-y-2">
+        <CardHeader class="items-center gap-2">
+          <div class="flex items-center gap-2">
+            <ListChecks class="size-5" />
+            <CardTitle>Network history</CardTitle>
+          </div>
+          <CardDescription>Records of recent tweaks and connectivity tests.</CardDescription>
+          <Button
+            size="sm"
+            variant="ghost"
+            class="w-30"
+            onclick={() => (networkHistory = [])}
+            disabled={networkHistory.length === 0}
+          >
+            Clear
+          </Button>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          {#if networkHistory.length === 0}
+            <p class="text-xs text-muted-foreground">No recent actions recorded.</p>
+          {:else}
+            <ul class="space-y-2">
+              {#each networkHistory as entry}
+                <li class="rounded-md border border-border/60 bg-muted/10 p-3">
+                  <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <div class="flex items-center gap-1">
+                      <Badge variant={entry.success ? 'secondary' : 'destructive'} class="text-[10px]">
+                        {entry.success ? 'OK' : 'Fail'}
+                      </Badge>
+                      <span class="font-medium text-[11px] text-foreground">{entry.label}</span>
+                    </div>
+                    <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  <pre class="mt-1 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap wrap-break-word max-h-28 overflow-auto">{entry.result}</pre>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </CardContent>
       </Card>
     </TabsContent>
