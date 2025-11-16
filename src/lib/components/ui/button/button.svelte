@@ -53,19 +53,15 @@
     children,
     ...restProps
   }: ButtonProps = $props();
-</script>
 
-{#if href}
+</script> 
+
+{#if href && !disabled}
   <a
     bind:this={ref}
     data-slot="button"
     class={cn(buttonVariants({ variant, size }), className)}
-    href={
-      href && !disabled ? resolve(href as Parameters<typeof resolve>[0]) : undefined
-    }
-    aria-disabled={disabled}
-    role={disabled ? 'link' : undefined}
-    tabindex={disabled ? -1 : undefined}
+    href={resolve(href as Parameters<typeof resolve>[0])}
     {...restProps}
   >
     {@render children?.()}

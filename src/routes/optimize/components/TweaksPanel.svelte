@@ -205,7 +205,7 @@
     </CardHeader>
     <CardContent class="space-y-4">
       <div class="flex flex-wrap gap-2">
-        {#each profileOptions as profile}
+        {#each profileOptions as profile (profile.id)}
         <Button
             size="lg"
             variant={selectedProfile === profile.id ? 'secondary' : 'outline'}
@@ -237,7 +237,7 @@
         <CardDescription>Baseline adjustments before unlocking advanced options.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3 max-h-[440px] overflow-y-auto pr-1">
-        {#each essentialTweaks as tweak}
+        {#each essentialTweaks as tweak (tweak.id)}
           <label
             class="flex gap-3 rounded-md px-2 py-2 transition hover:bg-muted/30"
             aria-label={tweak.label}
@@ -261,7 +261,7 @@
         <CardDescription>Deeper system, network, and service changes.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3 max-h-[440px] overflow-y-auto pr-1">
-        {#each advancedTweaks as tweak}
+        {#each advancedTweaks as tweak (tweak.id)}
           <label
             class="flex gap-3 rounded-md px-2 py-2 transition hover:bg-muted/30"
             aria-label={tweak.label}
@@ -285,7 +285,7 @@
         <CardDescription>Make the desktop behave the way you like it.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-        {#each customizeTweaks as tweak}
+        {#each customizeTweaks as tweak (tweak.id)}
           <label
             class="flex gap-3 rounded-md px-2 py-2 transition hover:bg-muted/30"
             aria-label={tweak.label}
@@ -311,7 +311,7 @@
         <CardDescription>Toggle Windows capabilities and legacy components.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-        {#each configItems as config}
+        {#each configItems as config (config.id)}
           <label
             class="flex gap-3 rounded-md px-2 py-2 transition hover:bg-muted/30"
             aria-label={config.label}
@@ -337,7 +337,7 @@
         <CardDescription>Quick remediation actions that can be run on demand.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
-        {#each fixActions as action}
+        {#each fixActions as action (action.id)}
           <div class="flex flex-col gap-2 rounded-md border border-border/60 px-3 py-2">
             <div class="flex items-center justify-between gap-3">
               <span class="font-semibold">{action.label}</span>
@@ -363,7 +363,7 @@
     </CardHeader>
     <CardContent class="space-y-3">
       <div class="flex flex-wrap gap-2">
-        {#each updateProfileOptions as profile}
+        {#each updateProfileOptions as profile (profile.id)}
         <Button
             size="sm"
             variant={selectedUpdateProfile === profile.id ? 'secondary' : 'outline'}

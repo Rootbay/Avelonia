@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Download, DownloadRelease } from '$lib/downloadManager';
+  import type { Download } from '$lib/downloadManager';
   import { getDownloadPath, setDownloadRelease } from '$lib/downloadManager';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import { Button } from '$lib/components/ui/button';
@@ -178,7 +178,7 @@
             value={activeReleaseLabel}
             onchange={handleReleaseChange}
           >
-            {#each releaseOptions as release}
+            {#each releaseOptions as release (release.label)}
               <option value={release.label}>{release.label}</option>
             {/each}
           </select>
