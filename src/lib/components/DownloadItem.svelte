@@ -18,11 +18,12 @@
 
   type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
 
-  const { download, selected, onToggleSelect, startDownload } = $props<{
+  const { download, selected, onToggleSelect, startDownload, cancelDownload } = $props<{
     download: Download;
     selected: boolean;
     onToggleSelect?: (payload: { checked: boolean; shiftKey: boolean }) => void;
     startDownload: (id: number) => void;
+    cancelDownload?: (id: number) => Promise<void>;
   }>();
 
   const statusTone = $derived.by(() => {
@@ -82,6 +83,13 @@
     event.stopPropagation();
     startDownload(download.id);
     toast.success(`Retrying ${download.name ?? 'download'}`);
+  }
+
+  function cancel(event: MouseEvent) {
+    event.stopPropagation();
+    if (cancelDownload) {
+      void cancelDownload(download.id);
+    }
   }
 
   function handleReleaseChange(event: Event) {
@@ -232,6 +240,11 @@
         </DropdownMenu>
       {:else if download.status === 'failed'}
         <Button type="button" variant="ghost" size="sm" onclick={retry}>Retry</Button>
+      {:else if cancelDownload &&
+        (download.status === 'downloading' ||
+          download.status === 'pending' ||
+          download.status === 'queued')}
+        <Button type="button" variant="destructive" size="sm" onclick={cancel}>Cancel</Button>
       {/if}
     </div>
   </TableCell>

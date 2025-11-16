@@ -1650,7 +1650,7 @@
         <Table ref={tableEl} class="min-w-[960px]">
           <TableHeader>
             <TableRow>
-              <TableHead class="w-[40px]">
+              <TableHead class="w-10">
                 <span class="flex justify-center">
                   <input
                     bind:this={selectAllCheckbox}
@@ -1748,7 +1748,7 @@
           <TableBody>
             {#if initialLoading}
               {#each Array.from({ length: 6 }) as _, ii}
-                <TableRow class="!border-0" aria-hidden="true">
+                <TableRow class="border-0!" aria-hidden="true">
                   <TableCell class="w-[60px]">
                     <div class="flex items-center gap-2">
                       <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
@@ -1789,7 +1789,7 @@
               {/if}
               {#each windowedDownloads as download, i (download.id)}
                 {#if skeletonIds.has(download.id)}
-                  <TableRow class="!border-0" aria-hidden="true">
+                  <TableRow class="border-0!" aria-hidden="true">
                     <TableCell class="w-[60px]">
                       <div class="flex items-center gap-2">
                         <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />

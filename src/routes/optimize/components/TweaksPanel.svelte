@@ -209,7 +209,7 @@
         <Button
             size="lg"
             variant={selectedProfile === profile.id ? 'secondary' : 'outline'}
-            class="flex-1 min-w-[170px] justify-start px-2 py-5 !h-auto"
+            class="flex-1 min-w-[170px] justify-start px-2 py-5 h-auto!"
             onclick={() => applyProfile(profile.id)}
           >
             <div class="flex flex-col items-start gap-1 text-left">
@@ -367,7 +367,7 @@
         <Button
             size="sm"
             variant={selectedUpdateProfile === profile.id ? 'secondary' : 'outline'}
-            class="flex-1 min-w-[140px] justify-start py-3 !h-auto"
+            class="flex-1 min-w-[140px] justify-start py-3 h-auto!"
             onclick={() => applyUpdateProfile(profile.id)}
           >
             <div class="flex flex-col items-start gap-1 text-left">
