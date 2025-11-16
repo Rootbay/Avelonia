@@ -1,17 +1,29 @@
+pub mod fix_actions;
+pub mod shell_helpers;
+pub mod tweaks;
+pub mod update_profiles;
 use std::env;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 use serde::{Serialize, Deserialize};
-use serde_json::Value;
+#[cfg(target_os = "windows")]
 use lnk::{ShellLink};
 use lnk::encoding::WINDOWS_1252;
 use std::process::{Command, Stdio};
 use std::str;
 use std::io;
-use std::net::IpAddr;
 use std::time::Duration;
 use rand::Rng;
 use sysinfo::System;
+
+pub use shell_helpers::{NetworkAdapterInfo, NetworkSummary};
+pub use tweaks::{TweakApplyRequest, TweakApplyResponse};
+
+use shell_helpers::{
+    collect_string_values, format_link_speed, run_cmd_elevated, run_command_text,
+    run_powershell_elevated, run_powershell_json, run_reg, run_reg_elevated, run_schtasks,
+    run_schtasks_capture,
+};
 
 #[derive(Serialize, Clone)]
 pub struct ScheduledTask {
@@ -45,20 +57,6 @@ pub struct OpResult {
     pub elevated: usize,
     pub stopped: usize,
     pub failures: Vec<TaskFailure>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct TweakApplyRequest {
-    pub tweaks: Vec<String>,
-    pub configs: Vec<String>,
-    pub update_profile: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct TweakApplyResponse {
-    pub tweaks_applied: usize,
-    pub configs_applied: usize,
-    pub profile_applied: Option<String>,
 }
 
 #[tauri::command]
@@ -799,224 +797,6 @@ pub fn remove_startup_shortcuts(files: Vec<String>) -> Result<usize, String> {
     Ok(count)
 }
 
-#[cfg(target_os = "windows")]
-fn fmt_command_text(output: &std::process::Output) -> String {
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let mut parts = Vec::new();
-    if !stdout.is_empty() {
-        parts.push(stdout);
-    }
-    if !stderr.is_empty() {
-        parts.push(stderr);
-    }
-    parts.join("\n")
-}
-
-#[cfg(target_os = "windows")]
-fn run_command_text(cmd: &str, args: &[&str]) -> Result<String, String> {
-    use std::process::Command;
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to run {}: {}", cmd, e))?;
-    let text = fmt_command_text(&output);
-    if output.status.success() {
-        Ok(text)
-    } else {
-        let suffix = if text.is_empty() { String::new() } else { format!(": {text}") };
-        Err(format!(
-            "{} exited with status {:?}{}",
-            cmd,
-            output.status.code(),
-            suffix
-        ))
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkAdapterInfo {
-    pub name: String,
-    pub status: Option<String>,
-    pub link_speed: Option<String>,
-    pub mac: Option<String>,
-    pub media: Option<String>,
-    pub link_state: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkSummary {
-    pub primary_adapter: Option<String>,
-    pub ipv4: Option<String>,
-    pub ipv6: Option<String>,
-    pub dns_servers: Vec<String>,
-    pub gateways: Vec<String>,
-    pub adapters: Vec<NetworkAdapterInfo>,
-}
-
-#[cfg(target_os = "windows")]
-fn run_powershell_json(script: &str) -> Result<Vec<Value>, String> {
-    use std::process::Command;
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            script,
-        ])
-        .output()
-        .map_err(|e| format!("failed to run powershell: {}", e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("powershell failed: {}", stderr));
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let parsed: Value =
-        serde_json::from_str(&text).map_err(|e| format!("failed to parse powershell output: {}", e))?;
-    let items = match parsed {
-        Value::Array(mut results) => {
-            if results.is_empty() {
-                Vec::new()
-            } else {
-                results
-            }
-        }
-        Value::Null => Vec::new(),
-        other => vec![other],
-    };
-    Ok(items)
-}
-
-#[cfg(target_os = "windows")]
-fn value_to_string(value: &Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        return Some(s.to_string());
-    }
-    if let Some(n) = value.as_u64() {
-        return Some(n.to_string());
-    }
-    if let Some(n) = value.as_i64() {
-        return Some(n.to_string());
-    }
-    if let Some(n) = value.as_f64() {
-        return Some(n.to_string());
-    }
-    if let Some(obj) = value.as_object() {
-        for key in ["IPAddress", "ServerAddress", "Address", "NextHop"] {
-            if let Some(entry) = obj.get(key) {
-                if let Some(s) = entry.as_str() {
-                    return Some(s.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-#[cfg(target_os = "windows")]
-fn push_candidate_value(result: &mut Vec<String>, candidate: &str) {
-    let trimmed = candidate.trim();
-    if trimmed.is_empty() || is_com_instance_string(trimmed) {
-        return;
-    }
-    if let Some(ip) = sanitize_ip_candidate(trimmed) {
-        if !result.contains(&ip) {
-            result.push(ip);
-        }
-        return;
-    }
-    let normalized = trimmed.to_string();
-    if !normalized.is_empty() && !result.contains(&normalized) {
-        result.push(normalized);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn collect_string_values(value: Option<&Value>, keys: &[&str]) -> Vec<String> {
-    let mut result = Vec::new();
-    if let Some(val) = value {
-        if let Some(arr) = val.as_array() {
-            for entry in arr {
-                for &key in keys {
-                    if let Some(item) = entry.get(key).and_then(|v| v.as_str()) {
-                        push_candidate_value(&mut result, item);
-                        break;
-                    }
-                }
-                if let Some(item) = value_to_string(entry) {
-                    push_candidate_value(&mut result, &item);
-                }
-            }
-        } else if let Some(item) = value_to_string(val) {
-            push_candidate_value(&mut result, &item);
-        }
-    }
-    result
-}
-
-#[cfg(target_os = "windows")]
-fn format_link_speed(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return Some(text.to_string());
-    }
-    if let Some(speed) = value.as_u64() {
-        let mbps = speed as f64 / 1_000_000.0;
-        let formatted = if (mbps - mbps.round()).abs() < 1e-3 {
-            format!("{:.0} Mbps", mbps)
-        } else {
-            format!("{:.1} Mbps", mbps)
-        };
-        return Some(formatted);
-    }
-    None
-}
-
-fn sanitize_ip_candidate(input: &str) -> Option<String> {
-    let mut candidate = input.trim();
-    if candidate.is_empty() {
-        return None;
-    }
-    candidate = candidate.trim_matches('"');
-    candidate = candidate.trim_matches('\'');
-    candidate = candidate.trim();
-    if candidate.is_empty() {
-        return None;
-    }
-    if let Some(pos) = candidate.find('%') {
-        let base = candidate[..pos].trim();
-        if !base.is_empty() {
-            if base.parse::<IpAddr>().is_ok() {
-                return Some(base.to_string());
-            }
-        }
-    }
-    if candidate.parse::<IpAddr>().is_ok() {
-        return Some(candidate.to_string());
-    }
-    if let Some(idx) = candidate.find(' ') {
-        let first = candidate[..idx].trim();
-        if first.parse::<IpAddr>().is_ok() {
-            return Some(first.to_string());
-        }
-    }
-    None
-}
-
-fn is_com_instance_string(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.starts_with("MSFT_") && trimmed.contains("Name =") {
-        return true;
-    }
-    false
-}
-
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn get_network_summary() -> Result<NetworkSummary, String> {
@@ -1177,52 +957,6 @@ pub fn renew_ip() -> Result<String, String> { Err("Only on Windows".into()) }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub fn reset_winsock() -> Result<String, String> { Err("Only on Windows".into()) }
-fn run_schtasks(args: &[&str]) -> bool {
-    if std::process::Command::new("schtasks")
-        .args(args)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        return true;
-    }
-
-    let arglist = {
-        let items: Vec<String> = args
-            .iter()
-            .map(|a| format!("'{}'", a.replace('\'', "''")))
-            .collect();
-        format!("@({})", items.join(", "))
-    };
-    let ps = format!(
-        "Start-Process -FilePath schtasks -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-        arglist
-    );
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn run_schtasks_capture(args: &[&str]) -> (bool, String, String) {
-    match std::process::Command::new("schtasks").args(args).output() {
-        Ok(out) => {
-            let ok = out.status.success();
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            (ok, stdout, stderr)
-        }
-        Err(_) => (false, String::new(), String::new()),
-    }
-}
-
 fn try_delete_as_system(target_tn: &str) -> bool {
     let mut rng = rand::thread_rng();
     let temp_name = format!("\\_AveloniaSysDel_{}", rng.r#gen::<u32>());
@@ -1291,93 +1025,6 @@ pub fn open_registry_key(hive: String, key: String) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn open_registry_key(_hive: String, _key: String) -> Result<(), String> {
     Err("open_registry_key is only implemented on Windows".into())
-}
-
-#[cfg(target_os = "windows")]
-fn run_cmd_elevated(args: &[&str]) -> bool {
-    let arglist = {
-        let items: Vec<String> = args
-            .iter()
-            .map(|a| format!("'{}'", a.replace('\'', "''")))
-            .collect();
-        format!("@({})", items.join(", "))
-    };
-    let ps = format!(
-        "Start-Process -FilePath cmd.exe -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-        arglist
-    );
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn run_reg(args: &[&str]) -> bool {
-    std::process::Command::new("reg")
-        .args(args)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn run_reg_elevated(args: &[&str]) -> bool {
-    let arglist = {
-        let items: Vec<String> = args
-            .iter()
-            .map(|a| format!("'{}'", a.replace('\'', "''")))
-            .collect();
-        format!("@({})", items.join(", "))
-    };
-    let ps = format!(
-        "Start-Process -FilePath reg -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-        arglist
-    );
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn run_powershell_elevated(args: &[&str]) -> bool {
-    let arglist = {
-        let items: Vec<String> = args
-            .iter()
-            .map(|a| format!("'{}'", a.replace('\'', "''")))
-            .collect();
-        format!("@({})", items.join(", "))
-    };
-    let ps = format!(
-        "Start-Process -FilePath powershell -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-        arglist
-    );
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -1678,54 +1325,17 @@ pub fn restart_system() -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn restart_system() -> Result<(), String> { Err("Only available on Windows".into()) }
 
-#[cfg(target_os = "windows")]
-fn run_fix_action_impl(action_id: &str) -> Result<String, String> {
-    println!("[fix] queued action: {}", action_id);
-    Ok(format!("Fix '{}' queued (stub)", action_id))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_fix_action_impl(_action_id: &str) -> Result<String, String> {
-    Err("Only on Windows".into())
-}
-
-#[cfg(target_os = "windows")]
-fn apply_update_profile_impl(profile: &str) -> Result<String, String> {
-    println!("[update profile] {}", profile);
-    Ok(format!("Update profile '{}' queued (stub)", profile))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn apply_update_profile_impl(_profile: &str) -> Result<String, String> {
-    Err("Only on Windows".into())
-}
-
 #[tauri::command]
 pub fn apply_tweaks(payload: TweakApplyRequest) -> Result<TweakApplyResponse, String> {
-    if !payload.tweaks.is_empty() {
-        println!("[tweaks] requested: {:?}", payload.tweaks);
-    }
-    if !payload.configs.is_empty() {
-        println!("[configs] requested: {:?}", payload.configs);
-    }
-    if let Some(ref profile) = payload.update_profile {
-        if let Err(err) = apply_update_profile_impl(profile) {
-            eprintln!("[apply_tweaks] update profile failed: {}", err);
-        }
-    }
-    Ok(TweakApplyResponse {
-        tweaks_applied: payload.tweaks.len(),
-        configs_applied: payload.configs.len(),
-        profile_applied: payload.update_profile,
-    })
+    tweaks::apply_tweaks(payload)
 }
 
 #[tauri::command]
 pub fn run_fix_action(action_id: String) -> Result<String, String> {
-    run_fix_action_impl(&action_id)
+    fix_actions::run_fix_action(action_id)
 }
 
 #[tauri::command]
 pub fn apply_update_profile(profile: String) -> Result<String, String> {
-    apply_update_profile_impl(&profile)
+    update_profiles::apply_update_profile(profile)
 }
