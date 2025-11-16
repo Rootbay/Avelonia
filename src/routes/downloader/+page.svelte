@@ -115,7 +115,6 @@
   let lastSelectedIndex: number | null = null;
   let tableEl: HTMLTableElement | null = null;
   let downloadsScrollEl: HTMLDivElement | null = null;
-  let downloadsSentinel: HTMLDivElement | null = null;
   let maxListHeight = $state(0);
   let addOpen = $state(false);
   let addUrl = $state('');
@@ -164,6 +163,12 @@
   $effect(() => {
     if (!nameTouched) {
       addName = effectiveName;
+    }
+  });
+
+  $effect(() => {
+    if (addOpen) {
+      nameTouched = false;
     }
   });
 
@@ -273,6 +278,15 @@
     return c;
   });
 
+  function isEditableEventTarget(event: Event): boolean {
+    const target = event.target as HTMLElement | null;
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    return !!target.closest('input,textarea,select,[contenteditable]');
+  }
+
   function toggleSelect(id: number, value?: boolean) {
     if (value === undefined) {
       if (selectedIds.has(id)) selectedIds.delete(id);
@@ -285,6 +299,16 @@
   }
   function clearSelection() {
     selectedIds = new Set();
+  }
+  function getSelectedDownloads() {
+    const all = get(downloads);
+    const lookup = new Map(all.map((d) => [d.id, d]));
+    const selected: Download[] = [];
+    for (const id of selectedIds) {
+      const next = lookup.get(id);
+      if (next) selected.push(next);
+    }
+    return selected;
   }
 
   async function appLog(level: LogLevel, message: string) {
@@ -316,8 +340,11 @@
       }
     } catch { /* noop */ }
 
-    const keyHandler = (e: KeyboardEvent) => {
-      const meta = e.ctrlKey || e.metaKey;
+      const keyHandler = (e: KeyboardEvent) => {
+        if (isEditableEventTarget(e)) {
+          return;
+        }
+        const meta = e.ctrlKey || e.metaKey;
       if (meta && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         for (const d of filteredDownloads) selectedIds.add(d.id);
@@ -385,29 +412,8 @@
     window.addEventListener('resize', onR);
     setTimeout(onR, 0);
 
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const prev = downloadsVisible;
-          const next = Math.min(prev + VIEW_CHUNK, filteredDownloads.length);
-          if (next > prev) {
-            markSkeletonRange(prev, next);
-            downloadsVisible = next;
-            if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
-              downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
-            }
-            lastVisible = next;
-          }
-        }
-      },
-      { root: downloadsScrollEl, rootMargin: '0px', threshold: 0.1 }
-    );
-    if (downloadsSentinel) io.observe(downloadsSentinel);
-
     return () => {
       window.removeEventListener('resize', onR);
-      io.disconnect();
     };
   });
 
@@ -559,11 +565,8 @@
   let downloadsStart = $state(0);
   let downloadsVisible = $state(10);
   const VIEW_CHUNK = 30;
-  const SCROLL_THRESHOLD_PX = 200;
-  let lastVisible = $state(0);
   let skeletonIds = $state(new Set<number>());
   let _downloadsScrollTick = false;
-  let prevFilteredLength = -1;
 
   const windowedDownloads = $derived(
     filteredDownloads.slice(downloadsStart, Math.min(downloadsVisible, filteredDownloads.length))
@@ -581,6 +584,33 @@
     } catch { /* noop */ }
   }
 
+  function updateVisibleWindow(el: HTMLElement) {
+    const total = filteredDownloads.length;
+    if (total === 0) {
+      downloadsStart = 0;
+      downloadsVisible = 0;
+      return;
+    }
+
+    const rowHeight = DOWNLOAD_ROW_PX;
+    const scrollTop = Math.max(0, el.scrollTop);
+    const clientHeight = Math.max(1, el.clientHeight);
+    const firstVisibleIndex = Math.max(0, Math.floor(scrollTop / rowHeight));
+    const viewportRows = Math.ceil(clientHeight / rowHeight);
+
+    const start = Math.max(0, firstVisibleIndex - VIEW_CHUNK);
+    const desiredEnd = Math.min(total, firstVisibleIndex + viewportRows + VIEW_CHUNK);
+    const maxEnd = Math.min(total, start + DOWNLOAD_MAX_DOM);
+    const end = Math.min(maxEnd, Math.max(desiredEnd, start + VIEW_CHUNK));
+
+    if (end > downloadsVisible) {
+      markSkeletonRange(downloadsVisible, end);
+    }
+
+    downloadsStart = start;
+    downloadsVisible = Math.min(total, Math.max(start + VIEW_CHUNK, end));
+  }
+
   function onDownloadsScroll(event: Event) {
     if (_downloadsScrollTick) return;
     _downloadsScrollTick = true;
@@ -590,22 +620,7 @@
       return;
     }
     requestAnimationFrame(() => {
-      const nearBottomPx = el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_THRESHOLD_PX;
-      const progress = (el.scrollTop + el.clientHeight) / Math.max(1, el.scrollHeight);
-      const nearBottomRatio = progress >= 0.8;
-
-      if (nearBottomPx || nearBottomRatio) {
-        const prev = downloadsVisible;
-        const next = Math.min(prev + VIEW_CHUNK, filteredDownloads.length);
-        if (next > prev) {
-          markSkeletonRange(prev, next);
-          downloadsVisible = next;
-          if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
-            downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
-          }
-          lastVisible = next;
-        }
-      }
+      updateVisibleWindow(el);
       _downloadsScrollTick = false;
     });
   }
@@ -616,24 +631,16 @@
       downloadsStart = 0;
       downloadsVisible = 0;
       skeletonIds = new Set();
-      lastVisible = 0;
-      prevFilteredLength = 0;
       return;
     }
 
-    if (prevFilteredLength === 0) {
+    if (!downloadsScrollEl) {
       downloadsStart = 0;
-      downloadsVisible = Math.min(VIEW_CHUNK, total);
+      downloadsVisible = Math.min(total, DOWNLOAD_MAX_DOM);
+      return;
     }
 
-    if (downloadsVisible > total) downloadsVisible = total;
-    if (downloadsVisible - downloadsStart > DOWNLOAD_MAX_DOM) {
-      downloadsStart = Math.max(0, downloadsVisible - DOWNLOAD_MAX_DOM);
-    }
-    if (downloadsStart > downloadsVisible) downloadsStart = 0;
-    skeletonIds = new Set();
-    lastVisible = downloadsVisible;
-    prevFilteredLength = total;
+    updateVisibleWindow(downloadsScrollEl);
   });
 
   const totalDownloads = $derived($downloads.length);
@@ -645,9 +652,10 @@
   );
   const completedCount = $derived($downloads.filter((d) => d.status === 'completed').length);
   const failedCount = $derived($downloads.filter((d) => d.status === 'failed').length);
-  const selectedCompletedCount = $derived(
-    filteredDownloads.filter((d) => selectedIds.has(d.id) && d.status === 'completed').length
-  );
+  const selectedCompletedCount = $derived.by(() => {
+    const selected = getSelectedDownloads();
+    return selected.filter((d) => d.status === 'completed').length;
+  });
 
   const startableAll = $derived(
     $downloads.filter((d) => d.status === 'available' && !!d.downloadLink).length
@@ -665,23 +673,23 @@
       (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
     ).length
   );
-  const startableSelected = $derived(
-    filteredDownloads.filter(
+  const startableSelected = $derived.by(() => {
+    const selected = getSelectedDownloads();
+    return selected.filter(
       (d) =>
-        selectedIds.has(d.id) &&
         (d.status === 'available' || d.status === 'completed') &&
         !!d.downloadLink
-    ).length
-  );
-  const cancelableSelected = $derived(
-    filteredDownloads.filter(
+    ).length;
+  });
+  const cancelableSelected = $derived.by(() => {
+    const selected = getSelectedDownloads();
+    return selected.filter(
       (d) =>
-        selectedIds.has(d.id) &&
-        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
-    ).length
-  );
+        d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+    ).length;
+  });
   const failedFiltered = $derived(filteredDownloads.filter((d) => d.status === 'failed').length);
-  const deletableSelected = $derived(filteredDownloads.filter((d) => selectedIds.has(d.id)).length);
+  const deletableSelected = $derived.by(() => getSelectedDownloads().length);
   const deletableFiltered = $derived(filteredDownloads.length);
 
   $effect(() => {
@@ -772,10 +780,10 @@
     }
   }
   function startSelected() {
+    const selected = getSelectedDownloads();
     let queued = 0;
-    for (const d of filteredDownloads) {
+    for (const d of selected) {
       if (
-        selectedIds.has(d.id) &&
         (d.status === 'available' || d.status === 'completed') &&
         d.downloadLink
       ) {
@@ -791,13 +799,13 @@
     }
   }
   function cancelSelected() {
-    const lookup = new Map(get(downloads).map((d) => [d.id, d]));
+    const selected = getSelectedDownloads();
     let canceled = 0;
-    for (const id of selectedIds) {
-      const d = lookup.get(id);
+    for (const d of selected) {
       if (
-        d &&
-        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+        d.status === 'downloading' ||
+        d.status === 'pending' ||
+        d.status === 'queued'
       ) {
         cancelDownload(d.id);
         canceled += 1;
@@ -812,16 +820,17 @@
   }
 
   function deleteSelected() {
-    const ids = filteredDownloads.filter((d) => selectedIds.has(d.id)).map((d) => d.id);
-    if (ids.length === 0) {
+    const selected = getSelectedDownloads();
+    if (selected.length === 0) {
       toast.info('No selected downloads to delete');
       return;
     }
-
-    for (const d of filteredDownloads) {
+    const ids = selected.map((d) => d.id);
+    for (const d of selected) {
       if (
-        selectedIds.has(d.id) &&
-        (d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+        d.status === 'downloading' ||
+        d.status === 'pending' ||
+        d.status === 'queued'
       ) {
         cancelDownload(d.id);
       }
@@ -852,9 +861,7 @@
   }
 
   async function openSelectedCompleted() {
-    const items = filteredDownloads.filter(
-      (d) => selectedIds.has(d.id) && d.status === 'completed'
-    );
+    const items = getSelectedDownloads().filter((d) => d.status === 'completed');
     if (items.length === 0) {
       toast.info('Select a completed download first');
       return;
@@ -885,9 +892,7 @@
   }
 
   async function showSelectedCompleted() {
-    const items = filteredDownloads.filter(
-      (d) => selectedIds.has(d.id) && d.status === 'completed'
-    );
+    const items = getSelectedDownloads().filter((d) => d.status === 'completed');
     if (items.length === 0) {
       toast.info('Select a completed download first');
       return;
@@ -1003,9 +1008,7 @@
   }
 
   async function copySelectedLinks() {
-    const links = filteredDownloads
-      .filter((d) => selectedIds.has(d.id) && d.downloadLink)
-      .map((d) => d.downloadLink);
+    const links = getSelectedDownloads().map((d) => d.downloadLink).filter(Boolean);
     if (links.length === 0) {
       toast.info('Select at least one download first');
       return;
@@ -1841,7 +1844,6 @@
             {/if}
           </TableBody>
         </Table>
-        <div bind:this={downloadsSentinel} class="h-0" aria-hidden="true"></div>
       </div>
 
       {#if selectedIds.size > 0}
