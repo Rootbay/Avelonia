@@ -32,11 +32,52 @@
     ChevronDown,
   } from '@lucide/svelte';
 
-  let cpuUsage = $state(0);
-  let usedMemory = $state(0);
-  let totalMemory = $state(0);
-  let totalDiskSpace = $state(0);
-  let availableDiskSpace = $state(0);
+  const SYSTEM_INFO_CACHE_KEY = 'avelonia_dashboard_system_info_v1';
+
+  type SystemInfoSnapshot = {
+    cpuUsage: number;
+    usedMemory: number;
+    totalMemory: number;
+    totalDiskSpace: number;
+    availableDiskSpace: number;
+  };
+
+  function loadSystemInfoSnapshot(): SystemInfoSnapshot | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(SYSTEM_INFO_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      const asNumber = (value: unknown) =>
+        typeof value === 'number' && Number.isFinite(value) ? value : 0;
+      return {
+        cpuUsage: asNumber(parsed.cpuUsage),
+        usedMemory: asNumber(parsed.usedMemory),
+        totalMemory: asNumber(parsed.totalMemory),
+        totalDiskSpace: asNumber(parsed.totalDiskSpace),
+        availableDiskSpace: asNumber(parsed.availableDiskSpace),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveSystemInfoSnapshot(snapshot: SystemInfoSnapshot) {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(SYSTEM_INFO_CACHE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // best-effort cache
+    }
+  }
+
+  const cachedSystemInfo = loadSystemInfoSnapshot();
+  let cpuUsage = $state(cachedSystemInfo?.cpuUsage ?? 0);
+  let usedMemory = $state(cachedSystemInfo?.usedMemory ?? 0);
+  let totalMemory = $state(cachedSystemInfo?.totalMemory ?? 0);
+  let totalDiskSpace = $state(cachedSystemInfo?.totalDiskSpace ?? 0);
+  let availableDiskSpace = $state(cachedSystemInfo?.availableDiskSpace ?? 0);
 
   const downloadStatusLabels: Record<Download['status'], string> = {
     available: 'Available',
@@ -119,6 +160,13 @@
         totalMemory = totalMem;
         totalDiskSpace = totalDisk;
         availableDiskSpace = availDisk;
+        saveSystemInfoSnapshot({
+          cpuUsage: cpu,
+          usedMemory: used,
+          totalMemory: totalMem,
+          totalDiskSpace: totalDisk,
+          availableDiskSpace: availDisk,
+        });
         systemInfoErrorLogged = false;
       } catch (error) {
         console.error('Failed to fetch system info:', error);

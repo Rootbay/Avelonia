@@ -1078,6 +1078,8 @@
   onMount(() => {
     void initBootCheck();
     void refreshNetworkStatus();
+    void loadRegistryItems();
+    void loadTasks();
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {

@@ -89,8 +89,8 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
   }
   const now = Date.now();
   const cache = loadSizeCache();
-  let dirty = false;
   const result: Record<string, string> = {};
+  const refreshQueue: Array<{ link: string; fallbackSize: string }> = [];
 
   for (const download of BUILT_IN_DOWNLOADS) {
     const link = download.downloadLink;
@@ -103,14 +103,23 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
       continue;
     }
 
-    const bytes = await fetchContentLength(link);
-    const resolvedSize = bytes === null ? fallbackSize : formatBytes(bytes);
-    cache[link] = { size: resolvedSize, updatedAt: now };
-    dirty = true;
-    result[link] = resolvedSize;
+    refreshQueue.push({ link, fallbackSize });
   }
 
-  if (dirty) {
+  if (refreshQueue.length > 0) {
+    await Promise.all(
+      refreshQueue.map(async ({ link, fallbackSize }) => {
+        try {
+          const bytes = await fetchContentLength(link);
+          const resolvedSize = bytes === null ? fallbackSize : formatBytes(bytes);
+          cache[link] = { size: resolvedSize, updatedAt: now };
+          result[link] = resolvedSize;
+        } catch {
+          cache[link] = { size: fallbackSize, updatedAt: now };
+          result[link] = fallbackSize;
+        }
+      })
+    );
     saveSizeCache(cache);
   }
 
