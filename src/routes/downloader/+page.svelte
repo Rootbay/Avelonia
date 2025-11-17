@@ -103,7 +103,7 @@
   let statusGroup = $state<StatusGroup>('all');
   let sortBy = $state<SortKey>('name');
   let sortDirection = $state<'asc' | 'desc'>('asc');
-  let selectedIds = $state(new Set<number>());
+  let selectedIds = $state(new SvelteSet<number>());
   const isSelected = (id: number) => selectedIds.has(id);
   let selectAllCheckbox: HTMLInputElement | null = null;
   let announce = $state('');
@@ -296,10 +296,9 @@
       if (value) selectedIds.add(id);
       else selectedIds.delete(id);
     }
-    selectedIds = new SvelteSet(selectedIds);
   }
   function clearSelection() {
-    selectedIds = new SvelteSet();
+    selectedIds.clear();
   }
   function getSelectedDownloads() {
     const all = get(downloads);
@@ -346,25 +345,24 @@
           return;
         }
         const meta = e.ctrlKey || e.metaKey;
-      if (meta && (e.key === 'a' || e.key === 'A')) {
-        e.preventDefault();
-        for (const d of filteredDownloads) selectedIds.add(d.id);
-        selectedIds = new SvelteSet(selectedIds);
-        return;
-      }
-      if (e.key === 'Escape') {
-        clearSelection();
-        return;
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        cancelSelected();
-        return;
-      }
-      if (e.key === 'Enter') {
-        startSelected();
-        return;
-      }
-    };
+        if (meta && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          for (const d of filteredDownloads) selectedIds.add(d.id);
+          return;
+        }
+        if (e.key === 'Escape') {
+          clearSelection();
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          cancelSelected();
+          return;
+        }
+        if (e.key === 'Enter') {
+          startSelected();
+          return;
+        }
+      };
     window.addEventListener('keydown', keyHandler);
     return () => {
       window.removeEventListener('keydown', keyHandler);
@@ -566,7 +564,7 @@
   let downloadsStart = $state(0);
   let downloadsVisible = $state(10);
   const VIEW_CHUNK = 30;
-  let skeletonIds = $state(new Set<number>());
+  let skeletonIds = $state(new SvelteSet<number>());
   let _downloadsScrollTick = false;
 
   const windowedDownloads = $derived(
@@ -577,10 +575,8 @@
     try {
       const ids = filteredDownloads.slice(startIndex, endIndex).map((d) => d.id);
       for (const id of ids) skeletonIds.add(id);
-      skeletonIds = new SvelteSet(skeletonIds);
       setTimeout(() => {
         for (const id of ids) skeletonIds.delete(id);
-        skeletonIds = new SvelteSet(skeletonIds);
       }, 350);
     } catch { /* noop */ }
   }
@@ -631,7 +627,7 @@
     if (total === 0) {
       downloadsStart = 0;
       downloadsVisible = 0;
-      skeletonIds = new SvelteSet();
+      skeletonIds.clear();
       return;
     }
 
@@ -863,7 +859,6 @@
     }
     removeDownloadsByIds(ids);
     for (const id of ids) selectedIds.delete(id);
-    selectedIds = new SvelteSet(selectedIds);
     toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
     void appLog('WARN', `Deleted ${ids.length} selected download(s)`);
   }
@@ -881,7 +876,6 @@
     }
     removeDownloadsByIds(ids);
     for (const id of ids) selectedIds.delete(id);
-    selectedIds = new SvelteSet(selectedIds);
     toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
     void appLog('WARN', `Deleted ${ids.length} filtered download(s)`);
   }
@@ -1000,7 +994,6 @@
         }
       }
     }
-    selectedIds = new SvelteSet(selectedIds);
     lastSelectedIndex = currentIndex;
   }
 
@@ -1013,15 +1006,13 @@
     }
     if (value) selectedIds.add(id);
     else selectedIds.delete(id);
-    selectedIds = new SvelteSet(selectedIds);
     lastSelectedIndex = index;
   }
 
   function invertSelection() {
     const next = new SvelteSet<number>();
-    const visible = new SvelteSet(filteredDownloads.map((d) => d.id));
-    for (const id of visible) {
-      if (!selectedIds.has(id)) next.add(id);
+    for (const d of filteredDownloads) {
+      if (!selectedIds.has(d.id)) next.add(d.id);
     }
     selectedIds = next;
   }

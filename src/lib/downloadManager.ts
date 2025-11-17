@@ -264,17 +264,15 @@ function formatBytesPerSec(bps: number): string {
 
 function updateDownloadById(id: number, mutator: (draft: Download) => void) {
   downloads.update((list) => {
-    let changed = false;
-    const next = list.map((item) => {
-      if (item.id !== id) {
-        return item;
-      }
-      changed = true;
-      const draft = { ...item };
-      mutator(draft);
-      return draft;
-    });
-    return changed ? next : list;
+    const index = list.findIndex((item) => item.id === id);
+    if (index === -1) {
+      return list;
+    }
+    const draft = { ...list[index] };
+    mutator(draft);
+    const next = [...list];
+    next[index] = draft;
+    return next;
   });
 }
 
@@ -394,18 +392,70 @@ export function initDownloadListener() {
 
     const now = Date.now();
     const previous = lastSample.get(id);
+    const snapshot = getDownloadSnapshot(id);
+    const prevStatus = snapshot?.status ?? 'pending';
+    const completed = total > 0 && downloaded >= total;
+    const newStatus = completed ? 'completed' : 'downloading';
 
-    updateDownloadById(id, (draft) => {
-      draft.progress = total === 0 ? -1 : Math.min(100, (downloaded / total) * 100);
-      draft.status = total > 0 && downloaded >= total ? 'completed' : 'downloading';
-      if (draft.status === 'completed') {
-        draft.progress = 100;
-        draft.speed = '';
-        draft.eta = 'Done';
+    let updatedSpeed = false;
+    let speedStr = '';
+    let etaStr = '';
+
+    if (previous) {
+      const deltaBytes = downloaded - previous.bytes;
+      const deltaTime = (now - previous.time) / 1000;
+      if (deltaTime > 0 && deltaBytes >= 0) {
+        const instBps = deltaBytes / deltaTime;
+        const prevAvg = avgSpeedBps.get(id) ?? instBps;
+        const nextAvg = EMA_ALPHA * instBps + (1 - EMA_ALPHA) * prevAvg;
+        avgSpeedBps.set(id, nextAvg);
+
+        const lastEmit = lastUiEmit.get(id) ?? 0;
+        const shouldEmit = now - lastEmit >= UI_UPDATE_MS;
+        if (shouldEmit) {
+          const bps = nextAvg;
+          speedStr = formatBytesPerSec(bps);
+          if (total > 0 && bps > 1) {
+            const remaining = Math.max(0, total - downloaded);
+            const etaSec = Math.max(0, Math.round(remaining / bps));
+            const hrs = Math.floor(etaSec / 3600);
+            const mins = Math.floor((etaSec % 3600) / 60);
+            const secs = etaSec % 60;
+            etaStr =
+              hrs > 0
+                ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+                : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+          } else if (total === 0) {
+            etaStr = '—';
+          }
+          updatedSpeed = true;
+          lastUiEmit.set(id, now);
+        }
       }
-    });
+    }
 
-    if (total > 0 && downloaded >= total) {
+    const shouldUpdateUi =
+      !previous || prevStatus !== newStatus || updatedSpeed || completed;
+
+    if (shouldUpdateUi) {
+      updateDownloadById(id, (draft) => {
+        draft.progress = total === 0 ? -1 : Math.min(100, (downloaded / total) * 100);
+        draft.status = newStatus;
+        if (newStatus === 'completed') {
+          draft.progress = 100;
+          draft.speed = '';
+          draft.eta = 'Done';
+        } else if (updatedSpeed) {
+          draft.speed = speedStr || draft.speed;
+          draft.eta = etaStr || draft.eta;
+        } else if (!previous && total === 0) {
+          draft.eta = '—';
+          draft.speed = '';
+        }
+      });
+    }
+
+    if (completed) {
       lastSample.delete(id);
       avgSpeedBps.delete(id);
       lastUiEmit.delete(id);
@@ -421,51 +471,6 @@ export function initDownloadListener() {
         }
       })();
       return;
-    }
-
-    if (previous) {
-      const deltaBytes = downloaded - previous.bytes;
-      const deltaTime = (now - previous.time) / 1000;
-      if (deltaTime > 0 && deltaBytes >= 0) {
-        const instBps = deltaBytes / deltaTime;
-        const prevAvg = avgSpeedBps.get(id) ?? instBps;
-        const nextAvg = EMA_ALPHA * instBps + (1 - EMA_ALPHA) * prevAvg;
-        avgSpeedBps.set(id, nextAvg);
-
-        const lastEmit = lastUiEmit.get(id) ?? 0;
-        const shouldEmit = now - lastEmit >= UI_UPDATE_MS;
-        if (shouldEmit) {
-          const bps = nextAvg;
-          const speedStr = formatBytesPerSec(bps);
-          let etaStr = '';
-          if (total > 0 && bps > 1) {
-            const remaining = Math.max(0, total - downloaded);
-            const etaSec = Math.max(0, Math.round(remaining / bps));
-            const hrs = Math.floor(etaSec / 3600);
-            const mins = Math.floor((etaSec % 3600) / 60);
-            const secs = etaSec % 60;
-            etaStr =
-              hrs > 0
-                ? `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-                : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-          } else if (total === 0) {
-            etaStr = '—';
-          }
-
-          updateDownloadById(id, (draft) => {
-            if (speedStr) draft.speed = speedStr;
-            if (etaStr) draft.eta = etaStr;
-          });
-          lastUiEmit.set(id, now);
-        }
-      }
-    } else {
-      if (total === 0) {
-        updateDownloadById(id, (draft) => {
-          draft.eta = '—';
-          draft.speed = '';
-        });
-      }
     }
 
     lastSample.set(id, { bytes: downloaded, time: now });
