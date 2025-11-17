@@ -72,6 +72,7 @@
   let selectedPaths = $state(new Set<string>());
   let showSettings = $state(false);
   let exclusions = $state<string[]>([]);
+  let normalizedExclusions = $state<string[]>([]);
   const EXC_KEY = 'avelonia_cleaner_exclusions_v1';
 
   function loadExclusions() {
@@ -91,6 +92,16 @@
       );
     } catch { /* noop */ }
   }
+
+  $effect(() => {
+    normalizedExclusions = Array.from(
+      new Set(
+        exclusions
+          .map((ex) => (ex || '').trim().toLowerCase())
+          .filter((value) => Boolean(value))
+      )
+    );
+  });
 
   onMount(() => {
     loadExclusions();
@@ -158,9 +169,9 @@
 
   function matchesExclusion(p: string): boolean {
     try {
-      for (const ex of exclusions) {
-        if (!ex) continue;
-        if (p.toLowerCase().includes(ex.toLowerCase())) return true;
+      const normalizedPath = (p || '').toLowerCase();
+      for (const pattern of normalizedExclusions) {
+        if (pattern && normalizedPath.includes(pattern)) return true;
       }
     } catch { /* noop */ }
     return false;
@@ -218,7 +229,11 @@
     return items;
   });
 
-  const getAllItemsList = () => resolveCleanerItems(allItems);
+  let allItemsList = $state<CleanerItem[]>([]);
+  $effect(() => {
+    allItemsList = resolveCleanerItems(allItems);
+  });
+  const getAllItemsList = () => allItemsList;
 
   $effect(() => {
     const _fk = filterKind;
@@ -416,7 +431,11 @@
     return items.slice(unifiedStart, end);
   });
 
-  const getUnifiedDisplayList = () => resolveCleanerItems(unifiedDisplayed);
+  let unifiedDisplayList = $state<CleanerItem[]>([]);
+  $effect(() => {
+    unifiedDisplayList = resolveCleanerItems(unifiedDisplayed);
+  });
+  const getUnifiedDisplayList = () => unifiedDisplayList;
 
   let unifiedPadPx = $state(0);
   const unifiedTopPad = $derived(unifiedVirtualize ? unifiedPadPx : 0);

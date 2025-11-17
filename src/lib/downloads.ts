@@ -8,6 +8,9 @@ import { resolveBuiltInDownloadSizes } from './downloadSizeResolver';
 
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
 const DEFAULT_CATALOG_FILENAME = 'avelonia-downloads.json';
+const DOWNLOADS_PERSIST_DELAY_MS = 500;
+let downloadsPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingDownloadsPersist: Download[] | null = null;
 let defaultCatalogPathPromise: Promise<string> | null = null;
 
 export type NewDownloadEntry = {
@@ -85,13 +88,26 @@ async function refreshBuiltInDownloadSizes() {
   }
 }
 
-downloads.subscribe((currentDownloads) => {
+function scheduleDownloadPersistence(list: Download[]) {
   if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(currentDownloads));
-  } catch (error) {
-    console.error('Failed to persist downloads state', error);
-  }
+  pendingDownloadsPersist = list;
+  if (downloadsPersistTimer !== null) return;
+
+  downloadsPersistTimer = window.setTimeout(() => {
+    downloadsPersistTimer = null;
+    const payload = pendingDownloadsPersist;
+    pendingDownloadsPersist = null;
+    if (!payload) return;
+    try {
+      localStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error('Failed to persist downloads state', error);
+    }
+  }, DOWNLOADS_PERSIST_DELAY_MS);
+}
+
+downloads.subscribe((currentDownloads) => {
+  scheduleDownloadPersistence(currentDownloads);
 });
 
 const initialCatalogPath = get(settings).downloader.downloadCatalogPath ?? '';
