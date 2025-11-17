@@ -1,4 +1,4 @@
-import { BUILT_IN_DOWNLOADS } from './builtInDownloads';
+import { loadBuiltInDownloads } from './builtInDownloads';
 
 const SIZE_CACHE_KEY = 'avelonia_builtin_download_size_cache';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // refresh once per week
@@ -101,8 +101,9 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
   const cache = loadSizeCache();
   const result: Record<string, string> = {};
   const refreshQueue: Array<{ link: string; fallbackSize: string }> = [];
+  const builtInDownloads = await loadBuiltInDownloads();
 
-  for (const download of BUILT_IN_DOWNLOADS) {
+  for (const download of builtInDownloads) {
     const link = download.downloadLink;
     const cached = cache[link];
     const needsRefresh = !cached || now - cached.updatedAt > CACHE_TTL_MS;

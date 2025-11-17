@@ -3,7 +3,7 @@ import type { Download } from './downloadManager';
 import { settings, updateDownloaderSettings } from '$lib/settings';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
-import { BUILT_IN_DOWNLOADS } from './builtInDownloads';
+import { loadBuiltInDownloads } from './builtInDownloads';
 import { resolveBuiltInDownloadSizes } from './downloadSizeResolver';
 
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
@@ -23,47 +23,55 @@ export type NewDownloadEntry = {
   downloadLink: string;
 };
 
-function cloneDownload(dl: Download): Download {
-  return {
-    ...dl,
-    tags: dl.tags ? [...dl.tags] : undefined,
-    releases: dl.releases
-      ? dl.releases.map((release) => ({ ...release }))
-      : undefined,
-  };
+function normalizeStoredDownload(download: Download): Download {
+  let status = download.status;
+  if (status === 'downloading' || status === 'pending' || status === 'queued') {
+    status = 'available';
+  }
+  return { ...download, status };
 }
 
-function defaultDownloads(): Download[] {
-  return BUILT_IN_DOWNLOADS.map(cloneDownload);
-}
-
-function loadDownloads(): Download[] {
+function loadDownloadsFromStorage(): Download[] | null {
   if (typeof window === 'undefined') {
-    return defaultDownloads();
+    return null;
   }
   const stored = localStorage.getItem(DOWNLOADS_STORAGE_KEY);
   if (!stored) {
-    return defaultDownloads();
+    return null;
   }
   try {
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) {
-      return defaultDownloads();
+      return null;
     }
-    return parsed.map((d: Download) => {
-      let status = d.status as Download['status'];
-      if (status === 'downloading' || status === 'pending' || status === 'queued') {
-        status = 'available';
-      }
-      return { ...d, status } as Download;
-    });
+    return parsed.map((d: Download) => normalizeStoredDownload(d));
   } catch (error) {
     console.error('Error parsing downloads from localStorage', error);
-    return defaultDownloads();
+    return null;
   }
 }
 
-export const downloads = writable<Download[]>(loadDownloads());
+const initialStoredDownloads = loadDownloadsFromStorage();
+export const downloads = writable<Download[]>(initialStoredDownloads ?? []);
+
+let downloadsInitialized = false;
+async function initializeDownloads(hasStored: Download[] | null) {
+  if (downloadsInitialized) return;
+  downloadsInitialized = true;
+  if (typeof window === 'undefined' || hasStored) {
+    return;
+  }
+  try {
+    const builtIn = await loadBuiltInDownloads();
+    downloads.set(builtIn);
+  } catch (error) {
+    console.error('Failed to load default downloads', error);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  void initializeDownloads(initialStoredDownloads);
+}
 
 async function refreshBuiltInDownloadSizes() {
   if (typeof window === 'undefined') return;
@@ -149,9 +157,10 @@ function scheduleCatalogPersist(list: Download[]) {
 async function persistCatalogFile(path: string, list: Download[]) {
   if (!path) return;
   try {
-    const source = list.length ? list : defaultDownloads();
+    let source = list;
     if (list.length === 0) {
-      downloads.set(defaultDownloads());
+      source = await loadBuiltInDownloads();
+      downloads.set(source);
     }
     const entries = source.map((download) => ({
       name: download.name,
