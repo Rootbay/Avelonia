@@ -64,6 +64,7 @@
   import { sanitizeFileName, normalizeExtension } from '$lib/downloadPath';
   import { prettifyDisplayName } from '$lib/name';
   import { tags as customTags, addTag, BUILT_IN_TAGS } from '$lib/tags';
+  import { SvelteSet } from 'svelte/reactivity';
   import { invoke } from '@tauri-apps/api/core';
   import { settings, updateDownloaderSettings } from '$lib/settings';
 
@@ -295,10 +296,10 @@
       if (value) selectedIds.add(id);
       else selectedIds.delete(id);
     }
-    selectedIds = new Set(selectedIds);
+    selectedIds = new SvelteSet(selectedIds);
   }
   function clearSelection() {
-    selectedIds = new Set();
+    selectedIds = new SvelteSet();
   }
   function getSelectedDownloads() {
     const all = get(downloads);
@@ -348,7 +349,7 @@
       if (meta && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         for (const d of filteredDownloads) selectedIds.add(d.id);
-        selectedIds = new Set(selectedIds);
+        selectedIds = new SvelteSet(selectedIds);
         return;
       }
       if (e.key === 'Escape') {
@@ -576,10 +577,10 @@
     try {
       const ids = filteredDownloads.slice(startIndex, endIndex).map((d) => d.id);
       for (const id of ids) skeletonIds.add(id);
-      skeletonIds = new Set(skeletonIds);
+      skeletonIds = new SvelteSet(skeletonIds);
       setTimeout(() => {
         for (const id of ids) skeletonIds.delete(id);
-        skeletonIds = new Set(skeletonIds);
+        skeletonIds = new SvelteSet(skeletonIds);
       }, 350);
     } catch { /* noop */ }
   }
@@ -630,7 +631,7 @@
     if (total === 0) {
       downloadsStart = 0;
       downloadsVisible = 0;
-      skeletonIds = new Set();
+      skeletonIds = new SvelteSet();
       return;
     }
 
@@ -837,7 +838,7 @@
     }
     removeDownloadsByIds(ids);
     for (const id of ids) selectedIds.delete(id);
-    selectedIds = new Set(selectedIds);
+    selectedIds = new SvelteSet(selectedIds);
     toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
     void appLog('WARN', `Deleted ${ids.length} selected download(s)`);
   }
@@ -855,7 +856,7 @@
     }
     removeDownloadsByIds(ids);
     for (const id of ids) selectedIds.delete(id);
-    selectedIds = new Set(selectedIds);
+    selectedIds = new SvelteSet(selectedIds);
     toast.success(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}`);
     void appLog('WARN', `Deleted ${ids.length} filtered download(s)`);
   }
@@ -974,7 +975,7 @@
         }
       }
     }
-    selectedIds = new Set(selectedIds);
+    selectedIds = new SvelteSet(selectedIds);
     lastSelectedIndex = currentIndex;
   }
 
@@ -987,13 +988,13 @@
     }
     if (value) selectedIds.add(id);
     else selectedIds.delete(id);
-    selectedIds = new Set(selectedIds);
+    selectedIds = new SvelteSet(selectedIds);
     lastSelectedIndex = index;
   }
 
   function invertSelection() {
-    const next = new Set<number>();
-    const visible = new Set(filteredDownloads.map((d) => d.id));
+    const next = new SvelteSet<number>();
+    const visible = new SvelteSet(filteredDownloads.map((d) => d.id));
     for (const id of visible) {
       if (!selectedIds.has(id)) next.add(id);
     }

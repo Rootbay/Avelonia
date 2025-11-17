@@ -19,6 +19,7 @@
     Ellipsis,
   } from '@lucide/svelte';
   import { ModeWatcher, toggleMode } from 'mode-watcher';
+  import { SvelteSet } from 'svelte/reactivity';
   import {
     Sidebar,
     SidebarContent,
@@ -304,7 +305,7 @@
     const k = vtKeyOf(it);
     if (vtExpanded.has(k)) vtExpanded.delete(k);
     else vtExpanded.add(k);
-    vtExpanded = new Set(vtExpanded);
+    vtExpanded = new SvelteSet(vtExpanded);
   }
   type VtTotalsCounts = {
     clean: number;
@@ -328,13 +329,18 @@
   });
 
   type MenuIcon = Component<IconProps>;
+  type AppRoute =
+    | '/dashboard'
+    | '/optimize'
+    | '/downloader'
+    | '/cleaner';
 
   type ButtonSnippetContext = {
     props?: Record<string, unknown> & { class?: string };
   };
 
   const menuItems: Array<{
-    href: string;
+    href: AppRoute;
     label: string;
     icon: MenuIcon;
     showBadge?: boolean;
@@ -1154,4 +1160,3 @@
 </Dialog>
 
 <Toaster richColors closeButton duration={4000} position="bottom-right" />
-

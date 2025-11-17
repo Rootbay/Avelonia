@@ -26,6 +26,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import { pushLog } from '$lib/logStore';
   import { Trash2, RefreshCw, FolderOpen, Eye, Search as SearchIcon } from '@lucide/svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type StartupItem = { path: string; name: string };
 
@@ -65,7 +66,7 @@
       const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
       startupItems = Array.isArray(items) ? items : [];
       console.debug('[VT] startup items loaded:', startupItems.length);
-      selectedStartup = new Set();
+      selectedStartup = new SvelteSet();
       startupLoaded = true;
       startupVisible = Math.min(startupItems.length, 50);
     } catch (e) {
@@ -98,9 +99,9 @@
         }
       }
       if (changed) {
-        const keep = new Set(selectedStartup);
+        const keep = new SvelteSet(selectedStartup);
         startupItems = next;
-        selectedStartup = new Set(Array.from(keep).filter((p) => nextSet.has(p)));
+        selectedStartup = new SvelteSet(Array.from(keep).filter((p) => nextSet.has(p)));
         startupVisible = Math.min(Math.max(50, startupVisible), startupItems.length);
       }
     } catch {
@@ -129,7 +130,7 @@
   function toggleStartup(path: string) {
     if (selectedStartup.has(path)) selectedStartup.delete(path);
     else selectedStartup.add(path);
-    selectedStartup = new Set(selectedStartup);
+    selectedStartup = new SvelteSet(selectedStartup);
   }
 
   function onStartupScroll(event: Event) {
@@ -174,7 +175,7 @@
         toast.info(info);
         pushLog('INFO', info, 'Optimize');
       }
-      selectedStartup = new Set();
+      selectedStartup = new SvelteSet();
       await reloadStartupItems();
     } catch (e) {
       const err = `Failed to remove startup items: ${e}`;
@@ -217,8 +218,8 @@
   function toggleAllStartup() {
     if (filteredStartupItems.length === 0) return;
     selectedStartup = allStartupSelected
-      ? new Set()
-      : new Set(filteredStartupItems.map((item) => item.path));
+      ? new SvelteSet()
+      : new SvelteSet(filteredStartupItems.map((item) => item.path));
   }
 
   $effect(() => {

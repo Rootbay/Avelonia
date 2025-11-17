@@ -43,6 +43,7 @@
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
   import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
   import { Trash2, Scan, Eraser, Ellipsis } from '@lucide/svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   interface FileEntry {
     path: string;
@@ -68,7 +69,7 @@
   let filterKind = $state<'all' | Kind>('all');
   let largeMinMB = $state(100);
   let dupGroups = $state<Array<{ hash: string; size: number; files: string[] }>>([]);
-  let selectedPaths = $state(new Set<string>());
+  let selectedPaths = new SvelteSet<string>();
   let showSettings = $state(false);
   let exclusions = $state<string[]>([]);
   const EXC_KEY = 'avelonia_cleaner_exclusions_v1';
@@ -175,7 +176,7 @@
   const allItems = $derived.by<CleanerItem[]>(() => {
     const cap = Math.max(500, unifiedCap);
     const items: CleanerItem[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const term = qDeb.trim().toLowerCase();
     function tryPush(it: CleanerItem) {
       const p = it.path;
@@ -541,7 +542,7 @@
     emptyFolders = [];
     brokenShortcuts = [];
     dupGroups = [];
-    selectedPaths = new Set();
+    selectedPaths = new SvelteSet();
     tempQueue = [];
     tempTruncated = false;
     tempReportedTotal = 0;
@@ -559,18 +560,18 @@
   }
 
   function toggleSelectUnified(p: string) {
-    const next = new Set(selectedPaths);
+    const next = new SvelteSet(selectedPaths);
     if (next.has(p)) next.delete(p);
     else next.add(p);
     selectedPaths = next;
   }
 
   function clearSelectionUnified() {
-    selectedPaths = new Set();
+    selectedPaths = new SvelteSet();
   }
 
   function setSelectionForKind(kind: 'all' | Kind) {
-    const next = new Set(selectedPaths);
+    const next = new SvelteSet(selectedPaths);
     for (const it of getAllItemsList()) {
       if (kind === 'all' || it.kind === kind) next.add(it.path);
     }
@@ -630,7 +631,7 @@
 
   function autoSelectDuplicatesKeepOne() {
     if (dupGroups.length === 0) return;
-    const next = new Set(selectedPaths);
+    const next = new SvelteSet(selectedPaths);
     for (const g of dupGroups) {
       if (!g.files || g.files.length < 2) continue;
       const sorted = [...g.files].sort();
@@ -826,7 +827,7 @@
       brokenShortcuts = brokenShortcuts.filter((f) => !filesToDelete.includes(f.path));
 
       filesToDelete = [];
-      selectedPaths = new Set();
+      selectedPaths = new SvelteSet();
     } catch (error) {
       message = `Error deleting files: ${error}`;
       console.error(error);
@@ -933,7 +934,7 @@
             variant="ghost"
             size="sm"
             onclick={() => {
-              selectedPaths = new Set();
+              selectedPaths = new SvelteSet();
             }}>Clear selection</Button
           >
         </div>

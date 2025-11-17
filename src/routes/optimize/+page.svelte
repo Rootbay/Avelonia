@@ -49,6 +49,7 @@
     ListChecks,
     Flag,
   } from '@lucide/svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   import TweaksPanel from './components/TweaksPanel.svelte';
@@ -269,7 +270,7 @@
         toast.info('No entries removed');
         pushLog('INFO', 'No registry entries removed', 'Optimize');
       }
-      selectedReg = new Set();
+      selectedReg = new SvelteSet();
       await reloadRegistryItems();
       monitorRegistryWatchdog([...pendingRegistry]);
 
@@ -511,7 +512,7 @@
           startupRegItems.map((i) => i.name).slice(0, 10)
         );
       } catch { /* noop */ }
-      selectedReg = new Set();
+      selectedReg = new SvelteSet();
       registryLoaded = true;
       registryVisible = Math.min(startupRegItems.length, 50);
     } catch (e) {
@@ -547,8 +548,8 @@
       }
       if (changed) {
         startupRegItems = next;
-        const keep = new Set(selectedReg);
-        selectedReg = new Set(Array.from(keep).filter((k) => nextSet.has(k)));
+      const keep = new SvelteSet(selectedReg);
+      selectedReg = new SvelteSet(Array.from(keep).filter((k) => nextSet.has(k)));
         registryVisible = Math.min(Math.max(50, registryVisible), startupRegItems.length);
       }
     } catch { /* noop */ } finally {
@@ -594,7 +595,7 @@
     const id = regId(it);
     if (selectedReg.has(id)) selectedReg.delete(id);
     else selectedReg.add(id);
-    selectedReg = new Set(selectedReg);
+    selectedReg = new SvelteSet(selectedReg);
   }
   let _registryScrollTick = false;
   function onRegistryScroll(event: Event) {
@@ -747,7 +748,7 @@
         }
       }
       await loadTasks();
-      selectedTasks = new Set();
+      selectedTasks = new SvelteSet();
     } catch (e) {
       console.error(e);
       message = `Action failed: ${e}`;
@@ -820,7 +821,9 @@
 
   function toggleAllRegistry() {
     if (filteredRegistryItems.length === 0) return;
-    selectedReg = allRegistrySelected ? new Set() : new Set(filteredRegistryItems.map(regId));
+    selectedReg = allRegistrySelected
+      ? new SvelteSet()
+      : new SvelteSet(filteredRegistryItems.map(regId));
   }
 
   $effect(() => {
@@ -896,14 +899,14 @@
   function toggleTask(name: string) {
     if (selectedTasks.has(name)) selectedTasks.delete(name);
     else selectedTasks.add(name);
-    selectedTasks = new Set(selectedTasks);
+    selectedTasks = new SvelteSet(selectedTasks);
   }
 
   function toggleAllTasks() {
     const slice = sortedTasks.slice(tasksStart, tasksVisible);
     if (slice.length === 0) return;
-    if (allTasksSelected) selectedTasks = new Set();
-    else selectedTasks = new Set(slice.map((t) => t.name));
+    if (allTasksSelected) selectedTasks = new SvelteSet();
+    else selectedTasks = new SvelteSet(slice.map((t) => t.name));
   }
 
   function isLikelyProtected(name: string): boolean {
@@ -927,7 +930,7 @@
   function confirmRunAction() {
     showTaskConfirm = false;
     taskAction = pendingAction;
-    selectedTasks = new Set(pendingNames);
+    selectedTasks = new SvelteSet(pendingNames);
     void runSelectedTasks();
   }
 

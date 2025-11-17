@@ -23,14 +23,15 @@
     TableBody,
     TableCell,
   } from '$lib/components/ui/table';
-  import {
-    Cpu,
-    MemoryStick,
-    HardDrive,
-    DownloadIcon,
-    ChevronRight,
-    ChevronDown,
-  } from '@lucide/svelte';
+import {
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  DownloadIcon,
+  ChevronRight,
+  ChevronDown,
+} from '@lucide/svelte';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const SYSTEM_INFO_CACHE_KEY = 'avelonia_dashboard_system_info_v1';
 
@@ -187,7 +188,7 @@
     };
   });
 
-  const trackedDownloads = new Map<number, Download['status']>();
+  const trackedDownloads = new SvelteMap<number, Download['status']>();
   let downloadsSnapshotReady = false;
 
   $effect(() => {
@@ -201,7 +202,7 @@
       return;
     }
 
-    const seen = new Set<number>();
+    const seen = new SvelteSet<number>();
     for (const dl of current) {
       seen.add(dl.id);
       const previousStatus = trackedDownloads.get(dl.id);
@@ -243,7 +244,7 @@
   let initialLogLoading = $state(true);
   let logsScrollEl: HTMLDivElement | null = null;
   let logsSentinel: HTMLDivElement | null = null;
-  let _logsTick = false;
+  let _logsTick = $state(false);
   let prevLogLen = $state(0);
 
   const windowedLogs = $derived(
@@ -282,7 +283,7 @@
   type VtGroup = { header: number; indices: number[] };
   const vtGroups = $derived.by(() => {
     const list = windowedLogs as LogEntry[];
-    const used = new Set<number>();
+    const used = new SvelteSet<number>();
     const out: VtGroup[] = [];
     const THRESH = 5 * 60;
     let current: { header: number; indices: number[]; headerSec: number } | null = null;
@@ -360,19 +361,19 @@
     return out;
   });
   const vtGroupIndexMap = $derived.by(() => {
-    const m = new Map<number, VtGroup>();
+    const m = new SvelteMap<number, VtGroup>();
     for (const g of vtGroups) {
       for (const k of g.indices) m.set(k, g);
     }
     return m;
   });
 
-  const vtHeaderSet = $derived(new Set(vtGroups.map((g) => g.header)));
+  const vtHeaderSet = $derived(new SvelteSet(vtGroups.map((g) => g.header)));
   let vtCollapsed = $state(new Set<number>());
   let vtKnownHeaders = $state(new Set<number>());
   
   $effect(() => {
-    const starts = new Set(vtGroups.map((g) => g.header));
+    const starts = new SvelteSet(vtGroups.map((g) => g.header));
     let changedCollapsed = false;
     let changedKnown = false;
     for (const s of starts) {
@@ -397,14 +398,14 @@
         changedKnown = true;
       }
     }
-    if (changedCollapsed) vtCollapsed = new Set(vtCollapsed);
-    if (changedKnown) vtKnownHeaders = new Set(vtKnownHeaders);
+    if (changedCollapsed) vtCollapsed = new SvelteSet(vtCollapsed);
+    if (changedKnown) vtKnownHeaders = new SvelteSet(vtKnownHeaders);
   });
 
   function toggleVtGroup(headerIndex: number) {
     if (vtCollapsed.has(headerIndex)) vtCollapsed.delete(headerIndex);
     else vtCollapsed.add(headerIndex);
-    vtCollapsed = new Set(vtCollapsed);
+    vtCollapsed = new SvelteSet(vtCollapsed);
   }
 
   const logsAfter = $derived(Math.max(0, $logStore.length - (logsStart + windowedLogs.length)));
@@ -412,10 +413,10 @@
   function markLogSkeletonRange(startIndex: number, endIndex: number) {
     try {
       for (let i = startIndex; i < endIndex; i++) logsSkeleton.add(i);
-      logsSkeleton = new Set(logsSkeleton);
+      logsSkeleton = new SvelteSet(logsSkeleton);
       setTimeout(() => {
         for (let i = startIndex; i < endIndex; i++) logsSkeleton.delete(i);
-        logsSkeleton = new Set(logsSkeleton);
+        logsSkeleton = new SvelteSet(logsSkeleton);
       }, 350);
     } catch { /* noop */ }
   }
@@ -620,29 +621,29 @@
         >
           <Table class="w-full">
             <TableHeader
-              class="sticky top-0 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70"
+              class="sticky top-0 bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70"
             >
-              <TableRow class="!border-0">
-                <TableHead class="w-[80px] text-xs text-muted-foreground">Time</TableHead>
-                <TableHead class="w-[80px] text-xs text-muted-foreground">Level</TableHead>
+              <TableRow class="border-0!">
+                <TableHead class="w-20 text-xs text-muted-foreground">Time</TableHead>
+                <TableHead class="w-20 text-xs text-muted-foreground">Level</TableHead>
                 <TableHead class="text-xs text-muted-foreground">Message</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {#if initialLogLoading}
                 {#each Array.from({ length: 6 }) as _, ii}
-                  <TableRow class="!border-0">
-                    <TableCell class="w-[80px]"
+                  <TableRow class="border-0!">
+                    <TableCell class="w-20"
                       ><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell
                     >
-                    <TableCell class="w-[80px]"
+                    <TableCell class="w-20"
                       ><Skeleton class="h-3 w-12" aria-hidden="true" /></TableCell
                     >
                     <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
                   </TableRow>
                 {/each}
               {:else if $logStore.length === 0}
-                <TableRow class="!border-0">
+                <TableRow class="border-0!">
                   <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
                     No activity recorded yet.
                   </TableCell>
@@ -658,11 +659,11 @@
                 {/if}
                 {#each windowedLogs as log, i (logsStart + i)}
                   {#if logsSkeleton.has(logsStart + i)}
-                    <TableRow class="!border-0" aria-hidden="true">
-                      <TableCell class="w-[80px]"
+                    <TableRow class="border-0!" aria-hidden="true">
+                      <TableCell class="w-20"
                         ><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell
                       >
-                      <TableCell class="w-[80px]"
+                      <TableCell class="w-20"
                         ><Skeleton class="h-3 w-12" aria-hidden="true" /></TableCell
                       >
                       <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
@@ -670,7 +671,7 @@
                   {:else if vtHeaderSet.has(i)}
                     {@const g = vtGroupIndexMap.get(i) as VtGroup}
                     <TableRow
-                      class="!border-0 bg-muted/20 hover:bg-muted/30 cursor-pointer"
+                      class="border-0! bg-muted/20 hover:bg-muted/30 cursor-pointer"
                       onclick={() => toggleVtGroup(i)}
                       role="button"
                       aria-expanded={!vtCollapsed.has(i)}
@@ -695,7 +696,7 @@
                     </TableRow>
                     {#if !vtCollapsed.has(i)}
                       {#each g.indices as gi}
-                        <TableRow class="!border-0 hover:bg-muted/30">
+                        <TableRow class="border-0! hover:bg-muted/30">
                           <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
                             >{windowedLogs[gi].timestamp}</TableCell
                           >
@@ -715,7 +716,7 @@
                   {:else if vtGroupIndexMap.has(i)}
                     <!-- Inside a group (collapsed or expanded): skip individual row; items render under header -->
                   {:else}
-                    <TableRow class="!border-0 hover:bg-muted/30">
+                    <TableRow class="border-0! hover:bg-muted/30">
                       <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
                         >{log.timestamp}</TableCell
                       >
