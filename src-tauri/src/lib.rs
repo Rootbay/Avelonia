@@ -478,6 +478,7 @@ pub fn run() {
             vt::vt_get_status,
             vt::vt_set_api_key,
             vt::vt_load_cache,
+            vt::vt_clear_cache,
             vt::vt_scan_startup,
             vt::vt_scan_registry,
             vt::vt_scan_all,

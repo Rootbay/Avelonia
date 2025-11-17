@@ -1,4 +1,4 @@
-﻿use dashmap::DashMap;
+use dashmap::DashMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -117,9 +117,15 @@ fn get_config_dir() -> PathBuf {
     std::env::temp_dir().join("avelonia")
 }
 
-fn cache_file_path() -> PathBuf { get_config_dir().join("vt_cache.json") }
-fn key_file_path() -> PathBuf { get_config_dir().join("vt_key.json") }
-fn snapshot_file_path() -> PathBuf { get_config_dir().join("vt_snapshot.json") }
+fn cache_file_path() -> PathBuf {
+    get_config_dir().join("vt_cache.json")
+}
+fn key_file_path() -> PathBuf {
+    get_config_dir().join("vt_key.json")
+}
+fn snapshot_file_path() -> PathBuf {
+    get_config_dir().join("vt_snapshot.json")
+}
 
 fn load_cache_from_disk() -> HashMap<String, CacheEntry> {
     let path = cache_file_path();
@@ -149,8 +155,12 @@ fn load_key_from_disk() -> Option<String> {
     let path = key_file_path();
     if let Ok(bytes) = fs::read(path) {
         #[derive(Deserialize)]
-        struct KeyWrap { key: String }
-        if let Ok(v) = serde_json::from_slice::<KeyWrap>(&bytes) { return Some(v.key); }
+        struct KeyWrap {
+            key: String,
+        }
+        if let Ok(v) = serde_json::from_slice::<KeyWrap>(&bytes) {
+            return Some(v.key);
+        }
     }
     None
 }
@@ -159,8 +169,13 @@ fn save_key_to_disk(key: &str) {
     let dir = get_config_dir();
     let _ = fs::create_dir_all(&dir);
     #[derive(Serialize)]
-    struct KeyWrap<'a> { key: &'a str }
-    let _ = fs::write(key_file_path(), serde_json::to_vec_pretty(&KeyWrap { key }).unwrap_or_default());
+    struct KeyWrap<'a> {
+        key: &'a str,
+    }
+    let _ = fs::write(
+        key_file_path(),
+        serde_json::to_vec_pretty(&KeyWrap { key }).unwrap_or_default(),
+    );
 }
 
 fn compute_sha256(path: &Path) -> Result<String, String> {
@@ -172,7 +187,9 @@ fn compute_sha256(path: &Path) -> Result<String, String> {
         let n = reader
             .read(&mut buf)
             .map_err(|e| format!("read failed: {}", e))?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
@@ -225,9 +242,16 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
         self_: Option<String>,
     }
     #[derive(Deserialize)]
-    struct RespAttrs { last_analysis_stats: Option<Stats> }
+    struct RespAttrs {
+        last_analysis_stats: Option<Stats>,
+    }
     #[derive(Deserialize)]
-    struct Stats { malicious: Option<u32>, suspicious: Option<u32>, harmless: Option<u32>, undetected: Option<u32> }
+    struct Stats {
+        malicious: Option<u32>,
+        suspicious: Option<u32>,
+        harmless: Option<u32>,
+        undetected: Option<u32>,
+    }
 
     let root: RespRoot = resp
         .json()
@@ -247,7 +271,13 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
             harmless = st.harmless.unwrap_or(0);
             undetected = st.undetected.unwrap_or(0);
             positives = malicious.saturating_add(suspicious);
-            verdict = if malicious > 0 { Verdict::Malicious } else if suspicious > 0 { Verdict::Suspicious } else { Verdict::Clean };
+            verdict = if malicious > 0 {
+                Verdict::Malicious
+            } else if suspicious > 0 {
+                Verdict::Suspicious
+            } else {
+                Verdict::Clean
+            };
         }
     }
     let link = Some(format!("https://www.virustotal.com/gui/file/{}", sha256));
@@ -273,15 +303,25 @@ async fn ensure_rate_limit(state: &VtState) {
             let diff = now.saturating_sub(prev);
             if diff < PUBLIC_API_INTERVAL_SECS {
                 PUBLIC_API_INTERVAL_SECS - diff
-            } else { 0 }
-        } else { 0 }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     };
-    if wait_secs > 0 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
+    if wait_secs > 0 {
+        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+    }
     let mut guard = state.last_req.lock().unwrap();
     *guard = Some(epoch_now());
 }
 
-async fn lookup_or_fetch(state: &State<'_, VtState>, sha256: &str, force: bool) -> Result<CacheEntry, String> {
+async fn lookup_or_fetch(
+    state: &State<'_, VtState>,
+    sha256: &str,
+    force: bool,
+) -> Result<CacheEntry, String> {
     if !force {
         if let Some(entry) = state.cache.get(sha256) {
             let age = epoch_now().saturating_sub(entry.last_checked);
@@ -290,8 +330,16 @@ async fn lookup_or_fetch(state: &State<'_, VtState>, sha256: &str, force: bool) 
             }
         }
     }
-    let key_opt = state.api_key.lock().unwrap().clone().or_else(load_key_from_disk);
-    let key = match key_opt { Some(k) => k, None => return Err("VirusTotal API key not set".into()) };
+    let key_opt = state
+        .api_key
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(load_key_from_disk);
+    let key = match key_opt {
+        Some(k) => k,
+        None => return Err("VirusTotal API key not set".into()),
+    };
     let client = Client::builder()
         .user_agent("Avelonia/0.1 (vt)")
         .timeout(Duration::from_secs(30))
@@ -317,7 +365,10 @@ fn cache_needs_refresh(state: &VtState, sha256: &str) -> bool {
 pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, String> {
     state.ensure_cache_loaded();
     let key_set = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
-    Ok(VtStatus { key_set, cached_items: state.cache.len() })
+    Ok(VtStatus {
+        key_set,
+        cached_items: state.cache.len(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -329,39 +380,55 @@ struct VtSnapshot {
 
 fn load_snapshot() -> VtSnapshot {
     if let Ok(bytes) = fs::read(snapshot_file_path()) {
-        if let Ok(s) = serde_json::from_slice::<VtSnapshot>(&bytes) { return s; }
+        if let Ok(s) = serde_json::from_slice::<VtSnapshot>(&bytes) {
+            return s;
+        }
     }
     VtSnapshot::default()
 }
 
 fn save_snapshot(s: &VtSnapshot) {
     let _ = fs::create_dir_all(get_config_dir());
-    if let Ok(js) = serde_json::to_vec_pretty(s) { let _ = fs::write(snapshot_file_path(), js); }
+    if let Ok(js) = serde_json::to_vec_pretty(s) {
+        let _ = fs::write(snapshot_file_path(), js);
+    }
 }
 
 #[cfg(target_os = "windows")]
 fn collect_startup_keys_for_snapshot() -> Vec<String> {
     let mut out = Vec::new();
     let items = resolve_startup_shortcut_targets();
-    for (_d, p) in items { out.push(p); }
+    for (_d, p) in items {
+        out.push(p);
+    }
     out
 }
 #[cfg(not(target_os = "windows"))]
-fn collect_startup_keys_for_snapshot() -> Vec<String> { Vec::new() }
+fn collect_startup_keys_for_snapshot() -> Vec<String> {
+    Vec::new()
+}
 
 #[cfg(target_os = "windows")]
 fn collect_registry_keys_for_snapshot() -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(items) = crate::optimize::list_registry_run() {
-        for it in items { out.push(format!("{}|{}|{}", it.hive, it.key, it.name)); }
+        for it in items {
+            out.push(format!("{}|{}|{}", it.hive, it.key, it.name));
+        }
     }
     out
 }
 #[cfg(not(target_os = "windows"))]
-fn collect_registry_keys_for_snapshot() -> Vec<String> { Vec::new() }
+fn collect_registry_keys_for_snapshot() -> Vec<String> {
+    Vec::new()
+}
 
 fn build_current_snapshot(prev_last_scan: u64) -> VtSnapshot {
-    VtSnapshot { last_scan: prev_last_scan, startup: collect_startup_keys_for_snapshot(), registry: collect_registry_keys_for_snapshot() }
+    VtSnapshot {
+        last_scan: prev_last_scan,
+        startup: collect_startup_keys_for_snapshot(),
+        registry: collect_registry_keys_for_snapshot(),
+    }
 }
 
 fn has_new(prev: &VtSnapshot, cur: &VtSnapshot) -> bool {
@@ -372,18 +439,37 @@ fn has_new(prev: &VtSnapshot, cur: &VtSnapshot) -> bool {
 }
 
 #[tauri::command]
-pub fn vt_set_api_key(state: State<'_, VtState>, key: Option<String>, persist: Option<bool>) -> Result<(), String> {
+pub fn vt_set_api_key(
+    state: State<'_, VtState>,
+    key: Option<String>,
+    persist: Option<bool>,
+) -> Result<(), String> {
     let mut guard = state.api_key.lock().unwrap();
     *guard = key.clone();
     if let Some(true) = persist {
-        if let Some(k) = key { save_key_to_disk(&k); }
+        if let Some(k) = key.as_ref() {
+            save_key_to_disk(k);
+        } else {
+            let _ = fs::remove_file(key_file_path());
+        }
     }
     Ok(())
 }
 
 #[tauri::command]
+pub fn vt_clear_cache(state: State<'_, VtState>) -> Result<(), String> {
+    state.cache.clear();
+    state.cache_loaded.store(false, Ordering::Release);
+    let _ = fs::remove_file(cache_file_path());
+    Ok(())
+}
+
+#[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(usize, usize), String> {
+pub fn vt_scan_needed(
+    state: State<'_, VtState>,
+    limit: Option<u32>,
+) -> Result<(usize, usize), String> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(50).max(1).min(200) as usize;
     let mut need_startup = 0usize;
@@ -392,18 +478,26 @@ pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(
     let items = resolve_startup_shortcut_targets();
     for (_display, path) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
-        if !pb.exists() || !pb.is_file() { continue; }
+        if !pb.exists() || !pb.is_file() {
+            continue;
+        }
         if let Ok(sha) = compute_sha256(&pb) {
-            if cache_needs_refresh(&state, &sha) { need_startup += 1; }
+            if cache_needs_refresh(&state, &sha) {
+                need_startup += 1;
+            }
         }
     }
 
     let items = resolve_registry_run_targets();
     for (_display, path, _hive, _key, _name) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
-        if !pb.exists() || !pb.is_file() { continue; }
+        if !pb.exists() || !pb.is_file() {
+            continue;
+        }
         if let Ok(sha) = compute_sha256(&pb) {
-            if cache_needs_refresh(&state, &sha) { need_registry += 1; }
+            if cache_needs_refresh(&state, &sha) {
+                need_registry += 1;
+            }
         }
     }
 
@@ -412,7 +506,12 @@ pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn vt_scan_needed(_state: State<'_, VtState>, _limit: Option<u32>) -> Result<(usize, usize), String> { Ok((0, 0)) }
+pub fn vt_scan_needed(
+    _state: State<'_, VtState>,
+    _limit: Option<u32>,
+) -> Result<(usize, usize), String> {
+    Ok((0, 0))
+}
 
 #[tauri::command]
 pub fn vt_load_cache(state: State<'_, VtState>) -> Result<usize, String> {
@@ -451,71 +550,109 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
         for (k, v) in std::env::vars() {
             let up = k.to_uppercase();
             let low = k.to_lowercase();
-            let pats = [format!("%{}%", k), format!("%{}%", up), format!("%{}%", low)];
-            for pat in pats { out = out.replace(&pat, &v); }
+            let pats = [
+                format!("%{}%", k),
+                format!("%{}%", up),
+                format!("%{}%", low),
+            ];
+            for pat in pats {
+                out = out.replace(&pat, &v);
+            }
         }
         out
     }
     let mut s = cmd.trim().to_string();
-    if s.is_empty() { return None; }
-    if s.ends_with('"') && !s.starts_with('"') { s = s.trim_end_matches('"').to_string(); }
+    if s.is_empty() {
+        return None;
+    }
+    if s.ends_with('"') && !s.starts_with('"') {
+        s = s.trim_end_matches('"').to_string();
+    }
     let mut first = if s.starts_with('"') {
         s.split('"').nth(1).unwrap_or("")
     } else {
         s.split_whitespace().next().unwrap_or("")
     };
-    if first.is_empty() { return None; }
+    if first.is_empty() {
+        return None;
+    }
     let expanded = expand_env_case_insensitive(first);
     let mut p = PathBuf::from(&expanded);
-    if p.exists() { return Some(p.display().to_string()); }
+    if p.exists() {
+        return Some(p.display().to_string());
+    }
     first = first.trim_end_matches(&[',', ';', '.'][..]);
     let expanded2 = expand_env_case_insensitive(first);
     p = PathBuf::from(&expanded2);
-    if p.exists() { return Some(p.display().to_string()); }
+    if p.exists() {
+        return Some(p.display().to_string());
+    }
 
     if Path::new(&expanded2).extension().is_none() {
         let mut cand = PathBuf::from(&expanded2);
         cand.set_extension("exe");
-        if cand.exists() { return Some(cand.display().to_string()); }
+        if cand.exists() {
+            return Some(cand.display().to_string());
+        }
     }
 
     let lower = first.to_lowercase();
     if lower.ends_with(".exe") && !lower.contains('\\') && !lower.contains('/') {
         let mut roots: Vec<PathBuf> = Vec::new();
-        if let Some(system_root) = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR")) {
+        if let Some(system_root) =
+            std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
+        {
             roots.push(PathBuf::from(&system_root).join("System32"));
             roots.push(PathBuf::from(&system_root).join("SysWOW64"));
         }
         if let Some(path) = std::env::var_os("PATH") {
-            for part in std::env::split_paths(&path) { roots.push(part); }
+            for part in std::env::split_paths(&path) {
+                roots.push(part);
+            }
         }
         for root in roots {
             let cand = root.join(&first);
-            if cand.exists() { return Some(cand.display().to_string()); }
+            if cand.exists() {
+                return Some(cand.display().to_string());
+            }
         }
     }
 
     let lower_all = s.to_lowercase();
     if let Some(idx) = lower_all.rfind(".exe") {
         let end = idx + 4;
-        let start = s[..end].rfind(|c| c == ' ' || c == '"' || c == '\\' || c == '\t').map(|i| i + 1).unwrap_or(0);
+        let start = s[..end]
+            .rfind(|c| c == ' ' || c == '"' || c == '\\' || c == '\t')
+            .map(|i| i + 1)
+            .unwrap_or(0);
         let token = s[start..end].trim_matches('"');
         if !token.is_empty() {
             let exp = expand_env_case_insensitive(token);
             let q = PathBuf::from(exp.trim_matches('"'));
-            if q.exists() { return Some(q.display().to_string()); }
-            if let Some(name) = Path::new(token).file_name().map(|x| x.to_string_lossy().to_string()) {
+            if q.exists() {
+                return Some(q.display().to_string());
+            }
+            if let Some(name) = Path::new(token)
+                .file_name()
+                .map(|x| x.to_string_lossy().to_string())
+            {
                 let mut roots: Vec<PathBuf> = Vec::new();
-                if let Some(system_root) = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR")) {
+                if let Some(system_root) =
+                    std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
+                {
                     roots.push(PathBuf::from(&system_root).join("System32"));
                     roots.push(PathBuf::from(&system_root).join("SysWOW64"));
                 }
                 if let Some(path) = std::env::var_os("PATH") {
-                    for part in std::env::split_paths(&path) { roots.push(part); }
+                    for part in std::env::split_paths(&path) {
+                        roots.push(part);
+                    }
                 }
                 for root in roots {
                     let cand = root.join(&name);
-                    if cand.exists() { return Some(cand.display().to_string()); }
+                    if cand.exists() {
+                        return Some(cand.display().to_string());
+                    }
                 }
             }
         }
@@ -524,7 +661,13 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn resolve_registry_run_targets() -> Vec<(String /*display*/, String /*path*/, String /*hive*/, String /*key*/, String /*name*/)> {
+fn resolve_registry_run_targets() -> Vec<(
+    String, /*display*/
+    String, /*path*/
+    String, /*hive*/
+    String, /*key*/
+    String, /*name*/
+)> {
     let mut out = Vec::new();
     if let Ok(items) = crate::optimize::list_registry_run() {
         for it in items {
@@ -538,7 +681,12 @@ fn resolve_registry_run_targets() -> Vec<(String /*display*/, String /*path*/, S
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<Vec<VtItemReport>, String> {
+pub async fn vt_scan_startup(
+    app: AppHandle,
+    state: State<'_, VtState>,
+    limit: Option<u32>,
+    force: Option<bool>,
+) -> Result<Vec<VtItemReport>, String> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
@@ -546,26 +694,92 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
     let mut out: Vec<VtItemReport> = Vec::new();
     for (display, path) in items.into_iter().take(limit) {
         let mut pb = PathBuf::from(&path);
-        if let Some(ext) = pb.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()) {
+        if let Some(ext) = pb
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase())
+        {
             if ext == "url" {
-                let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
-                out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                let rep = VtItemReport {
+                    subject: display.clone(),
+                    sha256: String::new(),
+                    verdict: Verdict::Unknown,
+                    positives: 0,
+                    permalink: None,
+                    source: "startup".into(),
+                    malicious: 0,
+                    suspicious: 0,
+                    harmless: 0,
+                    undetected: 0,
+                    total_vendors: 0,
+                    reason: Some("no-executable".into()),
+                };
+                out.push(rep.clone());
+                let _ = app.emit("vt-report", &rep);
+                continue;
             }
             if ext == "lnk" {
                 if let Ok(link) = lnk::ShellLink::open(&pb, lnk::encoding::WINDOWS_1252) {
                     if let Some(info) = link.link_info() {
                         let tgt = PathBuf::from(info.common_path_suffix().to_string());
-                        if tgt.exists() { pb = tgt; } else {
-                            let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
-                            out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                        if tgt.exists() {
+                            pb = tgt;
+                        } else {
+                            let rep = VtItemReport {
+                                subject: display.clone(),
+                                sha256: String::new(),
+                                verdict: Verdict::Unknown,
+                                positives: 0,
+                                permalink: None,
+                                source: "startup".into(),
+                                malicious: 0,
+                                suspicious: 0,
+                                harmless: 0,
+                                undetected: 0,
+                                total_vendors: 0,
+                                reason: Some("no-executable".into()),
+                            };
+                            out.push(rep.clone());
+                            let _ = app.emit("vt-report", &rep);
+                            continue;
                         }
                     } else {
-                        let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
-                        out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                        let rep = VtItemReport {
+                            subject: display.clone(),
+                            sha256: String::new(),
+                            verdict: Verdict::Unknown,
+                            positives: 0,
+                            permalink: None,
+                            source: "startup".into(),
+                            malicious: 0,
+                            suspicious: 0,
+                            harmless: 0,
+                            undetected: 0,
+                            total_vendors: 0,
+                            reason: Some("no-executable".into()),
+                        };
+                        out.push(rep.clone());
+                        let _ = app.emit("vt-report", &rep);
+                        continue;
                     }
                 } else {
-                    let rep = VtItemReport { subject: display.clone(), sha256: String::new(), verdict: Verdict::Unknown, positives: 0, permalink: None, source: "startup".into(), malicious: 0, suspicious: 0, harmless: 0, undetected: 0, total_vendors: 0, reason: Some("no-executable".into()) };
-                    out.push(rep.clone()); let _ = app.emit("vt-report", &rep); continue;
+                    let rep = VtItemReport {
+                        subject: display.clone(),
+                        sha256: String::new(),
+                        verdict: Verdict::Unknown,
+                        positives: 0,
+                        permalink: None,
+                        source: "startup".into(),
+                        malicious: 0,
+                        suspicious: 0,
+                        harmless: 0,
+                        undetected: 0,
+                        total_vendors: 0,
+                        reason: Some("no-executable".into()),
+                    };
+                    out.push(rep.clone());
+                    let _ = app.emit("vt-report", &rep);
+                    continue;
                 }
             }
         }
@@ -588,28 +802,34 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
             let _ = app.emit("vt-report", &rep);
             continue;
         }
-        let sha = match compute_sha256(&pb) { Ok(h) => h, Err(_) => {
-            let rep = VtItemReport {
-                subject: display.clone(),
-                sha256: String::new(),
-                verdict: Verdict::Unknown,
-                positives: 0,
-                permalink: None,
-                source: "startup".into(),
-                malicious: 0,
-                suspicious: 0,
-                harmless: 0,
-                undetected: 0,
-                total_vendors: 0,
-                reason: Some("hashing-failed".into()),
-            };
-            out.push(rep.clone());
-            let _ = app.emit("vt-report", &rep);
-            continue
-        } };
+        let sha = match compute_sha256(&pb) {
+            Ok(h) => h,
+            Err(_) => {
+                let rep = VtItemReport {
+                    subject: display.clone(),
+                    sha256: String::new(),
+                    verdict: Verdict::Unknown,
+                    positives: 0,
+                    permalink: None,
+                    source: "startup".into(),
+                    malicious: 0,
+                    suspicious: 0,
+                    harmless: 0,
+                    undetected: 0,
+                    total_vendors: 0,
+                    reason: Some("hashing-failed".into()),
+                };
+                out.push(rep.clone());
+                let _ = app.emit("vt-report", &rep);
+                continue;
+            }
+        };
         match lookup_or_fetch(&state, &sha, force).await {
             Ok(entry) => {
-                let total = entry.malicious_count + entry.suspicious_count + entry.harmless_count + entry.undetected_count;
+                let total = entry.malicious_count
+                    + entry.suspicious_count
+                    + entry.harmless_count
+                    + entry.undetected_count;
                 let rep = VtItemReport {
                     subject: display.clone(),
                     sha256: entry.sha256.clone(),
@@ -630,8 +850,12 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
                     let mut need_emit = true;
                     if let Some(mut cached) = state.cache.get_mut(&entry.sha256) {
                         let last = cached.last_alerted.unwrap_or(0);
-                        if epoch_now().saturating_sub(last) < DEFAULT_TTL_SECS { need_emit = false; }
-                        if need_emit { cached.last_alerted = Some(epoch_now()); }
+                        if epoch_now().saturating_sub(last) < DEFAULT_TTL_SECS {
+                            need_emit = false;
+                        }
+                        if need_emit {
+                            cached.last_alerted = Some(epoch_now());
+                        }
                     }
                     if need_emit {
                         let _ = app.emit("vt-alert", &rep);
@@ -641,11 +865,17 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
             }
             Err(e) => {
                 let es = e.to_lowercase();
-                let reason = if es.contains("api key not set") { "no-api-key" }
-                    else if es.contains("http 429") { "rate-limited" }
-                    else if es.contains("http ") { "http-error" }
-                    else if es.contains("request failed") { "network-error" }
-                    else { "unknown-error" };
+                let reason = if es.contains("api key not set") {
+                    "no-api-key"
+                } else if es.contains("http 429") {
+                    "rate-limited"
+                } else if es.contains("http ") {
+                    "http-error"
+                } else if es.contains("request failed") {
+                    "network-error"
+                } else {
+                    "unknown-error"
+                };
                 let rep = VtItemReport {
                     subject: display.clone(),
                     sha256: sha.clone(),
@@ -670,7 +900,12 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<Vec<VtItemReport>, String> {
+pub async fn vt_scan_registry(
+    app: AppHandle,
+    state: State<'_, VtState>,
+    limit: Option<u32>,
+    force: Option<bool>,
+) -> Result<Vec<VtItemReport>, String> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
@@ -681,7 +916,11 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
         let name = it.name.clone();
         let maybe_img = extract_exe_from_command(&it.command);
         if maybe_img.is_none() {
-            let subj = if !name.trim().is_empty() { name.clone() } else { display.clone() };
+            let subj = if !name.trim().is_empty() {
+                name.clone()
+            } else {
+                display.clone()
+            };
             let rep = VtItemReport {
                 subject: subj,
                 sha256: String::new(),
@@ -704,7 +943,11 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
         let pb = PathBuf::from(&path);
         if !pb.exists() || !pb.is_file() {
             let rep = VtItemReport {
-                subject: if !name.trim().is_empty() { name.clone() } else { display.clone() },
+                subject: if !name.trim().is_empty() {
+                    name.clone()
+                } else {
+                    display.clone()
+                },
                 sha256: String::new(),
                 verdict: Verdict::Unknown,
                 positives: 0,
@@ -721,29 +964,43 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
             let _ = app.emit("vt-report", &rep);
             continue;
         }
-        let sha = match compute_sha256(&pb) { Ok(h) => h, Err(_) => {
-            let rep = VtItemReport {
-                subject: if !name.trim().is_empty() { name.clone() } else { display.clone() },
-                sha256: String::new(),
-                verdict: Verdict::Unknown,
-                positives: 0,
-                permalink: None,
-                source: "registry".into(),
-                malicious: 0,
-                suspicious: 0,
-                harmless: 0,
-                undetected: 0,
-                total_vendors: 0,
-                reason: Some("hashing-failed".into()),
-            };
-            out.push(rep.clone());
-            let _ = app.emit("vt-report", &rep);
-            continue
-        } };
+        let sha = match compute_sha256(&pb) {
+            Ok(h) => h,
+            Err(_) => {
+                let rep = VtItemReport {
+                    subject: if !name.trim().is_empty() {
+                        name.clone()
+                    } else {
+                        display.clone()
+                    },
+                    sha256: String::new(),
+                    verdict: Verdict::Unknown,
+                    positives: 0,
+                    permalink: None,
+                    source: "registry".into(),
+                    malicious: 0,
+                    suspicious: 0,
+                    harmless: 0,
+                    undetected: 0,
+                    total_vendors: 0,
+                    reason: Some("hashing-failed".into()),
+                };
+                out.push(rep.clone());
+                let _ = app.emit("vt-report", &rep);
+                continue;
+            }
+        };
         match lookup_or_fetch(&state, &sha, force).await {
             Ok(entry) => {
-                let subj = if !name.trim().is_empty() { name.clone() } else { display.clone() };
-                let total = entry.malicious_count + entry.suspicious_count + entry.harmless_count + entry.undetected_count;
+                let subj = if !name.trim().is_empty() {
+                    name.clone()
+                } else {
+                    display.clone()
+                };
+                let total = entry.malicious_count
+                    + entry.suspicious_count
+                    + entry.harmless_count
+                    + entry.undetected_count;
                 let rep = VtItemReport {
                     subject: subj,
                     sha256: entry.sha256.clone(),
@@ -764,20 +1021,37 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
                     let mut need_emit = true;
                     if let Some(mut cached) = state.cache.get_mut(&entry.sha256) {
                         let last = cached.last_alerted.unwrap_or(0);
-                        if epoch_now().saturating_sub(last) < DEFAULT_TTL_SECS { need_emit = false; }
-                        if need_emit { cached.last_alerted = Some(epoch_now()); }
+                        if epoch_now().saturating_sub(last) < DEFAULT_TTL_SECS {
+                            need_emit = false;
+                        }
+                        if need_emit {
+                            cached.last_alerted = Some(epoch_now());
+                        }
                     }
-                    if need_emit { let _ = app.emit("vt-alert", &rep); save_cache_to_disk(&state.cache); }
+                    if need_emit {
+                        let _ = app.emit("vt-alert", &rep);
+                        save_cache_to_disk(&state.cache);
+                    }
                 }
             }
             Err(e) => {
                 let es = e.to_lowercase();
-                let reason = if es.contains("api key not set") { "no-api-key" }
-                    else if es.contains("http 429") { "rate-limited" }
-                    else if es.contains("http ") { "http-error" }
-                    else if es.contains("request failed") { "network-error" }
-                    else { "unknown-error" };
-                let subj = if !name.trim().is_empty() { name.clone() } else { display.clone() };
+                let reason = if es.contains("api key not set") {
+                    "no-api-key"
+                } else if es.contains("http 429") {
+                    "rate-limited"
+                } else if es.contains("http ") {
+                    "http-error"
+                } else if es.contains("request failed") {
+                    "network-error"
+                } else {
+                    "unknown-error"
+                };
+                let subj = if !name.trim().is_empty() {
+                    name.clone()
+                } else {
+                    display.clone()
+                };
                 let rep = VtItemReport {
                     subject: subj,
                     sha256: sha.clone(),
@@ -802,8 +1076,15 @@ pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: 
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub async fn vt_scan_all(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<(usize, usize), String> {
-    let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force).await?.len();
+pub async fn vt_scan_all(
+    app: AppHandle,
+    state: State<'_, VtState>,
+    limit: Option<u32>,
+    force: Option<bool>,
+) -> Result<(usize, usize), String> {
+    let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force)
+        .await?
+        .len();
     let n2 = vt_scan_registry(app, state, limit, force).await?.len();
     let prev = load_snapshot();
     let mut cur = build_current_snapshot(prev.last_scan);
@@ -814,30 +1095,66 @@ pub async fn vt_scan_all(app: AppHandle, state: State<'_, VtState>, limit: Optio
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub async fn vt_scan_startup(_app: AppHandle, _state: State<'_, VtState>, _limit: Option<u32>) -> Result<Vec<VtItemReport>, String> { Ok(Vec::new()) }
+pub async fn vt_scan_startup(
+    _app: AppHandle,
+    _state: State<'_, VtState>,
+    _limit: Option<u32>,
+) -> Result<Vec<VtItemReport>, String> {
+    Ok(Vec::new())
+}
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub async fn vt_scan_registry(_app: AppHandle, _state: State<'_, VtState>, _limit: Option<u32>) -> Result<Vec<VtItemReport>, String> { Ok(Vec::new()) }
+pub async fn vt_scan_registry(
+    _app: AppHandle,
+    _state: State<'_, VtState>,
+    _limit: Option<u32>,
+) -> Result<Vec<VtItemReport>, String> {
+    Ok(Vec::new())
+}
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub async fn vt_scan_all(_app: AppHandle, _state: State<'_, VtState>, _limit: Option<u32>) -> Result<(usize, usize), String> { Ok((0,0)) }
+pub async fn vt_scan_all(
+    _app: AppHandle,
+    _state: State<'_, VtState>,
+    _limit: Option<u32>,
+) -> Result<(usize, usize), String> {
+    Ok((0, 0))
+}
 
 #[tauri::command]
-pub async fn vt_auto_maybe_scan(app: AppHandle, state: State<'_, VtState>) -> Result<Option<String>, String> {
+pub async fn vt_auto_maybe_scan(
+    app: AppHandle,
+    state: State<'_, VtState>,
+) -> Result<Option<String>, String> {
     let prev = load_snapshot();
     let mut cur = build_current_snapshot(prev.last_scan);
     let key_present = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
     let now = epoch_now();
-    let reason = if has_new(&prev, &cur) { Some("new-items") } else if prev.last_scan == 0 || now.saturating_sub(prev.last_scan) >= DEFAULT_TTL_SECS { Some("ttl") } else { None };
+    let reason = if has_new(&prev, &cur) {
+        Some("new-items")
+    } else if prev.last_scan == 0 || now.saturating_sub(prev.last_scan) >= DEFAULT_TTL_SECS {
+        Some("ttl")
+    } else {
+        None
+    };
     if let Some(r) = reason {
-        if !key_present { let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": r})); return Ok(None); }
+        if !key_present {
+            let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": r}));
+            return Ok(None);
+        }
         let _ = app.emit("vt-autoscan-start", &serde_json::json!({"reason": r}));
         let (n1, n2) = vt_scan_all(app.clone(), state, Some(50), Some(false)).await?;
         cur.last_scan = epoch_now();
         save_snapshot(&cur);
-        let _ = app.emit("vt-autoscan-done", &serde_json::json!({"reason": r, "startup": n1, "registry": n2}));
+        let _ = app.emit(
+            "vt-autoscan-done",
+            &serde_json::json!({"reason": r, "startup": n1, "registry": n2}),
+        );
         return Ok(Some(r.to_string()));
     }
-    let _ = app.emit("vt-autoscan-skip", &serde_json::json!({"reason": "no-change"}));
+    let _ = app.emit(
+        "vt-autoscan-skip",
+        &serde_json::json!({"reason": "no-change"}),
+    );
     Ok(None)
 }
