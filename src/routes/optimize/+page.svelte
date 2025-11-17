@@ -581,7 +581,7 @@
             hint.push(`Process image(s): ${r.lastImages.join(', ')}`);
           }
           r.suspiciousReason =
-            `Entry reappeared after Full cleanup and reboot. ${hint.join(' Ã‚Â· ')}`.trim();
+            `Entry reappeared after Full cleanup and reboot. ${hint.join(' · ')}`.trim();
           registryHistory[id] = r;
           updates += 1;
         }
@@ -732,7 +732,7 @@
       let parts: string[] = [`${taskAction} affected ${success} task(s)`];
       if (elevated > 0) parts.push(`used elevation for ${elevated}`);
       if (stopped > 0) parts.push(`stopped ${stopped} before delete`);
-      message = parts.join(' Ã‚Â· ');
+      message = parts.join(' · ');
       const fails = (res as any)?.failures as Array<any> | undefined;
       if (Array.isArray(fails) && fails.length) {
         try {
