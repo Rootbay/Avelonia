@@ -236,16 +236,18 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const LOG_ROW_PX = 32;
   const LOG_MAX_DOM = 600;
-  const LOG_VIEW_CHUNK = 100;
+  const LOG_VIEW_CHUNK = 40;
   const LOG_SCROLL_THRESHOLD_PX = 120;
+  const INITIAL_LOGS_VISIBLE = LOG_VIEW_CHUNK;
   let logsStart = $state(0);
-  let logsVisible = $state(100);
+  let logsVisible = $state(INITIAL_LOGS_VISIBLE);
   let logsSkeleton = $state(new Set<number>());
   let initialLogLoading = $state(true);
   let logsScrollEl: HTMLDivElement | null = null;
   let logsSentinel: HTMLDivElement | null = null;
   let _logsTick = $state(false);
   let prevLogLen = $state(0);
+  let logsReady = $state(false);
 
   const windowedLogs = $derived(
     $logStore.slice(logsStart, Math.min(logsVisible, $logStore.length))
@@ -282,6 +284,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type VtGroup = { header: number; indices: number[] };
   const vtGroups = $derived.by(() => {
+    if (!logsReady) return [];
     const list = windowedLogs as LogEntry[];
     const used = new SvelteSet<number>();
     const out: VtGroup[] = [];
@@ -361,6 +364,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     return out;
   });
   const vtGroupIndexMap = $derived.by(() => {
+    if (!logsReady) return new SvelteMap<number, VtGroup>();
     const m = new SvelteMap<number, VtGroup>();
     for (const g of vtGroups) {
       for (const k of g.indices) m.set(k, g);
@@ -455,6 +459,12 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   });
 
   onMount(() => {
+    requestAnimationFrame(() => {
+      logsReady = true;
+    });
+  });
+
+  onMount(() => {
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -480,7 +490,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     const total = $logStore.length;
     const delta = total - prevLogLen;
     if (delta > 0) {
-      logsVisible = Math.min(total, Math.max(logsVisible + delta, 100));
+      logsVisible = Math.min(total, Math.max(logsVisible + delta, INITIAL_LOGS_VISIBLE));
       logsStart = 0;
       try {
         if (logsScrollEl && logsScrollEl.scrollTop <= 4) {
@@ -660,12 +670,12 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                 {#each windowedLogs as log, i (logsStart + i)}
                   {#if logsSkeleton.has(logsStart + i)}
                     <TableRow class="border-0!" aria-hidden="true">
-                      <TableCell class="w-20"
-                        ><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell
-                      >
-                      <TableCell class="w-20"
-                        ><Skeleton class="h-3 w-12" aria-hidden="true" /></TableCell
-                      >
+                      <TableCell class="w-20">
+                        <Skeleton class="h-3 w-14" aria-hidden="true" />
+                      </TableCell>
+                      <TableCell class="w-20">
+                        <Skeleton class="h-3 w-12" aria-hidden="true" />
+                      </TableCell>
                       <TableCell><Skeleton class="h-3 w-3/4" aria-hidden="true" /></TableCell>
                     </TableRow>
                   {:else if vtHeaderSet.has(i)}
@@ -676,9 +686,9 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                       role="button"
                       aria-expanded={!vtCollapsed.has(i)}
                     >
-                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
-                        >{log.timestamp}</TableCell
-                      >
+                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">
+                        {log.timestamp}
+                      </TableCell>
                       <TableCell class="pr-4" colspan={2}>
                         <div class="flex items-center gap-2">
                           <Badge variant="secondary" class="text-[11px]">VirusTotal activity</Badge>
@@ -707,9 +717,9 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                               >{windowedLogs[gi].level}</Badge
                             >
                           </TableCell>
-                          <TableCell class="text-sm leading-snug"
-                            >{windowedLogs[gi].message}</TableCell
-                          >
+                          <TableCell class="text-sm leading-snug">
+                            {windowedLogs[gi].message}
+                          </TableCell>
                         </TableRow>
                       {/each}
                     {/if}
@@ -721,9 +731,9 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                         >{log.timestamp}</TableCell
                       >
                       <TableCell class="pr-4">
-                        <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}
-                          >{log.level}</Badge
-                        >
+                        <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}>
+                          {log.level}
+                        </Badge>
                       </TableCell>
                       <TableCell class="text-sm leading-snug">{log.message}</TableCell>
                     </TableRow>

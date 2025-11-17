@@ -34,6 +34,7 @@
   const STARTUP_ROW_PX = 56;
 
   const dispatchMessage = createEventDispatcher<{ message: string }>();
+  let { active = false } = $props();
 
   let startupItems = $state<StartupItem[]>([]);
   let selectedStartup = $state(new Set<string>());
@@ -75,6 +76,11 @@
       loadingStartup = false;
     }
   }
+
+  $effect(() => {
+    if (!active || startupLoaded || loadingStartup) return;
+    void loadStartupItems();
+  });
 
   async function reloadStartupItems() {
     startupLoaded = false;
@@ -256,7 +262,6 @@
     };
 
     ensureSentinel();
-    loadStartupItems();
     _startupPollTimer = window.setInterval(pollStartupOnce, 5000);
 
     return () => {

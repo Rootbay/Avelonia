@@ -69,7 +69,7 @@
   let filterKind = $state<'all' | Kind>('all');
   let largeMinMB = $state(100);
   let dupGroups = $state<Array<{ hash: string; size: number; files: string[] }>>([]);
-  let selectedPaths = new SvelteSet<string>();
+  let selectedPaths = $state(new Set<string>());
   let showSettings = $state(false);
   let exclusions = $state<string[]>([]);
   const EXC_KEY = 'avelonia_cleaner_exclusions_v1';

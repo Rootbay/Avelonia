@@ -129,6 +129,9 @@
   let postDiagLoading = $state(false);
   let postDiag: CleanupDiagnostics | null = $state(null);
   let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
+  let activeOptimizeTab = $state<'tweaks' | 'startup' | 'registry' | 'tasks' | 'network'>(
+    'tweaks'
+  );
 
   const REGISTRY_MAX_DOM = 300;
   const REGISTRY_ROW_PX = 56;
@@ -1080,9 +1083,6 @@
 
   onMount(() => {
     void initBootCheck();
-    void refreshNetworkStatus();
-    void loadRegistryItems();
-    void loadTasks();
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -1108,6 +1108,16 @@
   });
 
   $effect(() => {
+    if (activeOptimizeTab === 'registry') {
+      void loadRegistryItems();
+    } else if (activeOptimizeTab === 'tasks') {
+      void loadTasks();
+    } else if (activeOptimizeTab === 'network') {
+      void refreshNetworkStatus();
+    }
+  });
+
+  $effect(() => {
     if (registryLoaded) {
       void scanSuspiciousAfterReboot();
     }
@@ -1122,7 +1132,13 @@
     </CardHeader>
   </Card>
 
-  <Tabs value="tweaks" class="space-y-4">
+  <Tabs
+    value={activeOptimizeTab}
+    onValueChange={(val: string) => {
+      activeOptimizeTab = val as 'tweaks' | 'startup' | 'registry' | 'tasks' | 'network';
+    }}
+    class="space-y-4"
+  >
     <TabsList class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 h-auto *:cursor-pointer">
       <TabsTrigger value="tweaks">Tweaks</TabsTrigger>
       <TabsTrigger value="startup">Startup items</TabsTrigger>
@@ -1136,7 +1152,10 @@
     </TabsContent>
 
     <TabsContent value="startup" class="space-y-4">
-      <StartupPanel on:message={(event) => (message = event.detail)} />
+      <StartupPanel
+        active={activeOptimizeTab === 'startup'}
+        on:message={(event) => (message = event.detail)}
+      />
     </TabsContent>
 
     <TabsContent value="registry" class="space-y-4">

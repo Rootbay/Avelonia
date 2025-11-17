@@ -644,36 +644,63 @@
     updateVisibleWindow(downloadsScrollEl);
   });
 
-  const totalDownloads = $derived($downloads.length);
-  const availableDownloads = $derived(filteredDownloads.length);
-  const activeCount = $derived(
-    $downloads.filter(
-      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
-    ).length
-  );
-  const completedCount = $derived($downloads.filter((d) => d.status === 'completed').length);
-  const failedCount = $derived($downloads.filter((d) => d.status === 'failed').length);
+  const globalDownloadStats = $derived.by(() => {
+    const list = $downloads;
+    let active = 0;
+    let completed = 0;
+    let failed = 0;
+    let startable = 0;
+    let cancelable = 0;
+    for (const download of list) {
+      if (download.status === 'available' && download.downloadLink) {
+        startable += 1;
+      }
+      if (download.status === 'downloading' || download.status === 'pending' || download.status === 'queued') {
+        active += 1;
+        cancelable += 1;
+      }
+      if (download.status === 'completed') {
+        completed += 1;
+      }
+      if (download.status === 'failed') {
+        failed += 1;
+      }
+    }
+    return {
+      total: list.length,
+      active,
+      completed,
+      failed,
+      startable,
+      cancelable,
+    };
+  });
+  const filteredDownloadStats = $derived.by(() => {
+    const list = filteredDownloads;
+    let startable = 0;
+    let cancelable = 0;
+    let failed = 0;
+    for (const download of list) {
+      if (download.status === 'available' && download.downloadLink) startable += 1;
+      if (download.status === 'downloading' || download.status === 'pending' || download.status === 'queued') {
+        cancelable += 1;
+      }
+      if (download.status === 'failed') {
+        failed += 1;
+      }
+    }
+    return {
+      available: list.length,
+      startable,
+      cancelable,
+      failed,
+      deletable: list.length,
+    };
+  });
   const selectedCompletedCount = $derived.by(() => {
     const selected = getSelectedDownloads();
     return selected.filter((d) => d.status === 'completed').length;
   });
-
-  const startableAll = $derived(
-    $downloads.filter((d) => d.status === 'available' && !!d.downloadLink).length
-  );
-  const cancelableAll = $derived(
-    $downloads.filter(
-      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
-    ).length
-  );
-  const startableFiltered = $derived(
-    filteredDownloads.filter((d) => d.status === 'available' && !!d.downloadLink).length
-  );
-  const cancelableFiltered = $derived(
-    filteredDownloads.filter(
-      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
-    ).length
-  );
   const startableSelected = $derived.by(() => {
     const selected = getSelectedDownloads();
     return selected.filter(
@@ -689,9 +716,7 @@
         d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
     ).length;
   });
-  const failedFiltered = $derived(filteredDownloads.filter((d) => d.status === 'failed').length);
   const deletableSelected = $derived.by(() => getSelectedDownloads().length);
-  const deletableFiltered = $derived(filteredDownloads.length);
 
   $effect(() => {
     const filteredIds = new Set(filteredDownloads.map((d) => d.id));
@@ -1074,14 +1099,14 @@
       <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
       <CardDescription>Search, filter, and manage app downloads.</CardDescription>
     </CardHeader>
-    <CardContent class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-      <span>Showing {availableDownloads} / {totalDownloads}</span>
+      <CardContent class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+      <span>Showing {filteredDownloadStats.available} / {globalDownloadStats.total}</span>
       <Separator orientation="vertical" class="hidden h-4 md:flex" />
       <span>Size: {formatBytes(filteredTotalBytes)}</span>
       <Separator orientation="vertical" class="hidden h-4 md:flex" />
-      <span class="text-primary">Active: {activeCount}</span>
-      <span class="text-emerald-500">Completed: {completedCount}</span>
-      <span class="text-destructive">Failed: {failedCount}</span>
+      <span class="text-primary">Active: {globalDownloadStats.active}</span>
+      <span class="text-emerald-500">Completed: {globalDownloadStats.completed}</span>
+      <span class="text-destructive">Failed: {globalDownloadStats.failed}</span>
     </CardContent>
   </Card>
 
@@ -1273,15 +1298,16 @@
                       }}
                     >
                       <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
-                      {#if startableAll > 0}<span class="text-xs text-muted-foreground tabular-nums"
-                          >{startableAll}</span
-                        >{/if}
+                      {#if globalDownloadStats.startable > 0}
+                        <span class="text-xs text-muted-foreground tabular-nums"
+                          >{globalDownloadStats.startable}</span
+                      >{/if}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       class="justify-between"
-                      disabled={cancelableAll === 0}
+                      disabled={globalDownloadStats.cancelable === 0}
                       onclick={() => {
                         cancelAllActive();
                         actionsOpen = false;
@@ -1290,9 +1316,10 @@
                       <span class="flex items-center gap-2"
                         ><CircleX class="size-4" /> Cancel active</span
                       >
-                      {#if cancelableAll > 0}<span
-                          class="text-xs text-muted-foreground tabular-nums">{cancelableAll}</span
-                        >{/if}
+                      {#if globalDownloadStats.cancelable > 0}
+                        <span class="text-xs text-muted-foreground tabular-nums"
+                          >{globalDownloadStats.cancelable}</span
+                      >{/if}
                     </Button>
                   </div>
                 </div>
@@ -1304,7 +1331,7 @@
                       type="button"
                       variant="outline"
                       class="justify-between"
-                      disabled={startableFiltered === 0}
+                      disabled={filteredDownloadStats.startable === 0}
                       onclick={() => {
                         startAllFiltered();
                         actionsOpen = false;
@@ -1313,16 +1340,16 @@
                       <span class="flex items-center gap-2"
                         ><Play class="size-4" /> Start filtered</span
                       >
-                      {#if startableFiltered > 0}<span
+                      {#if filteredDownloadStats.startable > 0}<span
                           class="text-xs text-muted-foreground tabular-nums"
-                          >{startableFiltered}</span
+                          >{filteredDownloadStats.startable}</span
                         >{/if}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       class="justify-between"
-                      disabled={cancelableFiltered === 0}
+                      disabled={filteredDownloadStats.cancelable === 0}
                       onclick={() => {
                         cancelAllFiltered();
                         actionsOpen = false;
@@ -1331,16 +1358,16 @@
                       <span class="flex items-center gap-2"
                         ><CircleX class="size-4" /> Cancel filtered</span
                       >
-                      {#if cancelableFiltered > 0}<span
+                      {#if filteredDownloadStats.cancelable > 0}<span
                           class="text-xs text-muted-foreground tabular-nums"
-                          >{cancelableFiltered}</span
+                          >{filteredDownloadStats.cancelable}</span
                         >{/if}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       class="justify-between"
-                      disabled={deletableFiltered === 0}
+                      disabled={filteredDownloadStats.deletable === 0}
                       onclick={() => {
                         deleteFiltered();
                         actionsOpen = false;
@@ -1349,16 +1376,16 @@
                       <span class="flex items-center gap-2"
                         ><Trash2 class="size-4" /> Delete filtered</span
                       >
-                      {#if deletableFiltered > 0}<span
+                      {#if filteredDownloadStats.deletable > 0}<span
                           class="text-xs text-muted-foreground tabular-nums"
-                          >{deletableFiltered}</span
+                          >{filteredDownloadStats.deletable}</span
                         >{/if}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       class="justify-between"
-                      disabled={failedFiltered === 0}
+                      disabled={filteredDownloadStats.failed === 0}
                       onclick={() => {
                         retryFailedFiltered();
                         actionsOpen = false;
@@ -1367,8 +1394,9 @@
                       <span class="flex items-center gap-2"
                         ><RefreshCcw class="size-4" /> Retry failed (filtered)</span
                       >
-                      {#if failedFiltered > 0}<span
-                          class="text-xs text-muted-foreground tabular-nums">{failedFiltered}</span
+                      {#if filteredDownloadStats.failed > 0}<span
+                          class="text-xs text-muted-foreground tabular-nums"
+                          >{filteredDownloadStats.failed}</span
                         >{/if}
                     </Button>
                     <Button
@@ -1503,7 +1531,7 @@
                     <Button
                       variant="outline"
                       class="justify-between"
-                      disabled={failedCount === 0}
+                      disabled={globalDownloadStats.failed === 0}
                       onclick={() => {
                         retryAllFailed();
                         actionsOpen = false;
@@ -1512,8 +1540,8 @@
                       <span class="flex items-center gap-2"
                         ><RefreshCcw class="size-4" /> Retry all failed</span
                       >
-                      {#if failedCount > 0}<span class="text-xs text-muted-foreground tabular-nums"
-                          >{failedCount}</span
+                      {#if globalDownloadStats.failed > 0}<span class="text-xs text-muted-foreground tabular-nums"
+                          >{globalDownloadStats.failed}</span
                         >{/if}
                     </Button>
                   </div>
