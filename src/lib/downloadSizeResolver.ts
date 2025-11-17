@@ -3,6 +3,9 @@ import { BUILT_IN_DOWNLOADS } from './builtInDownloads';
 const SIZE_CACHE_KEY = 'avelonia_builtin_download_size_cache';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // refresh once per week
 
+const MAX_SIZE_FETCH_CONCURRENCY = 4;
+const IDLE_WAIT_TIMEOUT_MS = 150;
+
 type SizeCacheEntry = {
   size: string;
   updatedAt: number;
@@ -60,6 +63,13 @@ function formatBytes(bytes: number, decimals = 1): string {
   return `${rounded} ${units[index]}`;
 }
 
+async function waitForIdle(timeout = IDLE_WAIT_TIMEOUT_MS): Promise<void> {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    return new Promise((resolve) => window.requestIdleCallback(() => resolve(), { timeout }));
+  }
+  return new Promise((resolve) => setTimeout(resolve, timeout));
+}
+
 async function fetchContentLength(url: string): Promise<number | null> {
   if (typeof fetch === 'undefined') {
     return null;
@@ -107,8 +117,15 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
   }
 
   if (refreshQueue.length > 0) {
-    await Promise.all(
-      refreshQueue.map(async ({ link, fallbackSize }) => {
+    await waitForIdle();
+    const queue = refreshQueue.slice();
+    const worker = async () => {
+      while (true) {
+        const job = queue.shift();
+        if (!job) {
+          return;
+        }
+        const { link, fallbackSize } = job;
         try {
           const bytes = await fetchContentLength(link);
           const resolvedSize = bytes === null ? fallbackSize : formatBytes(bytes);
@@ -118,8 +135,10 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
           cache[link] = { size: fallbackSize, updatedAt: now };
           result[link] = fallbackSize;
         }
-      })
-    );
+      }
+    };
+    const concurrency = Math.min(MAX_SIZE_FETCH_CONCURRENCY, queue.length);
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
     saveSizeCache(cache);
   }
 
