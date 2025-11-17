@@ -1,20 +1,20 @@
-﻿use futures_util::StreamExt;
+use dashmap::DashMap;
+use futures_util::StreamExt;
 use reqwest::{Client, Url};
-use serde::{Serialize};
+use serde::Serialize;
 use std::fs;
 use std::fs::File;
 use std::io::{ErrorKind, Write};
 use std::path::Path;
-use tauri::{AppHandle, State, Emitter};
-use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter, State};
 
 mod cleaner;
-mod system_info;
 mod eraser;
-mod optimize;
 mod installer;
+mod optimize;
+mod system_info;
 mod vt;
 
 #[derive(Default)]
@@ -42,11 +42,11 @@ fn path_exists(path: String) -> Result<bool, String> {
 fn filename_from_cd<S: AsRef<str>>(cd: S) -> Option<String> {
     let cd = cd.as_ref();
     if let Some(idx) = cd.to_lowercase().find("filename*=") {
-        let rest = &cd[idx+10..];
+        let rest = &cd[idx + 10..];
         let parts: Vec<&str> = rest.split(';').collect();
         let val = parts[0].trim();
         if let Some(pos) = val.find("''") {
-            let enc = &val[pos+2..];
+            let enc = &val[pos + 2..];
             if let Ok(decoded) = percent_encoding::percent_decode_str(enc).decode_utf8() {
                 return Some(decoded.to_string());
             }
@@ -56,33 +56,65 @@ fn filename_from_cd<S: AsRef<str>>(cd: S) -> Option<String> {
         }
     }
     if let Some(idx) = cd.to_lowercase().find("filename=") {
-        let rest = &cd[idx+9..];
-        let v = rest.split(';').next().unwrap_or("").trim().trim_matches('"');
-        if !v.is_empty() { return Some(v.to_string()); }
+        let rest = &cd[idx + 9..];
+        let v = rest
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"');
+        if !v.is_empty() {
+            return Some(v.to_string());
+        }
     }
     None
 }
 
 fn ext_from_content_type<S: AsRef<str>>(ct: S) -> Option<String> {
     let ct = ct.as_ref().to_lowercase();
-    let ext = if ct.contains("application/zip") { "zip" }
-    else if ct.contains("application/x-7z-compressed") { "7z" }
-    else if ct.contains("application/x-rar-compressed") { "rar" }
-    else if ct.contains("application/x-msdownload") { "exe" }
-    else if ct.contains("application/x-msi") || ct.contains("application/x-ms-installer") || ct.contains("application/x-msdownload") { "msi" }
-    else if ct.contains("application/x-dosexec") { "exe" }
-    else if ct.contains("application/x-tar") { "tar" }
-    else if ct.contains("application/gzip") { "tar.gz" }
-    else if ct.contains("application/x-bzip2") { "tar.bz2" }
-    else if ct.contains("application/x-xz") { "tar.xz" }
-    else if ct.contains("application/x-zstd") { "tar.zst" }
-    else if ct.contains("application/pdf") { "pdf" }
-    else if ct.contains("application/json") { "json" }
-    else if ct.contains("text/plain") { "txt" }
-    else if ct.contains("image/png") { "png" }
-    else if ct.contains("image/jpeg") { "jpg" }
-    else { "" };
-    if ext.is_empty() { None } else { Some(ext.to_string()) }
+    let ext = if ct.contains("application/zip") {
+        "zip"
+    } else if ct.contains("application/x-7z-compressed") {
+        "7z"
+    } else if ct.contains("application/x-rar-compressed") {
+        "rar"
+    } else if ct.contains("application/x-msdownload") {
+        "exe"
+    } else if ct.contains("application/x-msi")
+        || ct.contains("application/x-ms-installer")
+        || ct.contains("application/x-msdownload")
+    {
+        "msi"
+    } else if ct.contains("application/x-dosexec") {
+        "exe"
+    } else if ct.contains("application/x-tar") {
+        "tar"
+    } else if ct.contains("application/gzip") {
+        "tar.gz"
+    } else if ct.contains("application/x-bzip2") {
+        "tar.bz2"
+    } else if ct.contains("application/x-xz") {
+        "tar.xz"
+    } else if ct.contains("application/x-zstd") {
+        "tar.zst"
+    } else if ct.contains("application/pdf") {
+        "pdf"
+    } else if ct.contains("application/json") {
+        "json"
+    } else if ct.contains("text/plain") {
+        "txt"
+    } else if ct.contains("image/png") {
+        "png"
+    } else if ct.contains("image/jpeg") {
+        "jpg"
+    } else {
+        ""
+    };
+    if ext.is_empty() {
+        None
+    } else {
+        Some(ext.to_string())
+    }
 }
 
 #[tauri::command]
@@ -100,34 +132,52 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
     if let Ok(resp) = head {
         if resp.status().is_success() {
             if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
-                if let Ok(s) = cd.to_str() { filename = filename_from_cd(s); }
+                if let Ok(s) = cd.to_str() {
+                    filename = filename_from_cd(s);
+                }
             }
             if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
-                if let Ok(s) = ct.to_str() { ext = ext_from_content_type(s); }
+                if let Ok(s) = ct.to_str() {
+                    ext = ext_from_content_type(s);
+                }
             }
             if let Some(cl) = resp.headers().get(reqwest::header::CONTENT_LENGTH) {
-                if let Ok(s) = cl.to_str() { if let Ok(v) = s.parse::<u64>() { size = Some(v); } }
+                if let Ok(s) = cl.to_str() {
+                    if let Ok(v) = s.parse::<u64>() {
+                        size = Some(v);
+                    }
+                }
             }
         }
     }
     if filename.is_none() || ext.is_none() {
-        let get = client.get(&url).header(reqwest::header::RANGE, "bytes=0-0").send().await;
+        let get = client
+            .get(&url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await;
         if let Ok(resp) = get {
             if filename.is_none() {
                 if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
-                    if let Ok(s) = cd.to_str() { filename = filename_from_cd(s); }
+                    if let Ok(s) = cd.to_str() {
+                        filename = filename_from_cd(s);
+                    }
                 }
             }
             if ext.is_none() {
                 if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
-                    if let Ok(s) = ct.to_str() { ext = ext_from_content_type(s); }
+                    if let Ok(s) = ct.to_str() {
+                        ext = ext_from_content_type(s);
+                    }
                 }
             }
             if size.is_none() {
                 if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE) {
                     if let Ok(s) = cr.to_str() {
                         if let Some(pos) = s.rfind('/') {
-                            if let Ok(v) = s[pos+1..].trim().parse::<u64>() { size = Some(v); }
+                            if let Ok(v) = s[pos + 1..].trim().parse::<u64>() {
+                                size = Some(v);
+                            }
                         }
                     }
                 }
@@ -137,7 +187,12 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
 
     if filename.is_none() {
         if let Ok(u) = Url::parse(&url) {
-            if let Some(seg) = u.path_segments().and_then(|s| s.last()).and_then(|s| percent_encoding::percent_decode_str(s).decode_utf8().ok()).map(|cow| cow.to_string()) {
+            if let Some(seg) = u
+                .path_segments()
+                .and_then(|s| s.last())
+                .and_then(|s| percent_encoding::percent_decode_str(s).decode_utf8().ok())
+                .map(|cow| cow.to_string())
+            {
                 filename = Some(seg);
             }
         }
@@ -148,19 +203,37 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
         let lower = filename.to_lowercase();
         let multi = [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"];
         for m in multi.iter() {
-            if lower.ends_with(m) { ext = Some(m.trim_start_matches('.').to_string()); break; }
+            if lower.ends_with(m) {
+                ext = Some(m.trim_start_matches('.').to_string());
+                break;
+            }
         }
         if ext.is_none() {
-            if let Some(idx) = lower.rfind('.') { ext = Some(lower[idx+1..].to_string()); }
+            if let Some(idx) = lower.rfind('.') {
+                ext = Some(lower[idx + 1..].to_string());
+            }
         }
     }
 
-    Ok(ProbeResult { filename, ext: ext.unwrap_or_default(), size })
+    Ok(ProbeResult {
+        filename,
+        ext: ext.unwrap_or_default(),
+        size,
+    })
 }
 
 #[tauri::command]
-async fn download_file(app: AppHandle, id: u64, url: String, path: String, state: State<'_, DownloadState>) -> Result<(), String> {
-    println!("Rust: download_file called for ID: {}, URL: {}, Path: {}", id, url, path);
+async fn download_file(
+    app: AppHandle,
+    id: u64,
+    url: String,
+    path: String,
+    state: State<'_, DownloadState>,
+) -> Result<(), String> {
+    println!(
+        "Rust: download_file called for ID: {}, URL: {}, Path: {}",
+        id, url, path
+    );
     state.0.insert(id, false);
 
     let client = Client::builder()
@@ -168,14 +241,10 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
         .timeout(Duration::from_secs(300))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-    let res = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
-            println!("Rust Error: Failed to get response: {}", e);
-            format!("Failed to get response: {}", e)
-        })?;
+    let res = client.get(&url).send().await.map_err(|e| {
+        println!("Rust Error: Failed to get response: {}", e);
+        format!("Failed to get response: {}", e)
+    })?;
     println!("Rust: Got response for ID: {}", id);
 
     let total = res.content_length().unwrap_or(0);
@@ -186,11 +255,10 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
     }
 
     let temp_path = format!("{}.part", &path);
-    let mut file =
-        File::create(&temp_path).map_err(|e| {
-            println!("Rust Error: Failed to create file {}: {}", path, e);
-            format!("Failed to create file: {}", e)
-        })?;
+    let mut file = File::create(&temp_path).map_err(|e| {
+        println!("Rust Error: Failed to create file {}: {}", path, e);
+        format!("Failed to create file: {}", e)
+    })?;
     println!("Rust: Temp file created at {}", temp_path);
     let mut downloaded: u64 = 0;
     let mut stream = res.bytes_stream();
@@ -205,11 +273,10 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
             println!("Rust Error: Failed to download chunk for ID {}: {}", id, e);
             format!("Failed to download chunk: {}", e)
         })?;
-        file.write_all(&chunk)
-            .map_err(|e| {
-                println!("Rust Error: Failed to write to file for ID {}: {}", id, e);
-                format!("Failed to write to file: {}", e)
-            })?;
+        file.write_all(&chunk).map_err(|e| {
+            println!("Rust Error: Failed to write to file for ID {}: {}", id, e);
+            format!("Failed to write to file: {}", e)
+        })?;
         downloaded += chunk.len() as u64;
 
         if let Err(e) = app.emit(
@@ -220,14 +287,20 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
                 total,
             },
         ) {
-            println!("Rust Error: Failed to emit progress event for ID {}: {}", id, e);
+            println!(
+                "Rust Error: Failed to emit progress event for ID {}: {}",
+                id, e
+            );
         }
     }
 
     let was_cancelled = state.0.get(&id).map_or(false, |r| *r);
     if was_cancelled || (total > 0 && downloaded < total) {
         if let Err(e) = std::fs::remove_file(&temp_path) {
-            println!("Rust: Failed to remove partial file for ID {} at {}: {}", id, temp_path, e);
+            println!(
+                "Rust: Failed to remove partial file for ID {} at {}: {}",
+                id, temp_path, e
+            );
         } else {
             println!("Rust: Removed partial file for ID {} at {}", id, temp_path);
         }
@@ -241,10 +314,19 @@ async fn download_file(app: AppHandle, id: u64, url: String, path: String, state
                 total: final_total,
             },
         ) {
-            println!("Rust Error: Failed to emit final progress for ID {}: {}", id, e);
+            println!(
+                "Rust Error: Failed to emit final progress for ID {}: {}",
+                id, e
+            );
         }
         if let Err(e) = std::fs::rename(&temp_path, &path) {
-            println!("Rust: Failed to rename {} to {} for ID {}: {}", temp_path, path, id, e);
+            println!(
+                "Rust: Failed to rename {} to {} for ID {}: {}",
+                temp_path, path, id, e
+            );
+            let _ = std::fs::remove_file(&temp_path);
+            state.0.remove(&id);
+            return Err(format!("Failed to finalize download: {}", e));
         } else {
             println!("Rust: Renamed {} to {} for ID {}", temp_path, path, id);
         }
@@ -274,8 +356,13 @@ fn read_download_catalog(path: String) -> Result<String, String> {
 #[tauri::command]
 fn write_download_catalog(path: String, contents: String) -> Result<(), String> {
     if let Some(parent) = Path::new(&path).parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to ensure catalog directory {}: {}", parent.display(), e))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to ensure catalog directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
     fs::write(&path, contents).map_err(|e| format!("Failed to write catalog {}: {}", path, e))
 }
@@ -286,13 +373,19 @@ fn move_download_catalog(from: String, to: String) -> Result<(), String> {
         return Ok(());
     }
     if let Some(parent) = Path::new(&to).parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create catalog directory {}: {}", parent.display(), e))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create catalog directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
     if !Path::new(&from).exists() {
         return Ok(());
     }
-    fs::rename(&from, &to).map_err(|e| format!("Failed to move catalog from {} to {}: {}", from, to, e))
+    fs::rename(&from, &to)
+        .map_err(|e| format!("Failed to move catalog from {} to {}: {}", from, to, e))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

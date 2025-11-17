@@ -1,12 +1,14 @@
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 #[tauri::command]
 pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
-    if passes == 0 { return Err("passes must be >= 1".into()); }
+    if passes == 0 {
+        return Err("passes must be >= 1".into());
+    }
     let mut erased = 0usize;
 
     for path_str in files {
@@ -17,18 +19,27 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
         }
         let metadata = match std::fs::metadata(&path) {
             Ok(m) => m,
-            Err(e) => { eprintln!("metadata failed {}: {}", path_str, e); continue; }
+            Err(e) => {
+                eprintln!("metadata failed {}: {}", path_str, e);
+                continue;
+            }
         };
         let len = metadata.len();
         if len == 0 {
-            if let Err(e) = std::fs::remove_file(&path) { eprintln!("remove_file failed {}: {}", path_str, e); }
-            else { erased += 1; }
+            if let Err(e) = std::fs::remove_file(&path) {
+                eprintln!("remove_file failed {}: {}", path_str, e);
+            } else {
+                erased += 1;
+            }
             continue;
         }
 
         let mut file = match OpenOptions::new().write(true).open(&path) {
             Ok(f) => f,
-            Err(e) => { eprintln!("open for write failed {}: {}", path_str, e); continue; }
+            Err(e) => {
+                eprintln!("open for write failed {}: {}", path_str, e);
+                continue;
+            }
         };
 
         let mut buffer = vec![0u8; 1024 * 1024];
@@ -38,10 +49,15 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
             while remaining > 0 {
                 let chunk = std::cmp::min(remaining, buffer.len() as u64) as usize;
                 OsRng.fill_bytes(&mut buffer[..chunk]);
-                if let Err(e) = file.write_all(&buffer[..chunk]) { eprintln!("write failed {}: {}", path_str, e); break; }
+                if let Err(e) = file.write_all(&buffer[..chunk]) {
+                    eprintln!("write failed {}: {}", path_str, e);
+                    break;
+                }
                 remaining -= chunk as u64;
             }
-            if let Err(e) = file.flush() { eprintln!("flush failed {}: {}", path_str, e); }
+            if let Err(e) = file.flush() {
+                eprintln!("flush failed {}: {}", path_str, e);
+            }
         }
         drop(file);
 
@@ -53,4 +69,3 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
 
     Ok(erased)
 }
-

@@ -4,17 +4,27 @@ pub fn silent_install(path: String, elevate: bool) -> Result<(), String> {
     use std::path::PathBuf;
     use std::process::Command;
     let pb = PathBuf::from(&path);
-    if !pb.exists() { return Err(format!("installer not found: {}", path)); }
-    let ext = pb.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    if !pb.exists() {
+        return Err(format!("installer not found: {}", path));
+    }
+    let ext = pb
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
 
     fn run_process_elevated(file: &str, args: &[&str]) -> bool {
         let arglist = {
-            let items: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', "''"))).collect();
+            let items: Vec<String> = args
+                .iter()
+                .map(|a| format!("'{}'", a.replace('\'', "''")))
+                .collect();
             format!("@({})", items.join(", "))
         };
         let ps = format!(
             "Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-            file.replace('\'', "''"), arglist
+            file.replace('\'', "''"),
+            arglist
         );
         Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
@@ -25,10 +35,18 @@ pub fn silent_install(path: String, elevate: bool) -> Result<(), String> {
 
     if ext == "msi" {
         let args = ["/i", &path, "/qn", "/norestart", "ALLUSERS=1"];
-        let ok = if elevate { run_process_elevated("msiexec", &args) } else {
-            Command::new("msiexec").args(args).status().map(|s| s.success()).unwrap_or(false)
+        let ok = if elevate {
+            run_process_elevated("msiexec", &args)
+        } else {
+            Command::new("msiexec")
+                .args(args)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
         };
-        if ok { return Ok(()); }
+        if ok {
+            return Ok(());
+        }
         return Err("msiexec failed".into());
     }
 
@@ -41,10 +59,18 @@ pub fn silent_install(path: String, elevate: bool) -> Result<(), String> {
             vec!["/quiet"],
         ];
         for combo in combos {
-            let ok = if elevate { run_process_elevated(&path, &combo) } else {
-                Command::new(&path).args(&combo).status().map(|s| s.success()).unwrap_or(false)
+            let ok = if elevate {
+                run_process_elevated(&path, &combo)
+            } else {
+                Command::new(&path)
+                    .args(&combo)
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
             };
-            if ok { return Ok(()); }
+            if ok {
+                return Ok(());
+            }
         }
         return Err("no silent flag combination succeeded".into());
     }
@@ -64,17 +90,27 @@ pub fn launch_installer(path: String, elevate: bool) -> Result<(), String> {
     use std::path::PathBuf;
     use std::process::Command;
     let pb = PathBuf::from(&path);
-    if !pb.exists() { return Err(format!("installer not found: {}", path)); }
-    let ext = pb.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    if !pb.exists() {
+        return Err(format!("installer not found: {}", path));
+    }
+    let ext = pb
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
 
     fn run_process_elevated(file: &str, args: &[&str]) -> bool {
         let arglist = {
-            let items: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', "''"))).collect();
+            let items: Vec<String> = args
+                .iter()
+                .map(|a| format!("'{}'", a.replace('\'', "''")))
+                .collect();
             format!("@({})", items.join(", "))
         };
         let ps = format!(
             "Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
-            file.replace('\'', "''"), arglist
+            file.replace('\'', "''"),
+            arglist
         );
         Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
@@ -85,16 +121,33 @@ pub fn launch_installer(path: String, elevate: bool) -> Result<(), String> {
 
     if ext == "msi" {
         let args = ["/i", &path];
-        let ok = if elevate { run_process_elevated("msiexec", &args) } else {
-            Command::new("msiexec").args(args).status().map(|s| s.success()).unwrap_or(false)
+        let ok = if elevate {
+            run_process_elevated("msiexec", &args)
+        } else {
+            Command::new("msiexec")
+                .args(args)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
         };
-        if ok { return Ok(()); }
+        if ok {
+            return Ok(());
+        }
         return Err("msiexec launch failed".into());
     }
-    let ok = if elevate { run_process_elevated(&path, &[]) } else {
-        Command::new(&path).status().map(|s| s.success()).unwrap_or(false)
+    let ok = if elevate {
+        run_process_elevated(&path, &[])
+    } else {
+        Command::new(&path)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     };
-    if ok { Ok(()) } else { Err("failed to start installer".into()) }
+    if ok {
+        Ok(())
+    } else {
+        Err("failed to start installer".into())
+    }
 }
 
 #[tauri::command]
@@ -117,9 +170,15 @@ pub struct UninstallEntry {
 
 #[cfg(target_os = "windows")]
 fn read_uninstall_entries() -> Vec<UninstallEntry> {
-    use winreg::enums::*;
     use winreg::RegKey;
-    fn collect_from(hive: &RegKey, subkey: &str, hive_name: &str, view: &str, out: &mut Vec<UninstallEntry>) {
+    use winreg::enums::*;
+    fn collect_from(
+        hive: &RegKey,
+        subkey: &str,
+        hive_name: &str,
+        view: &str,
+        out: &mut Vec<UninstallEntry>,
+    ) {
         if let Ok(key) = hive.open_subkey_with_flags(subkey, KEY_READ) {
             for sk in key.enum_keys().filter_map(|x| x.ok()) {
                 if let Ok(appkey) = key.open_subkey(&sk) {
@@ -162,7 +221,9 @@ pub fn list_uninstall_entries() -> Result<Vec<UninstallEntry>, String> {
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn list_uninstall_entries() -> Result<Vec<UninstallEntry>, String> { Ok(Vec::new()) }
+pub fn list_uninstall_entries() -> Result<Vec<UninstallEntry>, String> {
+    Ok(Vec::new())
+}
 
 #[derive(serde::Serialize, Clone, Default)]
 pub struct VerifyResult {
@@ -172,10 +233,14 @@ pub struct VerifyResult {
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub async fn verify_install(display_name_hint: Option<String>, timeout_ms: Option<u64>) -> Result<VerifyResult, String> {
-    use tokio::time::{sleep, Duration};
+pub async fn verify_install(
+    display_name_hint: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<VerifyResult, String> {
+    use tokio::time::{Duration, sleep};
     let before = read_uninstall_entries();
-    let before_keys: std::collections::HashSet<String> = before.iter().map(|e| e.key_path.clone()).collect();
+    let before_keys: std::collections::HashSet<String> =
+        before.iter().map(|e| e.key_path.clone()).collect();
     let hint = display_name_hint.unwrap_or_default().to_lowercase();
     let timeout = timeout_ms.unwrap_or(30_000);
     let mut elapsed = 0u64;
@@ -183,9 +248,14 @@ pub async fn verify_install(display_name_hint: Option<String>, timeout_ms: Optio
     while elapsed <= timeout {
         let now = read_uninstall_entries();
         for e in &now {
-            if before_keys.contains(&e.key_path) { continue; }
+            if before_keys.contains(&e.key_path) {
+                continue;
+            }
             if hint.is_empty() || e.display_name.to_lowercase().contains(&hint) {
-                return Ok(VerifyResult { verified: true, matched: Some(e.clone()) });
+                return Ok(VerifyResult {
+                    verified: true,
+                    matched: Some(e.clone()),
+                });
             }
         }
         sleep(Duration::from_millis(step)).await;
@@ -193,28 +263,49 @@ pub async fn verify_install(display_name_hint: Option<String>, timeout_ms: Optio
     }
     let final_entries = read_uninstall_entries();
     if !hint.is_empty() {
-        if let Some(e) = final_entries.into_iter().find(|e| e.display_name.to_lowercase().contains(&hint)) {
-            return Ok(VerifyResult { verified: true, matched: Some(e) });
+        if let Some(e) = final_entries
+            .into_iter()
+            .find(|e| e.display_name.to_lowercase().contains(&hint))
+        {
+            return Ok(VerifyResult {
+                verified: true,
+                matched: Some(e),
+            });
         }
     }
-    Ok(VerifyResult { verified: false, matched: None })
+    Ok(VerifyResult {
+        verified: false,
+        matched: None,
+    })
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub async fn verify_install(_display_name_hint: Option<String>, _timeout_ms: Option<u64>) -> Result<VerifyResult, String> {
-    Ok(VerifyResult { verified: false, matched: None })
+pub async fn verify_install(
+    _display_name_hint: Option<String>,
+    _timeout_ms: Option<u64>,
+) -> Result<VerifyResult, String> {
+    Ok(VerifyResult {
+        verified: false,
+        matched: None,
+    })
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn is_installed(display_name_hint: String) -> Result<bool, String> {
     let hint = display_name_hint.to_lowercase();
-    if hint.trim().is_empty() { return Ok(false); }
+    if hint.trim().is_empty() {
+        return Ok(false);
+    }
     let entries = read_uninstall_entries();
-    Ok(entries.into_iter().any(|e| e.display_name.to_lowercase().contains(&hint)))
+    Ok(entries
+        .into_iter()
+        .any(|e| e.display_name.to_lowercase().contains(&hint)))
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn is_installed(_display_name_hint: String) -> Result<bool, String> { Ok(false) }
+pub fn is_installed(_display_name_hint: String) -> Result<bool, String> {
+    Ok(false)
+}

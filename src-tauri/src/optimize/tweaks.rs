@@ -1,7 +1,7 @@
-use std::collections::HashSet;
-use serde::{Deserialize, Serialize};
 use super::shell_helpers::run_powershell_commands;
 use super::update_profiles::apply_update_profile_impl;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct TweakApplyRequest {
@@ -154,7 +154,6 @@ foreach ($entry in $entries) {
     }
 }
 
-
 #[cfg(target_os = "windows")]
 fn script_for_config(id: &str) -> Vec<String> {
     match id {
@@ -192,7 +191,6 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Fo
     }
 }
 
-
 pub fn apply_tweaks(payload: TweakApplyRequest) -> Result<TweakApplyResponse, String> {
     let mut commands = Vec::new();
     let mut seen = HashSet::new();
@@ -219,4 +217,3 @@ pub fn apply_tweaks(payload: TweakApplyRequest) -> Result<TweakApplyResponse, St
         profile_applied: payload.update_profile,
     })
 }
-

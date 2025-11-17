@@ -1,6 +1,6 @@
-use sysinfo::System;
 use std::thread;
 use std::time::Duration;
+use sysinfo::System;
 
 #[tauri::command]
 pub fn get_cpu_usage() -> Result<f32, String> {

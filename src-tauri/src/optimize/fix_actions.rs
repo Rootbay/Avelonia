@@ -1,10 +1,10 @@
-use std::env;
 use super::shell_helpers::{escape_single_quotes, run_powershell_commands};
+use std::env;
 
 #[cfg(target_os = "windows")]
 fn run_autologin_impl() -> Result<String, String> {
-    let raw_username =
-        env::var("AVELONIA_AUTOLOGIN_USERNAME").unwrap_or_else(|_| env::var("USERNAME").unwrap_or_default());
+    let raw_username = env::var("AVELONIA_AUTOLOGIN_USERNAME")
+        .unwrap_or_else(|_| env::var("USERNAME").unwrap_or_default());
     if raw_username.is_empty() {
         return Err("Unable to determine username for autologin".into());
     }
@@ -13,7 +13,10 @@ fn run_autologin_impl() -> Result<String, String> {
     let (domain, user) = if let Some((dom, user)) = raw_username.split_once('\\') {
         (dom.to_string(), user.to_string())
     } else {
-        (env::var("USERDOMAIN").unwrap_or_else(|_| ".".into()), raw_username.clone())
+        (
+            env::var("USERDOMAIN").unwrap_or_else(|_| ".".into()),
+            raw_username.clone(),
+        )
     };
     let mut commands = Vec::new();
     commands.push(r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Force | Out-Null"#.to_string());
@@ -38,10 +41,10 @@ fn run_autologin_impl() -> Result<String, String> {
 #[cfg(target_os = "windows")]
 fn run_reset_windows_update_impl() -> Result<String, String> {
     let commands = vec![
-        r#"@('wuauserv','bits','cryptsvc','TrustedInstaller') | ForEach-Object { Stop-Service -Name /bin/bash -Force -ErrorAction SilentlyContinue }"#.to_string(),
-        r#"Remove-Item -Path ":windir\SoftwareDistribution" -Recurse -Force -ErrorAction SilentlyContinue"#.to_string(),
-        r#"Remove-Item -Path ":windir\System32\catroot2" -Recurse -Force -ErrorAction SilentlyContinue"#.to_string(),
-        r#"@('wuauserv','bits','cryptsvc','TrustedInstaller') | ForEach-Object { Start-Service -Name /bin/bash -ErrorAction SilentlyContinue }"#.to_string(),
+        r#"@('wuauserv','bits','cryptsvc','TrustedInstaller') | ForEach-Object { Stop-Service -Name $_ -Force -ErrorAction SilentlyContinue }"#.to_string(),
+        r#"Remove-Item -Path "$env:windir\SoftwareDistribution" -Recurse -Force -ErrorAction SilentlyContinue"#.to_string(),
+        r#"Remove-Item -Path "$env:windir\System32\catroot2" -Recurse -Force -ErrorAction SilentlyContinue"#.to_string(),
+        r#"@('wuauserv','bits','cryptsvc','TrustedInstaller') | ForEach-Object { Start-Service -Name $_ -ErrorAction SilentlyContinue }"#.to_string(),
     ];
     run_powershell_commands(&commands, "reset_updates")?;
     Ok("Windows Update reset task queued".into())

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
@@ -45,11 +46,38 @@ pub struct VtState {
     api_key: Mutex<Option<String>>,
     cache: Arc<DashMap<String, CacheEntry>>,
     last_req: Mutex<Option<u64>>,
+    cache_loaded: AtomicBool,
 }
 
 impl VtState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn ensure_cache_loaded(&self) {
+        if self.cache_loaded.load(Ordering::Acquire) {
+            return;
+        }
+        if self
+            .cache_loaded
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            for (k, v) in load_cache_from_disk() {
+                self.cache.insert(k, v);
+            }
+        }
+    }
+
+    fn reload_cache(&self) -> usize {
+        self.cache.clear();
+        let map = load_cache_from_disk();
+        let len = map.len();
+        for (k, v) in map {
+            self.cache.insert(k, v);
+        }
+        self.cache_loaded.store(true, Ordering::Release);
+        len
     }
 }
 
@@ -287,6 +315,7 @@ fn cache_needs_refresh(state: &VtState, sha256: &str) -> bool {
 
 #[tauri::command]
 pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, String> {
+    state.ensure_cache_loaded();
     let key_set = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
     Ok(VtStatus { key_set, cached_items: state.cache.len() })
 }
@@ -355,6 +384,7 @@ pub fn vt_set_api_key(state: State<'_, VtState>, key: Option<String>, persist: O
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn vt_scan_needed(state: State<'_, VtState>, limit: Option<u32>) -> Result<(usize, usize), String> {
+    state.ensure_cache_loaded();
     let limit = limit.unwrap_or(50).max(1).min(200) as usize;
     let mut need_startup = 0usize;
     let mut need_registry = 0usize;
@@ -386,9 +416,7 @@ pub fn vt_scan_needed(_state: State<'_, VtState>, _limit: Option<u32>) -> Result
 
 #[tauri::command]
 pub fn vt_load_cache(state: State<'_, VtState>) -> Result<usize, String> {
-    let map = load_cache_from_disk();
-    for (k, v) in map.into_iter() { state.cache.insert(k, v); }
-    Ok(state.cache.len())
+    Ok(state.reload_cache())
 }
 
 #[cfg(target_os = "windows")]
@@ -511,7 +539,7 @@ fn resolve_registry_run_targets() -> Vec<(String /*display*/, String /*path*/, S
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<Vec<VtItemReport>, String> {
-    let _ = vt_load_cache(state.clone());
+    state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
     let items = resolve_startup_shortcut_targets();
@@ -643,7 +671,7 @@ pub async fn vt_scan_startup(app: AppHandle, state: State<'_, VtState>, limit: O
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_registry(app: AppHandle, state: State<'_, VtState>, limit: Option<u32>, force: Option<bool>) -> Result<Vec<VtItemReport>, String> {
-    let _ = vt_load_cache(state.clone());
+    state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
     let mut out: Vec<VtItemReport> = Vec::new();

@@ -29,7 +29,11 @@ pub(crate) fn run_command_text(cmd: &str, args: &[&str]) -> Result<String, Strin
     if output.status.success() {
         Ok(text)
     } else {
-        let suffix = if text.is_empty() { String::new() } else { format!(": {text}") };
+        let suffix = if text.is_empty() {
+            String::new()
+        } else {
+            format!(": {text}")
+        };
         Err(format!(
             "{} exited with status {:?}{}",
             cmd,
@@ -83,8 +87,8 @@ pub(crate) fn run_powershell_json(script: &str) -> Result<Vec<Value>, String> {
     if text.is_empty() {
         return Ok(Vec::new());
     }
-    let parsed: Value =
-        serde_json::from_str(&text).map_err(|e| format!("failed to parse powershell output: {}", e))?;
+    let parsed: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("failed to parse powershell output: {}", e))?;
     let items = match parsed {
         Value::Array(results) => {
             if results.is_empty() {
@@ -222,8 +226,6 @@ pub(crate) fn is_com_instance_string(text: &str) -> bool {
     false
 }
 
-
-
 pub(crate) fn run_schtasks(args: &[&str]) -> bool {
     if std::process::Command::new("schtasks")
         .args(args)
@@ -246,19 +248,11 @@ pub(crate) fn run_schtasks(args: &[&str]) -> bool {
         arglist
     );
     std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
-
 
 pub(crate) fn run_schtasks_capture(args: &[&str]) -> (bool, String, String) {
     match std::process::Command::new("schtasks").args(args).output() {
@@ -271,8 +265,6 @@ pub(crate) fn run_schtasks_capture(args: &[&str]) -> (bool, String, String) {
         Err(_) => (false, String::new(), String::new()),
     }
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn run_cmd_elevated(args: &[&str]) -> bool {
@@ -288,19 +280,11 @@ pub(crate) fn run_cmd_elevated(args: &[&str]) -> bool {
         arglist
     );
     std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn run_reg(args: &[&str]) -> bool {
@@ -310,8 +294,6 @@ pub(crate) fn run_reg(args: &[&str]) -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn run_reg_elevated(args: &[&str]) -> bool {
@@ -327,19 +309,11 @@ pub(crate) fn run_reg_elevated(args: &[&str]) -> bool {
         arglist
     );
     std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn run_powershell_elevated(args: &[&str]) -> bool {
@@ -355,26 +329,16 @@ pub(crate) fn run_powershell_elevated(args: &[&str]) -> bool {
         arglist
     );
     std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &ps,
-        ])
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
 
-
-
 #[cfg(target_os = "windows")]
 pub(crate) fn escape_single_quotes(value: &str) -> String {
     value.replace('\'', "''")
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn write_temp_ps_script(prefix: &str, contents: &str) -> Result<String, String> {
@@ -384,8 +348,6 @@ pub(crate) fn write_temp_ps_script(prefix: &str, contents: &str) -> Result<Strin
     std::fs::write(&path, contents).map_err(|e| format!("write script failed: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
-
-
 
 #[cfg(target_os = "windows")]
 pub(crate) fn run_powershell_commands(commands: &[String], prefix: &str) -> Result<(), String> {
