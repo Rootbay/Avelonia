@@ -1,5 +1,5 @@
 ﻿<script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { Button } from '$lib/components/ui/button';
   import {
     Card,
@@ -761,6 +761,7 @@
   async function loadTasks() {
     if (loadingTasks || tasksLoaded) return;
     loadingTasks = true;
+    await tick();
     try {
       const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
@@ -950,9 +951,11 @@
     timestamp: number;
   };
 
+  const NETWORK_SUMMARY_TTL = 5 * 60 * 1000;
   let activeNetworkPreset = $state<NetworkPresetId>(NETWORK_PRESETS[0].id);
   let networkSummary = $state<NetworkSummary | null>(null);
   let networkInfoLoading = $state(false);
+  let networkSummaryFetchedAt = $state<number | null>(null);
   let networkHistory = $state<NetworkHistoryEntry[]>([]);
   let pingTarget = $state('1.1.1.1');
   let tracerouteTarget = $state('1.1.1.1');
@@ -979,9 +982,12 @@
   }
 
   async function refreshNetworkStatus() {
+    if (networkInfoLoading) return;
     networkInfoLoading = true;
+    await tick();
     try {
       networkSummary = await getNetworkSummary();
+      networkSummaryFetchedAt = Date.now();
     } catch (error: unknown) {
       console.error('network summary failed', error);
       const text =
@@ -1098,12 +1104,31 @@
     try {
       _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number;
     } catch { /* noop */ }
+    let networkPrefetchHandle: number | null = null;
+    const scheduleNetworkRefresh = () => {
+      if (!networkSummary && !networkInfoLoading) {
+        void refreshNetworkStatus();
+      }
+    };
+    if (typeof requestIdleCallback === 'function') {
+      networkPrefetchHandle = requestIdleCallback(scheduleNetworkRefresh);
+    } else {
+      networkPrefetchHandle = window.setTimeout(scheduleNetworkRefresh, 250);
+    }
+
     return () => {
       io.disconnect();
       try {
         if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number);
       } catch { /* noop */ }
       _registryPollTimer = null;
+      if (networkPrefetchHandle !== null) {
+        if (typeof cancelIdleCallback === 'function') {
+          cancelIdleCallback(networkPrefetchHandle);
+        } else {
+          window.clearTimeout(networkPrefetchHandle);
+        }
+      }
     };
   });
 
@@ -1112,8 +1137,11 @@
       void loadRegistryItems();
     } else if (activeOptimizeTab === 'tasks') {
       void loadTasks();
-    } else if (activeOptimizeTab === 'network') {
-      void refreshNetworkStatus();
+    } else if (activeOptimizeTab === 'network' && !networkInfoLoading) {
+      const elapsed = networkSummaryFetchedAt === null ? Infinity : Date.now() - networkSummaryFetchedAt;
+      if (!networkSummary || elapsed > NETWORK_SUMMARY_TTL) {
+        void refreshNetworkStatus();
+      }
     }
   });
 
