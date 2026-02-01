@@ -58,15 +58,37 @@ let downloadsInitialized = false;
 async function initializeDownloads(hasStored: Download[] | null) {
   if (downloadsInitialized) return;
   downloadsInitialized = true;
-  if (typeof window === 'undefined' || hasStored) {
+  if (typeof window === 'undefined') {
     return;
   }
   try {
     const builtIn = await loadBuiltInDownloads();
-    downloads.set(builtIn);
+    if (!hasStored) {
+      downloads.set(builtIn);
+    } else {
+      await syncBuiltInDownloads(builtIn);
+    }
   } catch (error) {
     console.error('Failed to load default downloads', error);
   }
+}
+
+async function syncBuiltInDownloads(builtIn: Download[]) {
+  downloads.update((current) => {
+    let hasChange = false;
+    const next = current.map((item) => {
+      // Only sync built-in downloads (typically IDs < 100)
+      if (item.id >= 100) return item;
+
+      const match = builtIn.find((b) => b.name === item.name);
+      if (match && match.downloadLink !== item.downloadLink) {
+        hasChange = true;
+        return { ...item, downloadLink: match.downloadLink, size: match.size };
+      }
+      return item;
+    });
+    return hasChange ? next : current;
+  });
 }
 
 if (typeof window !== 'undefined') {

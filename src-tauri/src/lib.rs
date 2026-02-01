@@ -247,6 +247,21 @@ async fn download_file(
     })?;
     println!("Rust: Got response for ID: {}", id);
 
+    if !res.status().is_success() {
+        let status = res.status();
+        println!("Rust Error: HTTP request failed for ID {}: {}", id, status);
+        return Err(format!("HTTP request failed: {}", status));
+    }
+
+    if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE) {
+        if let Ok(s) = ct.to_str() {
+            if s.contains("text/html") {
+                println!("Rust Error: Content-Type is text/html for ID {}: {}", id, s);
+                return Err(format!("Invalid Content-Type: {}", s));
+            }
+        }
+    }
+
     let total = res.content_length().unwrap_or(0);
     if total > 0 {
         println!("Rust: Content length for ID {}: {}", id, total);
