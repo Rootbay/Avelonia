@@ -56,9 +56,10 @@ function load(): AppSettings {
       fallbackOpen: parsed?.downloader?.fallbackOpen ?? true,
       verifyInstall: parsed?.downloader?.verifyInstall ?? false,
       preferWinget: parsed?.downloader?.preferWinget ?? false,
-      downloadCatalogPath: typeof parsed?.downloader?.downloadCatalogPath === 'string'
-        ? parsed.downloader.downloadCatalogPath
-        : '',
+      downloadCatalogPath:
+        typeof parsed?.downloader?.downloadCatalogPath === 'string'
+          ? parsed.downloader.downloadCatalogPath
+          : '',
     };
     return { downloader: d };
   } catch (error) {

@@ -29,9 +29,13 @@ export default [
   {
     files: ['**/*.svelte.ts'],
     languageOptions: {
+      parser: svelteParser,
+      parserOptions: {
+        parser: tsParser,
+        extraFileExtensions: ['.svelte'],
+      },
       ecmaVersion: 'latest',
       sourceType: 'module',
-      parser: tsParser,
       globals: {
         ...globals.browser,
         ...globals.node,

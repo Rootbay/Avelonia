@@ -1,27 +1,30 @@
+use crate::AppError;
 use rand::RngCore;
 use rand::rngs::OsRng;
+use rayon::prelude::*;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tauri::command]
-pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
+pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, AppError> {
     if passes == 0 {
-        return Err("passes must be >= 1".into());
+        return Err(AppError::Internal("passes must be >= 1".to_string()));
     }
-    let mut erased = 0usize;
+    let erased_count = AtomicUsize::new(0);
 
-    for path_str in files {
+    files.into_par_iter().for_each(|path_str| {
         let path = PathBuf::from(&path_str);
         if !path.exists() || !path.is_file() {
             eprintln!("secure_erase: skipping non-file {}", path_str);
-            continue;
+            return;
         }
         let metadata = match std::fs::metadata(&path) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("metadata failed {}: {}", path_str, e);
-                continue;
+                return;
             }
         };
         let len = metadata.len();
@@ -29,31 +32,40 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
             if let Err(e) = std::fs::remove_file(&path) {
                 eprintln!("remove_file failed {}: {}", path_str, e);
             } else {
-                erased += 1;
+                erased_count.fetch_add(1, Ordering::SeqCst);
             }
-            continue;
+            return;
         }
 
         let mut file = match OpenOptions::new().write(true).open(&path) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("open for write failed {}: {}", path_str, e);
-                continue;
+                return;
             }
         };
 
         let mut buffer = vec![0u8; 1024 * 1024];
+        let mut success = true;
         for _ in 0..passes {
             let mut remaining = len;
-            file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+            if let Err(e) = file.seek(SeekFrom::Start(0)) {
+                eprintln!("seek failed {}: {}", path_str, e);
+                success = false;
+                break;
+            }
             while remaining > 0 {
                 let chunk = std::cmp::min(remaining, buffer.len() as u64) as usize;
                 OsRng.fill_bytes(&mut buffer[..chunk]);
                 if let Err(e) = file.write_all(&buffer[..chunk]) {
                     eprintln!("write failed {}: {}", path_str, e);
+                    success = false;
                     break;
                 }
                 remaining -= chunk as u64;
+            }
+            if !success {
+                break;
             }
             if let Err(e) = file.flush() {
                 eprintln!("flush failed {}: {}", path_str, e);
@@ -61,11 +73,15 @@ pub fn secure_erase(files: Vec<String>, passes: u32) -> Result<usize, String> {
         }
         drop(file);
 
-        match std::fs::remove_file(&path) {
-            Ok(_) => erased += 1,
-            Err(e) => eprintln!("remove_file failed {}: {}", path_str, e),
+        if success {
+            match std::fs::remove_file(&path) {
+                Ok(_) => {
+                    erased_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Err(e) => eprintln!("remove_file failed {}: {}", path_str, e),
+            }
         }
-    }
+    });
 
-    Ok(erased)
+    Ok(erased_count.load(Ordering::SeqCst))
 }

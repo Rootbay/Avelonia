@@ -30,10 +30,7 @@ function loadSizeCache(): SizeCache {
     for (const [key, value] of Object.entries(parsed)) {
       if (!value || typeof value !== 'object') continue;
       const entry = value as Record<string, unknown>;
-      if (
-        typeof entry.size === 'string' &&
-        typeof entry.updatedAt === 'number'
-      ) {
+      if (typeof entry.size === 'string' && typeof entry.updatedAt === 'number') {
         result[key] = {
           size: entry.size,
           updatedAt: entry.updatedAt,

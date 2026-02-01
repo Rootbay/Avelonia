@@ -22,9 +22,7 @@ export async function listSuspiciousTasks(): Promise<string[]> {
   return Array.isArray(res) ? res : [];
 }
 
-export async function getTaskDetails(
-  taskName: string
-): Promise<[string, string, boolean, number]> {
+export async function getTaskDetails(taskName: string): Promise<[string, string, boolean, number]> {
   return (await invoke('get_task_details', { task_name: taskName })) as [
     string,
     string,
@@ -33,7 +31,7 @@ export async function getTaskDetails(
   ];
 }
 
-export async function executeTaskAction(action: TaskAction, names: string[]): Promise<any> {
+export async function executeTaskAction(action: TaskAction, names: string[]): Promise<unknown> {
   if (!action || names.length === 0) return null;
   if (action === 'disable') return await invoke('disable_scheduled_tasks', { names });
   if (action === 'enable') return await invoke('enable_scheduled_tasks', { names });

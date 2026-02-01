@@ -23,7 +23,6 @@
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogClose,
   } from '$lib/components/ui/dialog';
   import {
     AlertDialog,
@@ -39,7 +38,6 @@
     RefreshCw,
     FolderOpen,
     Trash2,
-    Eye,
     Copy as CopyIcon,
     Search as SearchIcon,
     Network as NetworkIcon,
@@ -72,17 +70,8 @@
     openRegistryKey,
     regId,
   } from './services/registry';
-  import type {
-    StartupRegItem,
-    CleanupDiagnostics,
-    RegistryAttempt,
-  } from './services/registry';
-  import {
-    listScheduledTasks,
-    listSuspiciousTasks,
-    getTaskDetails,
-    executeTaskAction,
-  } from './services/tasks';
+  import type { StartupRegItem, CleanupDiagnostics, RegistryAttempt } from './services/registry';
+  import { listScheduledTasks, getTaskDetails, executeTaskAction } from './services/tasks';
   import type { ScheduledTask, TaskAction } from './services/tasks';
   import {
     NETWORK_PRESETS,
@@ -99,10 +88,7 @@
   import {
     extractExeFromCommand,
     extractExePathFromCommand,
-    isCommandSuspicious,
-    isHardCommandSuspicious,
     splitTaskName,
-    isUnderMicrosoft,
   } from './utils/heuristics';
 
   let message = $state('');
@@ -129,9 +115,7 @@
   let postDiagLoading = $state(false);
   let postDiag: CleanupDiagnostics | null = $state(null);
   let regPreset = $state<'basic' | 'force' | 'aggressive' | 'full'>('basic');
-  let activeOptimizeTab = $state<'tweaks' | 'startup' | 'registry' | 'tasks' | 'network'>(
-    'tweaks'
-  );
+  let activeOptimizeTab = $state<'tweaks' | 'startup' | 'registry' | 'tasks' | 'network'>('tweaks');
 
   const REGISTRY_MAX_DOM = 300;
   const REGISTRY_ROW_PX = 56;
@@ -186,12 +170,16 @@
     try {
       const raw = localStorage.getItem(REG_HISTORY_KEY);
       if (raw) registryHistory = JSON.parse(raw) ?? {};
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   });
   function saveRegHistory() {
     try {
       localStorage.setItem(REG_HISTORY_KEY, JSON.stringify(registryHistory));
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 
   let rebootDetected = $state(false);
@@ -211,20 +199,6 @@
   const regHasExePath = $derived(
     pendingRegistry.some((r) => !!extractExePathFromCommand(r.command))
   );
-  const regSuggestAdvanced = $derived.by(() => {
-    if (registryUserRebooted) return true;
-    const ids = pendingRegistry.map(regId);
-    let anyRebooted = false;
-    let triedBasic = false;
-    for (const id of ids) {
-      const h = registryHistory[id];
-      if (!h) continue;
-      if (h.rebootConfirmed) anyRebooted = true;
-      if (h.attempts >= 1 && (h.lastOptions.force || h.lastOptions.ifeo || h.lastOptions.dor))
-        triedBasic = true;
-    }
-    return anyRebooted && triedBasic;
-  });
 
   function requestRemoveSelectedRegistry() {
     const entries = startupRegItems.filter((it) => selectedReg.has(regId(it)));
@@ -309,7 +283,9 @@
           const names = Array.from(suspects);
           try {
             await stopServices(names);
-          } catch { /* noop */ }
+          } catch {
+            /* noop */
+          }
           try {
             const n = await disableServices(names);
             if (n > 0) toast.message(`Disabled ${n} related service${n === 1 ? '' : 's'}.`);
@@ -439,7 +415,9 @@
           } as RegistryAttempt;
         }
         saveRegHistory();
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       pendingRegistry = [];
       registryForce = false;
       registryBlockIFEO = false;
@@ -472,14 +450,18 @@
             toast.warning('Watchdog detected: entry reappeared in Startup (Registry).');
             break;
           }
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
 
         try {
           for (const img of images) {
             const running = await isProcessRunning(img);
             if (running && !restarted.includes(img)) restarted.push(img);
           }
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
 
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -514,7 +496,9 @@
           startupRegItems.length,
           startupRegItems.map((i) => i.name).slice(0, 10)
         );
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       selectedReg = new SvelteSet();
       registryLoaded = true;
       registryVisible = Math.min(startupRegItems.length, 50);
@@ -551,11 +535,13 @@
       }
       if (changed) {
         startupRegItems = next;
-      const keep = new SvelteSet(selectedReg);
-      selectedReg = new SvelteSet(Array.from(keep).filter((k) => nextSet.has(k)));
+        const keep = new SvelteSet(selectedReg);
+        selectedReg = new SvelteSet(Array.from(keep).filter((k) => nextSet.has(k)));
         registryVisible = Math.min(Math.max(50, registryVisible), startupRegItems.length);
       }
-    } catch { /* noop */ } finally {
+    } catch {
+      /* noop */
+    } finally {
       _registryPollBusy = false;
     }
   }
@@ -620,22 +606,6 @@
       _registryScrollTick = false;
     });
   }
-  async function disableSelectedRegistry() {
-    const entries = startupRegItems.filter((it) => selectedReg.has(regId(it)));
-    if (entries.length === 0) return;
-    try {
-      await removeRegistryRun(entries);
-      pushLog(
-        'SUCCESS',
-        `Removed ${entries.length} registry startup entr${entries.length === 1 ? 'y' : 'ies'}`,
-        'Optimize'
-      );
-      toast.success(`Removed ${entries.length} registry entr${entries.length === 1 ? 'y' : 'ies'}`);
-      await reloadRegistryItems();
-    } catch (e) {
-      console.error(e);
-    }
-  }
 
   let tasks = $state<ScheduledTask[]>([]);
   let tasksQuery = $state('');
@@ -677,11 +647,11 @@
     try {
       const result = await getTaskDetails(name);
       const [task_to_run, author, is_sus, score] = result;
-      
+
       tasks = tasks.map((t) =>
         t.name === name ? { ...t, task_to_run, author, is_sus, score } : t
       );
-    } catch (e) {
+    } catch {
       // ignore
     } finally {
       enrichInFlight -= 1;
@@ -702,7 +672,7 @@
   }
 
   $effect(() => {
-    const _ = taskFilter;
+    void taskFilter;
     queueEnrichVisibleTasks(20);
   });
 
@@ -726,12 +696,11 @@
         try {
           console.groupCollapsed(`[tasks] ${taskAction} failures (${fails.length})`);
           for (const f of fails) {
-            const name = f?.name || 'unknown';
-            const step = f?.step || 'n/a';
-            const elevated = !!f?.elevated;
             const stderr = (f?.stderr || '').trim();
             const stdout = (f?.stdout || '').trim();
-              }
+            if (stderr) console.error(stderr);
+            if (stdout) console.log(stdout);
+          }
           console.groupEnd();
         } catch {
           // ignore
@@ -752,7 +721,7 @@
     try {
       const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
-        tasksLoaded = true;
+      tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
       queueEnrichVisibleTasks(12);
     } catch (e) {
@@ -967,8 +936,7 @@
       networkSummaryFetchedAt = Date.now();
     } catch (error: unknown) {
       console.error('network summary failed', error);
-      const text =
-        error instanceof Error ? error.message : 'Failed to refresh network summary';
+      const text = error instanceof Error ? error.message : 'Failed to refresh network summary';
       toast.error(text);
       networkSummary = null;
     } finally {
@@ -986,8 +954,7 @@
       networkTestResult = result;
       addNetworkHistory(label, result, true);
     } catch (error: unknown) {
-      const text =
-        error instanceof Error ? error.message : `${label} test failed`;
+      const text = error instanceof Error ? error.message : `${label} test failed`;
       networkTestResult = text;
       addNetworkHistory(label, text, false);
       toast.error(text);
@@ -1008,9 +975,7 @@
     await runNetworkTest('DNS Lookup', () => runDnsLookupCommand(dnsLookupTarget));
   }
 
-  const selectedPreset = $derived(
-    NETWORK_PRESETS.find((item) => item.id === activeNetworkPreset)
-  );
+  const selectedPreset = $derived(NETWORK_PRESETS.find((item) => item.id === activeNetworkPreset));
 
   async function applyNetworkPreset(id: NetworkPresetId) {
     const preset = NETWORK_PRESETS.find((item) => item.id === id);
@@ -1026,10 +991,7 @@
     await refreshNetworkStatus();
   }
 
-  async function runNetworkAction(
-    label: string,
-    action: () => Promise<string>
-  ): Promise<boolean> {
+  async function runNetworkAction(label: string, action: () => Promise<string>): Promise<boolean> {
     try {
       const output = await action();
       const message = (output ?? '').trim();
@@ -1044,8 +1006,8 @@
         error instanceof Error
           ? error.message
           : typeof error === 'string'
-          ? error
-          : `${label} failed`;
+            ? error
+            : `${label} failed`;
       toast.error(text);
       addNetworkHistory(label, text, false);
       return false;
@@ -1080,7 +1042,9 @@
     if (tasksSentinel) io.observe(tasksSentinel);
     try {
       _registryPollTimer = setInterval(pollRegistryOnce, 6000) as unknown as number;
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     let networkPrefetchHandle: number | null = null;
     const scheduleNetworkRefresh = () => {
       if (!networkSummary && !networkInfoLoading) {
@@ -1097,7 +1061,9 @@
       io.disconnect();
       try {
         if (_registryPollTimer) clearInterval(_registryPollTimer as unknown as number);
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       _registryPollTimer = null;
       if (networkPrefetchHandle !== null) {
         if (typeof cancelIdleCallback === 'function') {
@@ -1115,7 +1081,8 @@
     } else if (activeOptimizeTab === 'tasks') {
       void loadTasks();
     } else if (activeOptimizeTab === 'network' && !networkInfoLoading) {
-      const elapsed = networkSummaryFetchedAt === null ? Infinity : Date.now() - networkSummaryFetchedAt;
+      const elapsed =
+        networkSummaryFetchedAt === null ? Infinity : Date.now() - networkSummaryFetchedAt;
       if (!networkSummary || elapsed > NETWORK_SUMMARY_TTL) {
         void refreshNetworkStatus();
       }
@@ -1133,7 +1100,9 @@
   <Card>
     <CardHeader>
       <CardTitle class="text-2xl">Optimize</CardTitle>
-      <CardDescription>Manage startup items, registry Run keys, and scheduled tasks.</CardDescription>
+      <CardDescription
+        >Manage startup items, registry Run keys, and scheduled tasks.</CardDescription
+      >
     </CardHeader>
   </Card>
 
@@ -1169,16 +1138,16 @@
           <AlertDialogHeader>
             <AlertDialogTitle>Remove Registry Startup</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes selected Run/RunOnce entries. The app will attempt forced removal if needed
-              (may prompt for admin).
+              This removes selected Run/RunOnce entries. The app will attempt forced removal if
+              needed (may prompt for admin).
             </AlertDialogDescription>
           </AlertDialogHeader>
           {#if regPreset === 'full'}
             <Alert class="mb-2">
               <AlertDescription>
                 Full cleanup runs an aggressive cleanup: forced removal, IFEO blocking, and
-                delete-on-reboot, purging StartupApproved and removing related Scheduled Tasks and WMI
-                subscriptions You may get UAC prompts. Save your work and close unnecessary apps
+                delete-on-reboot, purging StartupApproved and removing related Scheduled Tasks and
+                WMI subscriptions You may get UAC prompts. Save your work and close unnecessary apps
                 before continuing.
               </AlertDescription>
             </Alert>
@@ -1201,8 +1170,8 @@
           {:else}
             <Alert class="mb-2">
               <AlertDescription>
-                Basic: attempts normal removal without elevation. Fastest path when nothing is locking
-                the entry. If it fails, try Force or Aggressive.
+                Basic: attempts normal removal without elevation. Fastest path when nothing is
+                locking the entry. If it fails, try Force or Aggressive.
               </AlertDescription>
             </Alert>
           {/if}
@@ -1224,7 +1193,7 @@
 
             {#if pendingRegistry.length}
               <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
-                {#each pendingRegistry.slice(0, 10) as it}
+                {#each pendingRegistry.slice(0, 10) as it (regId(it))}
                   <li class="truncate">
                     {it.name}
                     <span class="text-muted-foreground"> - {it.hive}\{it.key}</span>
@@ -1239,7 +1208,9 @@
             {/if}
           </div>
           <AlertDialogFooter class="pr-2">
-            <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onclick={() => (showRegistryConfirm = false)}
+              >Cancel</AlertDialogCancel
+            >
             <AlertDialogAction onclick={confirmRemoveRegistry}>Continue</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1257,7 +1228,7 @@
             <p class="text-sm text-muted-foreground">No suspicious entries recorded.</p>
           {:else}
             <div class="max-h-[50vh] overflow-y-auto space-y-3">
-              {#each suspectEntries as s}
+              {#each suspectEntries as s (s.id)}
                 <div class="rounded-md border p-3 bg-muted/10">
                   <div class="flex items-center gap-2">
                     <Badge variant="destructive">Suspicious</Badge>
@@ -1300,7 +1271,7 @@
                 {:else}
                   <p class="text-destructive">Some entries remain:</p>
                   <ul class="list-disc pl-5 mt-1">
-                    {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r}
+                    {#each postDiag.removedRegistry.stillPresent.slice(0, 6) as r (r)}
                       <li class="break-all">{r}</li>
                     {/each}
                     {#if postDiag.removedRegistry.stillPresent.length > 6}
@@ -1329,7 +1300,7 @@
                 {:else}
                   <p class="text-destructive">Related tasks remaining:</p>
                   <ul class="list-disc pl-5 mt-1">
-                    {#each postDiag.taskMatches.remaining.slice(0, 8) as t}
+                    {#each postDiag.taskMatches.remaining.slice(0, 8) as t (t)}
                       <li class="break-all">{t}</li>
                     {/each}
                     {#if postDiag.taskMatches.remaining.length > 8}
@@ -1367,7 +1338,7 @@
                   {/if}
                   {#if postDiag.runningImages.running.length > 0}
                     <li>
-                      Close or uninstall the processes still running: 
+                      Close or uninstall the processes still running:
                       {postDiag.runningImages.running.join(', ')}.
                     </li>
                   {/if}
@@ -1473,7 +1444,7 @@
               class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
             >
               <ul class="divide-y divide-border/60">
-                {#each Array.from({ length: 8 }) as _, i}
+                {#each Array.from({ length: 8 }) as _, i (i)}
                   <li class="px-2 py-2">
                     <div class="flex items-center gap-3">
                       <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
@@ -1556,7 +1527,7 @@
               class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
             >
               <ul class="divide-y divide-border/60">
-                {#each Array.from({ length: 6 }) as _, i}
+                {#each Array.from({ length: 6 }) as _, i (i)}
                   <li class="px-2 py-2">
                     <div class="flex items-center gap-3">
                       <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
@@ -1604,16 +1575,16 @@
                     {taskSort === 'suspicious'
                       ? 'Suspicious first'
                       : taskSort === 'name'
-                      ? 'Name'
-                      : taskSort === 'next'
-                      ? 'Next run'
-                      : taskSort === 'status'
-                      ? 'Status'
-                      : taskSort === 'author'
-                      ? 'Author'
-                      : taskSort === 'command'
-                      ? 'Command'
-                      : 'Sort by'}
+                        ? 'Name'
+                        : taskSort === 'next'
+                          ? 'Next run'
+                          : taskSort === 'status'
+                            ? 'Status'
+                            : taskSort === 'author'
+                              ? 'Author'
+                              : taskSort === 'command'
+                                ? 'Command'
+                                : 'Sort by'}
                   </p>
                 </SelectTrigger>
                 <SelectContent>
@@ -1628,13 +1599,17 @@
               <Select type="single">
                 <SelectTrigger class="w-40">
                   <p>
-                    {taskFilter === 'sus' && !includeDisabled && !includeNoNext && !includeMicrosoftInSus
+                    {taskFilter === 'sus' &&
+                    !includeDisabled &&
+                    !includeNoNext &&
+                    !includeMicrosoftInSus
                       ? 'Suspicious only'
-                      : taskFilter === 'sus' && (includeDisabled || includeNoNext || includeMicrosoftInSus)
-                      ? 'Suspicious + extras'
-                      : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
-                      ? 'Custom filters'
-                      : 'Filters'}
+                      : taskFilter === 'sus' &&
+                          (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                        ? 'Suspicious + extras'
+                        : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                          ? 'Custom filters'
+                          : 'Filters'}
                   </p>
                 </SelectTrigger>
                 <SelectContent>
@@ -1677,8 +1652,7 @@
                 variant="secondary"
                 onclick={loadTasks}
                 title="Refresh tasks"
-                aria-label="Refresh tasks"
-                ><RefreshCw class="mr-2 size-4" /> Refresh</Button
+                aria-label="Refresh tasks"><RefreshCw class="mr-2 size-4" /> Refresh</Button
               >
               <Select type="single" bind:value={taskAction}>
                 <SelectTrigger class="w-40">
@@ -1686,14 +1660,14 @@
                     {taskAction === 'disable'
                       ? 'Disable'
                       : taskAction === 'enable'
-                      ? 'Enable'
-                      : taskAction === 'delete'
-                      ? 'Delete'
-                      : taskAction === 'run'
-                      ? 'Run now'
-                      : taskAction === 'end'
-                      ? 'End'
-                      : 'Action'}
+                        ? 'Enable'
+                        : taskAction === 'delete'
+                          ? 'Delete'
+                          : taskAction === 'run'
+                            ? 'Run now'
+                            : taskAction === 'end'
+                              ? 'End'
+                              : 'Action'}
                   </p>
                 </SelectTrigger>
                 <SelectContent>
@@ -1709,8 +1683,7 @@
                 onclick={requestRunSelected}
                 disabled={!taskAction || selectedTasks.size === 0}
                 title="Run action"
-                aria-label="Run action"
-                >Run</Button
+                aria-label="Run action">Run</Button
               >
               <Button
                 size="sm"
@@ -1729,7 +1702,7 @@
               class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
             >
               <ul class="divide-y divide-border/60">
-                {#each Array.from({ length: 10 }) as _, i}
+                {#each Array.from({ length: 10 }) as _, i (i)}
                   <li class="px-3 py-2">
                     <div class="flex items-center justify-between gap-3">
                       <div class="flex-1 min-w-0">
@@ -1779,9 +1752,7 @@
                                 >SUS ({t.score})</Badge
                               >
                             {:else if t.score !== undefined}
-                              <Badge
-                                variant="outline"
-                                class="text-[10px] opacity-60"
+                              <Badge variant="outline" class="text-[10px] opacity-60"
                                 >{t.score}</Badge
                               >
                             {/if}
@@ -1806,7 +1777,9 @@
                   <li class="px-2 py-2"><Skeleton class="h-5 w-full" aria-hidden="true" /></li>
                 {/if}
                 {#if sortedTasks.length === 0 && tasksLoaded}
-                  <li class="px-3 py-8 text-center text-xs text-muted-foreground">No tasks match.</li>
+                  <li class="px-3 py-8 text-center text-xs text-muted-foreground">
+                    No tasks match.
+                  </li>
                 {/if}
               </ul>
             </div>
@@ -1830,7 +1803,7 @@
             <div>Selected: {pendingNames.length}</div>
             {#if pendingNames.length}
               <ul class="max-h-32 overflow-auto rounded bg-muted/10 p-2 text-xs">
-                {#each pendingNames.slice(0, 8) as nm}
+                {#each pendingNames.slice(0, 8) as nm (nm)}
                   {@const p = splitTaskName(nm)}
                   <li class="truncate">
                     {p.base}
@@ -1847,7 +1820,9 @@
           <AlertDialogFooter>
             <AlertDialogCancel onclick={() => (showTaskConfirm = false)}>Cancel</AlertDialogCancel>
             {#if pendingAction === 'delete'}
-              <AlertDialogAction onclick={switchToDisableAndRun}>Switch to Disable</AlertDialogAction>
+              <AlertDialogAction onclick={switchToDisableAndRun}
+                >Switch to Disable</AlertDialogAction
+              >
             {/if}
             <AlertDialogAction onclick={confirmRunAction}>Continue</AlertDialogAction>
           </AlertDialogFooter>
@@ -1873,7 +1848,6 @@
             >
               Refresh
             </Button>
-            
           </CardHeader>
           <CardContent>
             {#if networkInfoLoading}
@@ -1902,7 +1876,7 @@
                   <span class="font-semibold text-[11px] text-foreground">DNS</span>
                   {#if networkSummary.dnsServers.length}
                     <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
-                      {#each networkSummary.dnsServers as dns}
+                      {#each networkSummary.dnsServers as dns (dns)}
                         <div>{dns}</div>
                       {/each}
                     </div>
@@ -1914,7 +1888,7 @@
                   <span class="font-semibold text-[11px] text-foreground">Gateway</span>
                   {#if networkSummary.gateways.length}
                     <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
-                      {#each networkSummary.gateways as gateway}
+                      {#each networkSummary.gateways as gateway (gateway)}
                         <div>{gateway}</div>
                       {/each}
                     </div>
@@ -1944,15 +1918,16 @@
               <p class="text-xs text-muted-foreground">No adapters detected.</p>
             {:else}
               <div class="space-y-2">
-                {#each networkSummary.adapters as adapter}
+                {#each networkSummary.adapters as adapter (adapter.name)}
                   <div class="rounded-md border border-border/60 bg-muted/10 p-3">
                     <div class="flex items-center justify-between gap-3">
                       <span class="font-semibold">{adapter.name}</span>
                       {#if adapter.status}
                         <Badge
-                          variant={adapter.status?.toLowerCase().includes('up') ? 'secondary' : 'outline'}
-                          class="text-[10px]"
-                          >{adapter.status}</Badge
+                          variant={adapter.status?.toLowerCase().includes('up')
+                            ? 'secondary'
+                            : 'outline'}
+                          class="text-[10px]">{adapter.status}</Badge
                         >
                       {/if}
                     </div>
@@ -2023,7 +1998,7 @@
           <div class="space-y-2 border-t border-border/60 pt-3">
             <p class="text-xs uppercase text-muted-foreground">Automation presets</p>
             <div class="flex flex-wrap gap-2">
-              {#each NETWORK_PRESETS as preset}
+              {#each NETWORK_PRESETS as preset (preset.id)}
                 <Button
                   size="sm"
                   variant={activeNetworkPreset === preset.id ? 'secondary' : 'outline'}
@@ -2046,7 +2021,9 @@
             <SearchIcon class="size-5" />
             <CardTitle>Quick tests</CardTitle>
           </div>
-          <CardDescription>Ping, traceroute, and DNS lookups without leaving the app.</CardDescription>
+          <CardDescription
+            >Ping, traceroute, and DNS lookups without leaving the app.</CardDescription
+          >
         </CardHeader>
         <CardContent class="space-y-4">
           <div class="grid gap-3 md:grid-cols-3">
@@ -2054,7 +2031,12 @@
               <p class="text-xs text-muted-foreground">Ping target</p>
               <div class="flex items-center gap-2">
                 <Input class="flex-1" placeholder="1.1.1.1" bind:value={pingTarget} />
-                <Button size="sm" variant="outline" onclick={runPingTest} disabled={networkTestLoading}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onclick={runPingTest}
+                  disabled={networkTestLoading}
+                >
                   Ping
                 </Button>
               </div>
@@ -2077,13 +2059,20 @@
               <p class="text-xs text-muted-foreground">DNS lookup</p>
               <div class="flex items-center gap-2">
                 <Input class="flex-1" placeholder="example.com" bind:value={dnsLookupTarget} />
-                <Button size="sm" variant="outline" onclick={runDnsLookupTest} disabled={networkTestLoading}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onclick={runDnsLookupTest}
+                  disabled={networkTestLoading}
+                >
                   Lookup
                 </Button>
               </div>
             </div>
           </div>
-          <div class="rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono whitespace-pre-wrap wrap-break-word max-h-40 overflow-auto">
+          <div
+            class="rounded-md border border-border/60 bg-muted/10 p-3 text-xs font-mono whitespace-pre-wrap wrap-break-word max-h-40 overflow-auto"
+          >
             {#if networkTestLoading}
               <p class="text-muted-foreground">Running {networkTestLabel}...</p>
             {:else if networkTestResult}
@@ -2116,18 +2105,22 @@
             <p class="text-xs text-muted-foreground">No recent actions recorded.</p>
           {:else}
             <ul class="space-y-2">
-              {#each networkHistory as entry}
+              {#each networkHistory as entry (entry.id)}
                 <li class="rounded-md border border-border/60 bg-muted/10 p-3">
                   <div class="flex items-center justify-between text-[10px] text-muted-foreground">
                     <div class="flex items-center gap-1">
-                      <Badge variant={entry.success ? 'secondary' : 'destructive'} class="text-[10px]">
+                      <Badge
+                        variant={entry.success ? 'secondary' : 'destructive'}
+                        class="text-[10px]"
+                      >
                         {entry.success ? 'OK' : 'Fail'}
                       </Badge>
                       <span class="font-medium text-[11px] text-foreground">{entry.label}</span>
                     </div>
                     <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
                   </div>
-                  <pre class="mt-1 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap wrap-break-word max-h-28 overflow-auto">{entry.result}</pre>
+                  <pre
+                    class="mt-1 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap wrap-break-word max-h-28 overflow-auto">{entry.result}</pre>
                 </li>
               {/each}
             </ul>

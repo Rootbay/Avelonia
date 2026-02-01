@@ -273,7 +273,7 @@ export const configItems: ConfigItem[] = [
   {
     id: 'hyperv_virtualization',
     label: 'Hyper-V Virtualization',
-    description: 'Enable Microsoft\'s native hypervisor for local virtual machines and containers.',
+    description: "Enable Microsoft's native hypervisor for local virtual machines and containers.",
   },
   {
     id: 'legacy_media',
@@ -329,10 +329,34 @@ export type FixAction = {
 };
 
 export const fixActions: FixAction[] = [
-  { id: 'autologin', label: 'Set Up Autologin', description: 'Configure a secure auto-login flow for trusted environments.' },
-  { id: 'reset_windows_update', label: 'Reset Windows Update', description: 'Re-register Windows Update services and folders.' },
-  { id: 'reset_network', label: 'Reset Network', description: 'Flush networking stacks and restart adapters.' },
-  { id: 'system_corruption_scan', label: 'System Corruption Scan', description: 'Run SFC/DISM checks to repair corrupted system files.' },
-  { id: 'winget_reinstall', label: 'WinGet Reinstall', description: 'Reinstall the Windows Package Manager from the Microsoft Store manifest.' },
-  { id: 'remove_adobe_cc', label: 'Remove Adobe Creative Cloud', description: 'Uninstall leftover Creative Cloud helpers and telemetry services.' },
+  {
+    id: 'autologin',
+    label: 'Set Up Autologin',
+    description: 'Configure a secure auto-login flow for trusted environments.',
+  },
+  {
+    id: 'reset_windows_update',
+    label: 'Reset Windows Update',
+    description: 'Re-register Windows Update services and folders.',
+  },
+  {
+    id: 'reset_network',
+    label: 'Reset Network',
+    description: 'Flush networking stacks and restart adapters.',
+  },
+  {
+    id: 'system_corruption_scan',
+    label: 'System Corruption Scan',
+    description: 'Run SFC/DISM checks to repair corrupted system files.',
+  },
+  {
+    id: 'winget_reinstall',
+    label: 'WinGet Reinstall',
+    description: 'Reinstall the Windows Package Manager from the Microsoft Store manifest.',
+  },
+  {
+    id: 'remove_adobe_cc',
+    label: 'Remove Adobe Creative Cloud',
+    description: 'Uninstall leftover Creative Cloud helpers and telemetry services.',
+  },
 ];

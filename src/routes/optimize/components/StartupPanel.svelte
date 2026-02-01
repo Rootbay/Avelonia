@@ -125,14 +125,6 @@
     }
   }
 
-  async function copyText(txt: string) {
-    try {
-      await navigator.clipboard.writeText(txt);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   function toggleStartup(path: string) {
     if (selectedStartup.has(path)) selectedStartup.delete(path);
     else selectedStartup.add(path);
@@ -197,21 +189,23 @@
     try {
       const folders: string[] = await invoke('get_startup_folders');
       if (!folders || folders.length === 0) {
-          toast.info("No startup folders found.");
-          return;
+        toast.info('No startup folders found.');
+        return;
       }
       for (const folder of folders) {
         try {
           await openPath(folder);
-          await new Promise(r => setTimeout(r, 200));
+          await new Promise((r) => setTimeout(r, 200));
         } catch (err) {
-          console.error("Failed to open folder:", folder, err);
-          try { await revealItemInDir(folder); } catch {}
+          console.error('Failed to open folder:', folder, err);
+          try {
+            await revealItemInDir(folder);
+          } catch {}
         }
       }
     } catch (e) {
       console.error(e);
-      toast.error("Failed to list startup folders");
+      toast.error('Failed to list startup folders');
     }
   }
 
@@ -346,7 +340,7 @@
           class="h-75 rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
         >
           <ul class="divide-y divide-border/60">
-            {#each Array.from({ length: 8 }) as _, i}
+            {#each Array.from({ length: 8 }) as _, i (i)}
               <li class="px-2 py-2">
                 <div class="flex items-center gap-3">
                   <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
@@ -425,7 +419,7 @@
           class="h-75 rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
         >
           <ul class="divide-y divide-border/60">
-            {#each Array.from({ length: 6 }) as _, i}
+            {#each Array.from({ length: 6 }) as _, i (i)}
               <li class="px-2 py-2">
                 <div class="flex items-center gap-3">
                   <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
@@ -456,7 +450,7 @@
         <div>Selected: {pendingStartup.length}</div>
         {#if pendingStartup.length}
           <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
-            {#each pendingStartup.slice(0, 10) as entry}
+            {#each pendingStartup.slice(0, 10) as entry (entry)}
               <li class="truncate">{normalizeWinPath(entry)}</li>
             {/each}
             {#if pendingStartup.length > 10}

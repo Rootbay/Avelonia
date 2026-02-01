@@ -254,6 +254,7 @@ pub(crate) fn run_schtasks(args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(dead_code)]
 pub(crate) fn run_schtasks_capture(args: &[&str]) -> (bool, String, String) {
     match std::process::Command::new("schtasks").args(args).output() {
         Ok(out) => {
@@ -346,7 +347,7 @@ pub(crate) fn is_elevated() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn run_powershell_elevated(args: &[&str]) -> bool {
+pub fn run_powershell_elevated(args: &[&str]) -> bool {
     if is_elevated() {
         return std::process::Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass"])

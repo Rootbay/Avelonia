@@ -1,3 +1,4 @@
+use crate::AppError;
 use dashmap::DashMap;
 use std::sync::Arc;
 use tauri::State;
@@ -13,7 +14,7 @@ pub async fn silent_install(
     elevate: bool,
     custom_flags: Option<String>,
     state: State<'_, InstallState>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     use std::path::PathBuf;
     use std::process::Command;
 
@@ -22,7 +23,7 @@ pub async fn silent_install(
     let pb = PathBuf::from(&path);
     if !pb.exists() {
         state.0.remove(&id);
-        return Err(format!("installer not found: {}", path));
+        return Err(AppError::Internal(format!("installer not found: {}", path)));
     }
     let ext = pb
         .extension()
@@ -34,7 +35,7 @@ pub async fn silent_install(
 
     if is_cancelled() {
         state.0.remove(&id);
-        return Err("Installation cancelled".into());
+        return Err(AppError::Cancelled);
     }
 
     if let Some(flags) = custom_flags {
@@ -52,7 +53,7 @@ pub async fn silent_install(
         if ok {
             return Ok(());
         }
-        return Err("Installation with custom flags failed".into());
+        return Err(AppError::Internal("Installation with custom flags failed".into()));
     }
 
     if ext == "msi" {
@@ -70,7 +71,7 @@ pub async fn silent_install(
         if ok {
             return Ok(());
         }
-        return Err("msiexec failed".into());
+        return Err(AppError::System("msiexec failed".into()));
     }
 
     if ext == "exe" {
@@ -84,7 +85,7 @@ pub async fn silent_install(
         for combo in combos {
             if is_cancelled() {
                 state.0.remove(&id);
-                return Err("Installation cancelled".into());
+                return Err(AppError::Cancelled);
             }
             let ok = if elevate {
                 crate::optimize::shell_helpers::run_elevated(&path, &combo)
@@ -101,15 +102,15 @@ pub async fn silent_install(
             }
         }
         state.0.remove(&id);
-        return Err("no silent flag combination succeeded".into());
+        return Err(AppError::Internal("no silent flag combination succeeded".into()));
     }
 
     state.0.remove(&id);
-    Err("unsupported installer type (expecting .msi or .exe)".into())
+    Err(AppError::Internal("unsupported installer type (expecting .msi or .exe)".into()))
 }
 
 #[tauri::command]
-pub async fn cancel_install(id: u64, state: State<'_, InstallState>) -> Result<(), String> {
+pub async fn cancel_install(id: u64, state: State<'_, InstallState>) -> Result<(), AppError> {
     state.0.insert(id, true);
     Ok(())
 }
@@ -122,8 +123,8 @@ pub async fn silent_install(
     _elevate: bool,
     _custom_flags: Option<String>,
     _state: State<'_, InstallState>,
-) -> Result<(), String> {
-    Err("Silent install is only supported on Windows in this build".into())
+) -> Result<(), AppError> {
+    Err(AppError::System("Silent install is only supported on Windows in this build".into()))
 }
 
 #[tauri::command]

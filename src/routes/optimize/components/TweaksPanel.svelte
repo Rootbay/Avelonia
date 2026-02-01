@@ -163,9 +163,7 @@
         configs: selectedConfigs,
         updateProfile: selectedUpdateProfile,
       })) as { tweaks_applied: number; configs_applied: number };
-      toast.success(
-        `Queued ${res.tweaks_applied} tweak(s) and ${res.configs_applied} config(s).`
-      );
+      toast.success(`Queued ${res.tweaks_applied} tweak(s) and ${res.configs_applied} config(s).`);
     } catch (error) {
       console.error('Failed to apply tweaks', error);
       toast.error('Unable to apply tweaks right now.');
@@ -201,12 +199,13 @@
   <Card>
     <CardHeader>
       <CardTitle class="text-lg">Recommended Profiles</CardTitle>
-      <CardDescription>Choose a proven bundle of tweaks to prefill the lists below.</CardDescription>
+      <CardDescription>Choose a proven bundle of tweaks to prefill the lists below.</CardDescription
+      >
     </CardHeader>
     <CardContent class="space-y-4">
       <div class="flex flex-wrap gap-2">
         {#each profileOptions as profile (profile.id)}
-        <Button
+          <Button
             size="lg"
             variant={selectedProfile === profile.id ? 'secondary' : 'outline'}
             class="flex-1 min-w-[170px] justify-start px-2 py-5 h-auto!"
@@ -214,13 +213,16 @@
           >
             <div class="flex flex-col items-start gap-1 text-left">
               <span class="text-sm font-semibold">{profile.label}</span>
-              <span class="text-xs text-muted-foreground whitespace-normal">{profile.description}</span>
+              <span class="text-xs text-muted-foreground whitespace-normal"
+                >{profile.description}</span
+              >
             </div>
           </Button>
         {/each}
       </div>
       <p class="text-sm text-muted-foreground">
-        Start with a recommended profile, then toggle the individual tweaks below to refine the behavior.
+        Start with a recommended profile, then toggle the individual tweaks below to refine the
+        behavior.
       </p>
       <div class="flex gap-2">
         <Button size="sm" variant="secondary" onclick={applySelectedTweaks}>
@@ -364,7 +366,7 @@
     <CardContent class="space-y-3">
       <div class="flex flex-wrap gap-2">
         {#each updateProfileOptions as profile (profile.id)}
-        <Button
+          <Button
             size="sm"
             variant={selectedUpdateProfile === profile.id ? 'secondary' : 'outline'}
             class="flex-1 min-w-[140px] justify-start py-3 h-auto!"
@@ -372,13 +374,16 @@
           >
             <div class="flex flex-col items-start gap-1 text-left">
               <span class="text-sm font-semibold">{profile.label}</span>
-              <span class="text-xs text-muted-foreground whitespace-normal">{profile.description}</span>
+              <span class="text-xs text-muted-foreground whitespace-normal"
+                >{profile.description}</span
+              >
             </div>
           </Button>
         {/each}
       </div>
       <p class="text-sm text-muted-foreground">
-        Profiles adjust deferred update policies in the backend; run the matching service tweaks to apply them.
+        Profiles adjust deferred update policies in the backend; run the matching service tweaks to
+        apply them.
       </p>
     </CardContent>
   </Card>

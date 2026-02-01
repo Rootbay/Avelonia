@@ -72,7 +72,13 @@
   let selectedPaths = $state(new Set<string>());
   let showSettings = $state(false);
   let exclusions = $state<string[]>([]);
-  let normalizedExclusions = $state<string[]>([]);
+  let normalizedExclusions = $derived(
+    Array.from(
+      new Set(
+        exclusions.map((ex) => (ex || '').trim().toLowerCase()).filter((value) => Boolean(value))
+      )
+    )
+  );
   const EXC_KEY = 'avelonia_cleaner_exclusions_v1';
 
   function loadExclusions() {
@@ -90,18 +96,10 @@
         EXC_KEY,
         JSON.stringify(Array.from(new Set(exclusions.map((s) => s.trim()).filter(Boolean))))
       );
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
-
-  $effect(() => {
-    normalizedExclusions = Array.from(
-      new Set(
-        exclusions
-          .map((ex) => (ex || '').trim().toLowerCase())
-          .filter((value) => Boolean(value))
-      )
-    );
-  });
 
   onMount(() => {
     loadExclusions();
@@ -118,7 +116,9 @@
         brokenShortcuts = Array.isArray(cache.brokenShortcuts) ? cache.brokenShortcuts : [];
         dupGroups = Array.isArray(cache.dupGroups) ? cache.dupGroups : [];
       }
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   });
 
   function addExclusion(pattern: string) {
@@ -136,7 +136,9 @@
   function saveCacheSoon() {
     try {
       if (_cacheSaveTimer) clearTimeout(_cacheSaveTimer as unknown as number);
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     _cacheSaveTimer = setTimeout(() => {
       try {
         saveCleanerCache({
@@ -148,7 +150,9 @@
           dupGroups,
           timestamp: Date.now(),
         });
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }, 500) as unknown as number;
   }
 
@@ -173,7 +177,9 @@
       for (const pattern of normalizedExclusions) {
         if (pattern && normalizedPath.includes(pattern)) return true;
       }
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     return false;
   }
 
@@ -227,10 +233,12 @@
         }
       }
     }
-        return items;
-      });
-    
-      const selectedCount = $derived(selectedPaths.size);  const selectedSize = $derived.by(() => {
+    return items;
+  });
+
+  const getAllItemsList = () => allItems;
+  const selectedCount = $derived(selectedPaths.size);
+  const selectedSize = $derived.by(() => {
     let sum = 0;
     const s = selectedPaths;
     for (const it of getAllItemsList()) {
@@ -259,7 +267,9 @@
           tempFlushRaf = setTimeout(run, TEMP_FLUSH_IDLE_MS) as unknown as number;
           return;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
 
       const take = tempQueue.splice(0, Math.min(2500, tempQueue.length));
       const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
@@ -296,7 +306,9 @@
           largeFlushRaf = setTimeout(run, 300) as unknown as number;
           return;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       const take = largeQueue.splice(0, Math.min(2500, largeQueue.length));
       const next = take.map(([p, s]) => ({ path: p, size: s }));
       if (next.length) largeFiles = [...largeFiles, ...next];
@@ -322,7 +334,9 @@
           dupFlushRaf = setTimeout(run, 300) as unknown as number;
           return;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       const take = dupGroupsQueue.splice(0, Math.min(500, dupGroupsQueue.length));
       if (take.length) {
         dupGroups = [...dupGroups, ...take];
@@ -353,7 +367,9 @@
           emptyFlushRaf = setTimeout(run, 300) as unknown as number;
           return;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       const take = emptyQueue.splice(0, Math.min(2500, emptyQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) emptyFolders = [...emptyFolders, ...next];
@@ -379,7 +395,9 @@
           shortcutFlushRaf = setTimeout(run, 300) as unknown as number;
           return;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       const take = shortcutQueue.splice(0, Math.min(2500, shortcutQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) brokenShortcuts = [...brokenShortcuts, ...next];
@@ -397,12 +415,10 @@
   let UNIFIED_ROW_PX = $state(40);
   const UNIFIED_PREBUFFER = 3;
   const UNIFIED_MAX_DOM = 600;
-  let unifiedVirtualize = $state(true);
   let unifiedAutoFallback = $state(false);
-
-  $effect(() => {
-    unifiedVirtualize = !unifiedAutoFallback && (scanning || getAllItemsList().length > 1500);
-  });
+  let unifiedVirtualize = $derived(
+    !unifiedAutoFallback && (scanning || getAllItemsList().length > 1500)
+  );
 
   let unifiedStart = $state(0);
   const unifiedRowsInView = $derived(() => {
@@ -418,11 +434,7 @@
     return items.slice(unifiedStart, end);
   });
 
-  let unifiedDisplayList = $state<CleanerItem[]>([]);
-  const getAllItemsList = () => allItems;
-  $effect(() => {
-    unifiedDisplayList = resolveCleanerItems(unifiedDisplayed);
-  });
+  let unifiedDisplayList = $derived(resolveCleanerItems(unifiedDisplayed));
   const getUnifiedDisplayList = () => unifiedDisplayList;
 
   let unifiedPadPx = $state(0);
@@ -472,7 +484,9 @@
         if (unifiedAutoFallback !== shouldFallback) {
           unifiedAutoFallback = shouldFallback;
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }, 0);
   });
 
@@ -485,7 +499,9 @@
       if (h && isFinite(h) && h > 8 && h < 200) {
         UNIFIED_ROW_PX = h;
       }
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 
   onMount(() => {
@@ -525,7 +541,9 @@
           if (movingDown && el.scrollTop + el.clientHeight >= el.scrollHeight - 400) {
             unifiedCap = Math.min(unifiedCap + UNIFIED_BUILD_STEP, unifiedCap + 20000);
           }
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
       }
       _unifiedScrollTick = false;
     });
@@ -538,7 +556,9 @@
       const res = (await invoke('stat_paths', { paths })) as [string, number][];
       const map = new Map(res);
       tempFiles = tempFiles.map((f) => ({ path: f.path, size: map.get(f.path) ?? f.size }));
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 
   async function scanAll() {
@@ -651,19 +671,19 @@
   onMount(() => {
     const unsubs: Array<() => void> = [];
 
-    listen('scan_progress', (event) => {
+    listen<string>('scan_progress', (event) => {
       const typedWindow = window as Window & { __lastProg?: number };
       if ((window.performance?.now?.() ?? Date.now()) - (typedWindow.__lastProg || 0) > 300) {
-        progressMessage = event.payload as string;
+        progressMessage = event.payload;
         typedWindow.__lastProg = window.performance?.now?.() ?? Date.now();
       }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-temp-batch', (event) => {
+    listen<string[]>('cleaner-temp-batch', (event) => {
       try {
-        const arr = (event.payload as string[]) || [];
+        const arr = event.payload;
         if (Array.isArray(arr) && arr.length) {
           for (const p of arr) {
             if (tempFiles.length + tempQueue.length >= MAX_TEMP_ITEMS) {
@@ -674,14 +694,16 @@
           }
           scheduleTempFlush();
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-temp-done', (event) => {
+    listen<{ total?: number }>('cleaner-temp-done', (event) => {
       try {
-        const payload = event.payload as { total?: number };
+        const payload = event.payload;
         tempReportedTotal = Number(payload?.total || 0);
       } catch {
         tempReportedTotal = 0;
@@ -718,59 +740,71 @@
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-large-batch', (event) => {
+    listen<[string, number][]>('cleaner-large-batch', (event) => {
       try {
-        const arr = (event.payload as [string, number][]) || [];
+        const arr = event.payload;
         if (Array.isArray(arr) && arr.length) {
           for (const it of arr) largeQueue.push([String(it[0]), Number(it[1])]);
           scheduleLargeFlush();
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-dup-groups-batch', (event) => {
-      try {
-        const groups =
-          (event.payload as Array<{ hash: string; size: number; files: string[] }>) || [];
-        if (Array.isArray(groups) && groups.length) {
-          for (const g of groups) dupGroupsQueue.push(g);
-          scheduleDupFlush();
+    listen<Array<{ hash: string; size: number; files: string[] }>>(
+      'cleaner-dup-groups-batch',
+      (event) => {
+        try {
+          const groups = event.payload;
+          if (Array.isArray(groups) && groups.length) {
+            for (const g of groups) dupGroupsQueue.push(g);
+            scheduleDupFlush();
+          }
+        } catch {
+          /* noop */
         }
-      } catch { /* noop */ }
-    })
+      }
+    )
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-empty-batch', (event) => {
+    listen<string[]>('cleaner-empty-batch', (event) => {
       try {
-        const arr = (event.payload as string[]) || [];
+        const arr = event.payload;
         if (Array.isArray(arr) && arr.length) {
           for (const p of arr) emptyQueue.push(String(p));
           scheduleEmptyFlush();
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-shortcut-batch', (event) => {
+    listen<string[]>('cleaner-shortcut-batch', (event) => {
       try {
-        const arr = (event.payload as string[]) || [];
+        const arr = event.payload;
         if (Array.isArray(arr) && arr.length) {
           for (const p of arr) shortcutQueue.push(String(p));
           scheduleShortcutFlush();
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
 
-    listen('cleaner-done', (event) => {
+    listen('cleaner-done', () => {
       try {
-        const scope = (event.payload as any)?.scope as string | undefined;
-      } catch { /* noop */ }
+        // ...
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
@@ -783,7 +817,9 @@
     listen('cleaner-error', (ev) => {
       try {
         toast.error(String(ev.payload || 'Scan error'));
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     })
       .then((fn) => unsubs.push(fn))
       .catch(() => {});
@@ -792,7 +828,9 @@
       for (const u of unsubs) {
         try {
           u();
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
       }
     };
   });
@@ -812,7 +850,9 @@
     try {
       await invoke('cancel_temp_scan');
       await invoke('cancel_cleaner_scan');
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
     scanning = false;
     tempQueue = [];
     toast.warning('Scan cancelled');
@@ -853,214 +893,220 @@
 <div class="space-y-6 text-foreground">
   <Card>
     <CardHeader>
-      <div class="flex items-center justify-between gap-2">
-        <div>
-          <CardTitle class="text-2xl">Cleaner</CardTitle>
-          <CardDescription>Scan, review and clean safely.</CardDescription>
-        </div>
-
+      <CardTitle class="text-2xl">Cleaner</CardTitle>
+      <div class="flex items-baseline justify-between">
+        <CardDescription>Scan, review and clean safely.</CardDescription>
         <span class="text-xs text-muted-foreground"
           >Counts ? Temp: {tempFiles.length}, Large: {largeFiles.length}, Dups: {dupGroups.length},
           Empty: {emptyFolders.length}, Shortcuts: {brokenShortcuts.length}</span
         >
       </div>
     </CardHeader>
-    <CardContent>
-      <div class="flex flex-col gap-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <Input placeholder="Search path..." bind:value={q} class="w-70" />
-          <div class="flex items-center gap-2">
-            <Label for="kind">Type</Label>
-            <Select
-              type="single"
-              bind:value={filterKind}
-            >
-              <SelectTrigger id="kind" class="w-30">
-                <p class="truncate">
-                  {filterKind === 'all'
-                    ? 'All'
-                    : filterKind === 'temp'
-                    ? 'Temp'
-                    : filterKind === 'large'
-                    ? 'Large'
-                    : filterKind === 'duplicate'
-                    ? 'Duplicates'
-                    : filterKind === 'empty'
-                    ? 'Empty'
-                    : filterKind === 'shortcut'
-                    ? 'Shortcuts'
-                    : filterKind}
-                </p>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="temp">Temp</SelectItem>
-                <SelectItem value="large">Large</SelectItem>
-                <SelectItem value="duplicate">Duplicates</SelectItem>
-                <SelectItem value="empty">Empty</SelectItem>
-                <SelectItem value="shortcut">Shortcuts</SelectItem>
-              </SelectContent>
-            </Select>
+  </Card>
+
+  <div class="space-y-6 text-foreground">
+    <Card>
+      <CardContent>
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <Input placeholder="Search path..." bind:value={q} class="w-70" />
+            <div class="flex items-center gap-2">
+              <Label for="kind">Type</Label>
+              <Select type="single" bind:value={filterKind}>
+                <SelectTrigger id="kind" class="w-30">
+                  <p class="truncate">
+                    {filterKind === 'all'
+                      ? 'All'
+                      : filterKind === 'temp'
+                        ? 'Temp'
+                        : filterKind === 'large'
+                          ? 'Large'
+                          : filterKind === 'duplicate'
+                            ? 'Duplicates'
+                            : filterKind === 'empty'
+                              ? 'Empty'
+                              : filterKind === 'shortcut'
+                                ? 'Shortcuts'
+                                : filterKind}
+                  </p>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="temp">Temp</SelectItem>
+                  <SelectItem value="large">Large</SelectItem>
+                  <SelectItem value="duplicate">Duplicates</SelectItem>
+                  <SelectItem value="empty">Empty</SelectItem>
+                  <SelectItem value="shortcut">Shortcuts</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="ml-auto flex items-center gap-2">
+              <Button onclick={scanAll} disabled={isLoading}
+                ><Scan class="h-4 w-4" />Scan All</Button
+              >
+              {#if scanning}
+                <Button variant="secondary" onclick={stopScan} title="Stop scanning">Stop</Button>
+              {/if}
+              <Button
+                variant="secondary"
+                onclick={() => (showSettings = true)}
+                aria-label="Settings">Settings</Button
+              >
+              <Button
+                variant="secondary"
+                onclick={autoSelectDuplicatesKeepOne}
+                title="Auto-select duplicate copies">Auto-select Duplicates</Button
+              >
+            </div>
           </div>
-          <div class="ml-auto flex items-center gap-2">
-            <Button onclick={scanAll} disabled={isLoading}><Scan class="h-4 w-4" />Scan All</Button>
-            {#if scanning}
-              <Button variant="secondary" onclick={stopScan} title="Stop scanning">Stop</Button>
-            {/if}
-            <Button variant="secondary" onclick={() => (showSettings = true)} aria-label="Settings"
-              >Settings</Button
+          <div class="flex items-center gap-2">
+            <Button
+              variant="destructive"
+              disabled={selectedPaths.size === 0 || isLoading}
+              onclick={deleteSelectedUnified}
+              ><Trash2 class="h-4 w-4" />Delete Selected ({selectedCount})</Button
             >
             <Button
               variant="secondary"
-              onclick={autoSelectDuplicatesKeepOne}
-              title="Auto-select duplicate copies">Auto-select Duplicates</Button
+              disabled={selectedPaths.size === 0 || isLoading}
+              onclick={moveSelectedUnified}>Move Selected</Button
+            >
+            <Button
+              variant="secondary"
+              disabled={selectedPaths.size === 0 || isErasing}
+              onclick={secureEraseSelectedUnified}><Eraser class="h-4 w-4" />Secure Erase</Button
+            >
+            <span class="text-xs text-muted-foreground"
+              >Selected size: {formatBytes(selectedSize)}</span
+            >
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={() => {
+                selectedPaths = new SvelteSet();
+              }}>Clear selection</Button
             >
           </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <Button
-            variant="destructive"
-            disabled={selectedPaths.size === 0 || isLoading}
-            onclick={deleteSelectedUnified}
-            ><Trash2 class="h-4 w-4" />Delete Selected ({selectedCount})</Button
+          <div
+            class="rounded-md border h-[60vh] overflow-auto"
+            style="overscroll-behavior: contain; overflow-anchor: none;"
+            bind:this={unifiedContainer}
+            onscroll={onUnifiedScroll}
           >
-          <Button
-            variant="secondary"
-            disabled={selectedPaths.size === 0 || isLoading}
-            onclick={moveSelectedUnified}>Move Selected</Button
-          >
-          <Button
-            variant="secondary"
-            disabled={selectedPaths.size === 0 || isErasing}
-            onclick={secureEraseSelectedUnified}><Eraser class="h-4 w-4" />Secure Erase</Button
-          >
-          <span class="text-xs text-muted-foreground"
-            >Selected size: {formatBytes(selectedSize)}</span
-          >
-          <Button
-            variant="ghost"
-            size="sm"
-            onclick={() => {
-              selectedPaths = new SvelteSet();
-            }}>Clear selection</Button
-          >
-        </div>
-        <div
-          class="rounded-md border h-[60vh] overflow-auto"
-          style="overscroll-behavior: contain; overflow-anchor: none;"
-          bind:this={unifiedContainer}
-          onscroll={onUnifiedScroll}
-        >
-          <table class="w-full text-sm text-foreground">
-            <thead class="bg-muted/40 text-xs">
-              <tr>
-                <th class="px-3 py-2 text-left w-9">
-                  <Checkbox
-                    checked={selectedPaths.size > 0 &&
-                      selectedPaths.size === getAllItemsList().length &&
-                      getAllItemsList().length > 0}
-                    onCheckedChange={() =>
-                      setSelectionForKind(filterKind === 'all' ? 'all' : filterKind)}
-                  />
-                </th>
-                <th class="px-3 py-2 text-left">Path</th>
-                <th class="px-3 py-2 text-left">Type</th>
-                <th class="px-3 py-2 text-left w-30">Size</th>
-                <th class="px-3 py-2 text-left w-40">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#if getAllItemsList().length === 0}
-                {#if scanning || isLoading}
-                  {#each Array.from({ length: 16 }) as _, i}
-                    <tr class="border-t">
-                      <td class="px-3 py-2" colspan="5"
-                        ><Skeleton class="h-4 w-full" aria-hidden="true" /></td
+            <table class="w-full text-sm text-foreground">
+              <thead class="bg-muted/40 text-xs">
+                <tr>
+                  <th class="px-3 py-2 text-left w-9">
+                    <Checkbox
+                      checked={selectedPaths.size > 0 &&
+                        selectedPaths.size === getAllItemsList().length &&
+                        getAllItemsList().length > 0}
+                      onCheckedChange={() =>
+                        setSelectionForKind(filterKind === 'all' ? 'all' : filterKind)}
+                    />
+                  </th>
+                  <th class="px-3 py-2 text-left">Path</th>
+                  <th class="px-3 py-2 text-left">Type</th>
+                  <th class="px-3 py-2 text-left w-30">Size</th>
+                  <th class="px-3 py-2 text-left w-40">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if getAllItemsList().length === 0}
+                  {#if scanning || isLoading}
+                    {#each Array.from({ length: 16 }) as _, i (i)}
+                      <tr class="border-t">
+                        <td class="px-3 py-2" colspan="5"
+                          ><Skeleton class="h-4 w-full" aria-hidden="true" /></td
+                        >
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr>
+                      <td colspan="5" class="px-3 py-6 text-center text-muted-foreground"
+                        >No items. Click Scan All.</td
                       >
                     </tr>
-                  {/each}
+                  {/if}
                 {:else}
-                  <tr>
-                    <td colspan="5" class="px-3 py-6 text-center text-muted-foreground"
-                      >No items. Click Scan All.</td
+                  {#if unifiedVirtualize && unifiedTopPad > 0}
+                    <tr
+                      ><td colspan="5" style={`height:${unifiedTopPad}px; overflow-anchor: none;`}
+                      ></td></tr
                     >
-                  </tr>
-                {/if}
-              {:else}
-                {#if unifiedVirtualize && unifiedTopPad > 0}
-                  <tr
-                    ><td colspan="5" style={`height:${unifiedTopPad}px; overflow-anchor: none;`}
-                    ></td></tr
-                  >
-                {/if}
-                {#each (
-                  getUnifiedDisplayList().length > 0
-                    ? getUnifiedDisplayList()
-                    : getAllItemsList().slice(
-                        0,
-                        Math.min(getAllItemsList().length, UNIFIED_MAX_DOM)
-                      )
-                ) as it (it.path)}
-                  <tr class="border-t h-10 align-middle">
-                    <td class="px-3 py-2"
-                      ><Checkbox
-                        checked={selectedPaths.has(it.path)}
-                        onCheckedChange={() => toggleSelectUnified(it.path)}
-                      /></td
-                    >
-                    <td class="px-3 py-2"
-                      ><span class="block truncate max-w-[60ch]" title={it.path}>{it.path}</span
-                      ></td
-                    >
-                    <td class="px-3 py-2"
-                      ><span
-                        class="inline-flex items-center rounded border px-2 py-0.5 text-xs capitalize"
-                        >{it.kind}</span
-                      ></td
-                    >
-                    <td class="px-3 py-2">{it.size ? formatBytes(it.size) : '-'}</td>
-                    <td class="px-3 py-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger>
-                          <Button type="button" variant="ghost" size="sm" aria-label="Details">
-                            <Ellipsis class="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          onclick={(e: MouseEvent) => e.stopPropagation()}
-                        >
-                          <DropdownMenuItem
-                            onclick={async (e: MouseEvent) => { e.stopPropagation(); try { const { revealItemInDir } = await import('@tauri-apps/plugin-opener'); await revealItemInDir(it.path); } catch { /* noop */ } }}
-                            >Reveal</DropdownMenuItem
+                  {/if}
+                  {#each getUnifiedDisplayList().length > 0 ? getUnifiedDisplayList() : getAllItemsList().slice(0, Math.min(getAllItemsList().length, UNIFIED_MAX_DOM)) as it (it.path)}
+                    <tr class="border-t h-10 align-middle">
+                      <td class="px-3 py-2"
+                        ><Checkbox
+                          checked={selectedPaths.has(it.path)}
+                          onCheckedChange={() => toggleSelectUnified(it.path)}
+                        /></td
+                      >
+                      <td class="px-3 py-2"
+                        ><span class="block truncate max-w-[60ch]" title={it.path}>{it.path}</span
+                        ></td
+                      >
+                      <td class="px-3 py-2"
+                        ><span
+                          class="inline-flex items-center rounded border px-2 py-0.5 text-xs capitalize"
+                          >{it.kind}</span
+                        ></td
+                      >
+                      <td class="px-3 py-2">{it.size ? formatBytes(it.size) : '-'}</td>
+                      <td class="px-3 py-2">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger>
+                            <Button type="button" variant="ghost" size="sm" aria-label="Details">
+                              <Ellipsis class="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            onclick={(e: MouseEvent) => e.stopPropagation()}
                           >
-                          <DropdownMenuItem
-                            onclick={(e: MouseEvent) => {
-                              e.stopPropagation();
-                              addExclusion(it.path);
-                            }}>Exclude</DropdownMenuItem
-                          >
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                {/each}
-                {#if unifiedVirtualize && unifiedBottomPad > 0}
-                  <tr
-                    ><td colspan="5" style={`height:${unifiedBottomPad}px; overflow-anchor: none;`}
-                    ></td></tr
-                  >
+                            <DropdownMenuItem
+                              onclick={async (e: MouseEvent) => {
+                                e.stopPropagation();
+                                try {
+                                  const { revealItemInDir } =
+                                    await import('@tauri-apps/plugin-opener');
+                                  await revealItemInDir(it.path);
+                                } catch {
+                                  /* noop */
+                                }
+                              }}>Reveal</DropdownMenuItem
+                            >
+                            <DropdownMenuItem
+                              onclick={(e: MouseEvent) => {
+                                e.stopPropagation();
+                                addExclusion(it.path);
+                              }}>Exclude</DropdownMenuItem
+                            >
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  {/each}
+                  {#if unifiedVirtualize && unifiedBottomPad > 0}
+                    <tr
+                      ><td
+                        colspan="5"
+                        style={`height:${unifiedBottomPad}px; overflow-anchor: none;`}
+                      ></td></tr
+                    >
+                  {/if}
                 {/if}
-              {/if}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
+          {#if message || progressMessage}
+            <p class="mt-1 text-xs text-muted-foreground">{progressMessage || message}</p>
+          {/if}
         </div>
-        {#if message || progressMessage}
-          <p class="mt-1 text-xs text-muted-foreground">{progressMessage || message}</p>
-        {/if}
-      </div>
-    </CardContent>
-  </Card>
+      </CardContent>
+    </Card>
+  </div>
 </div>
 
 <Dialog open={showSettings} onOpenChange={(v) => (showSettings = !!v)}>

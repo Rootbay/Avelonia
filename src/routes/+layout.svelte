@@ -16,10 +16,8 @@
     Sun,
     Moon,
     Settings as SettingsIcon,
-    Ellipsis,
   } from '@lucide/svelte';
   import { ModeWatcher, toggleMode } from 'mode-watcher';
-  import { SvelteSet } from 'svelte/reactivity';
   import {
     Sidebar,
     SidebarContent,
@@ -33,311 +31,39 @@
   import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
   import { Toaster } from '$lib/components/ui/sonner';
-  import { toast } from '$lib/components/ui/sonner';
-  import { pushLog, clearLogs } from '$lib/logStore';
   import { cn } from '$lib/utils.js';
-  import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTrigger,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-  } from '$lib/components/ui/dialog';
-  import { Checkbox } from '$lib/components/ui/checkbox';
-  import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-  import { settings, updateDownloaderSettings } from '$lib/settings';
   import { startDownloadIntegrityWatch, stopDownloadIntegrityWatch } from '$lib/downloadIntegrity';
   import { startInstallPresenceWatch, stopInstallPresenceWatch } from '$lib/downloadManager';
-  import { listen } from '@tauri-apps/api/event';
-  import { invoke } from '@tauri-apps/api/core';
-  import { openUrl as openExternal } from '@tauri-apps/plugin-opener';
-  import { save } from '@tauri-apps/plugin-dialog';
-  import { vtVerdicts, setVerdictFromReport, setVerdict, reasonFor } from '$lib/vtVerdicts';
-  import { vtScan, beginScan, endScan, pushReport as pushScanReport } from '$lib/scanStatus';
-  import {
-    cleanerScan,
-    beginCleanerScan,
-    incCleanerFound,
-    setCleanerMessage,
-    endCleanerScan,
-  } from '$lib/cleanerScan';
+  import SettingsDialog from '$lib/components/SettingsDialog.svelte';
+  import VtScanDialog from '$lib/components/VtScanDialog.svelte';
+  import { useVtScan } from '$lib/hooks/useVtScan.svelte';
+  import { useCleanerScan } from '$lib/hooks/useCleanerScan.svelte';
   import '../app.css';
-
-  const scan = $derived($vtScan);
-
-  onMount(() => {
-    initDownloadListener();
-    startDownloadIntegrityWatch(20000);
-    startInstallPresenceWatch(20000);
-    (async () => {
-      try {
-        const loaded = (await invoke('vt_load_cache')) as number;
-        const status = (await invoke('vt_get_status')) as { key_set?: boolean };
-        if (status && (status as any).key_set) {
-          try {
-            await invoke('vt_auto_maybe_scan');
-          } catch { /* noop */ }
-          const iv = setInterval(() => {
-            void (async () => {
-              try {
-                await invoke('vt_auto_maybe_scan');
-              } catch { /* noop */ }
-            })();
-          }, 60_000);
-          unlistenFns.push(() => {
-            try {
-              clearInterval(iv as unknown as number);
-            } catch { /* noop */ }
-          });
-        } else {
-          pushLog('INFO', 'VT key not set. Reputation scans disabled.', 'Optimize');
-        }
-      } catch { /* noop */ }
-    })();
-
-    const unAutoStart = listen('vt-autoscan-start', (ev) => {
-      toast.message('VirusTotal scan started (auto)', {
-        action: {
-          label: 'Open details',
-          onClick: () => {
-            try {
-              scanDialogOpen = true;
-            } catch { /* noop */ }
-          },
-        },
-      });
-      pushLog(
-        'INFO',
-        'VT scan starting (auto): ' + (((ev as any)?.payload as any)?.reason || 'auto'),
-        'Optimize'
-      );
-    });
-
-    unlistenFns.push(() => {
-      unAutoStart.then((f) => f()).catch(() => {});
-    });
-
-    const unAutoDone = listen('vt-autoscan-done', (ev) => {
-      const p = ev.payload as any;
-      toast.success('VirusTotal scan completed (auto)', {
-        action: {
-          label: 'Open details',
-          onClick: () => {
-            try {
-              scanDialogOpen = true;
-            } catch { /* noop */ }
-          },
-        },
-      });
-      pushLog(
-        'SUCCESS',
-        'VT scan finished (auto): startup ' +
-          (Number((p as any)?.startup) || 0) +
-          ', registry ' +
-          (Number((p as any)?.registry) || 0) +
-          '.',
-        'Optimize'
-      );
-    });
-
-    unlistenFns.push(() => {
-      unAutoDone.then((f) => f()).catch(() => {});
-    });
-
-    const un = listen('vt-alert', (ev) => {
-      const p = ev.payload as {
-        subject?: string;
-        verdict?: string;
-        positives?: number;
-        permalink?: string;
-        source?: string;
-      };
-      const name = p?.subject || 'Startup item';
-      const src = (p?.source || 'startup').toString();
-      const sev = (p?.verdict || '').toString().toUpperCase();
-      const msg = `${sev === 'MALICIOUS' ? 'Malicious' : 'Suspicious'} ${src === 'registry' ? 'registry item' : 'startup item'}: ${name}`;
-      toast.error(msg, {
-        action: p?.permalink
-          ? {
-              label: 'Open VirusTotal',
-              onClick: async () => {
-                try {
-                  await openExternal(p.permalink as string);
-                } catch { /* noop */ }
-              },
-            }
-          : undefined,
-      });
-      const lvl = sev === 'MALICIOUS' ? 'ERROR' : 'WARN';
-      const pos = typeof p?.positives === 'number' ? ` (${p?.positives} vendors)` : '';
-      pushLog(
-        lvl as any,
-        `VT detection: ${name}${pos}. ${p?.permalink ? 'Report available.' : ''}`,
-        'Optimize'
-      );
-      setVerdict(name, 'Sus');
-      setTimeout(() => {
-        try {
-          applyVtBadges();
-        } catch { /* noop */ }
-      }, 0);
-    });
-    unlistenFns.push(() => {
-      un.then((f) => f()).catch(() => {});
-    });
-    const unReport = listen('vt-report', (ev) => {
-      const rep = ev.payload as any;
-      try {
-        setVerdictFromReport(rep);
-        try {
-          pushScanReport(rep);
-        } catch { /* noop */ }
-        const v = String(rep?.verdict || '').toUpperCase();
-        const pos = typeof rep?.positives === 'number' ? ` (${rep?.positives} vendors)` : '';
-        pushLog('INFO', `VT report: ${rep?.subject ?? 'item'} -> ${v}${pos}`, 'Optimize');
-        setTimeout(() => {
-          try {
-            applyVtBadges();
-          } catch { /* noop */ }
-        }, 0);
-      } catch { /* noop */ }
-    });
-
-    unlistenFns.push(() => {
-      unReport.then((f) => f()).catch(() => {});
-    });
-
-    let cleanerToastShown = false;
-    const cleanerToastId = 'cleaner-scan';
-    const unScanProg = listen('scan_progress', (ev) => {
-      try {
-        const msg = String((ev as any)?.payload || '');
-        setCleanerMessage(msg);
-        if (cleanerToastShown) {
-          toast.message(`${msg}`, { id: cleanerToastId, duration: Infinity });
-        }
-      } catch { /* noop */ }
-    });
-    unlistenFns.push(() => {
-      unScanProg.then((f) => f()).catch(() => {});
-    });
-    const unTempBatch = listen('cleaner-temp-batch', (ev) => {
-      try {
-        const arr = (ev as any)?.payload as unknown as string[];
-        const n = Array.isArray(arr) ? arr.length : 0;
-        if (n > 0) {
-          beginCleanerScan();
-          incCleanerFound(n);
-          if (!cleanerToastShown) {
-            cleanerToastShown = true;
-            toast.message('Scanning temporary files…', {
-              id: cleanerToastId,
-              duration: Infinity,
-              action: {
-                label: 'Stop',
-                onClick: async () => {
-                  try {
-                    await invoke('cancel_temp_scan');
-                  } catch { /* noop */ }
-                },
-              },
-            });
-          }
-          cleanerScan.subscribe((s) => {
-            if (s.phase === 'running') {
-              const label =
-                s.message && s.message.length > 0 ? s.message : 'Scanning temporary files…';
-              toast.message(`${label} (${s.found.toLocaleString()} found)`, {
-                id: cleanerToastId,
-                duration: Infinity,
-              });
-            }
-          })();
-        }
-      } catch { /* noop */ }
-    });
-    unlistenFns.push(() => {
-      unTempBatch.then((f) => f()).catch(() => {});
-    });
-    const unTempDone = listen('cleaner-temp-done', (ev) => {
-      try {
-        const total = Number(((ev as any)?.payload as any)?.total || 0);
-        endCleanerScan(total);
-        toast.success(
-          `Temp scan complete • ${Number.isFinite(total) ? total.toLocaleString() : '0'} files`
-        );
-        cleanerToastShown = false;
-        try {
-          (toast as any)?.dismiss?.(cleanerToastId);
-        } catch { /* noop */ }
-      } catch { /* noop */ }
-    });
-    unlistenFns.push(() => {
-      unTempDone.then((f) => f()).catch(() => {});
-    });
-  });
-  onDestroy(() => {
-    disposeDownloadListener();
-    stopDownloadIntegrityWatch();
-    stopInstallPresenceWatch();
-    for (const fn of unlistenFns) {
-      try {
-        fn();
-      } catch { /* noop */ }
-    }
-  });
 
   let { children }: { children?: Snippet } = $props();
   let open = $state(true);
   const collapsed = $derived(!open);
   let scanDialogOpen = $state(false);
-  let vtExpanded = $state(new Set<string>());
-  function vtKeyOf(it: { subject: string; source?: string }) {
-    return `${it?.source || 'startup'}|${(it?.subject || '').toString().trim().toLowerCase()}`;
-  }
-  function toggleVtDetails(it: { subject: string; source?: string }) {
-    const k = vtKeyOf(it);
-    if (vtExpanded.has(k)) vtExpanded.delete(k);
-    else vtExpanded.add(k);
-    vtExpanded = new SvelteSet(vtExpanded);
-  }
-  type VtTotalsCounts = {
-    clean: number;
-    detected: number;
-    notScanned: number;
-    total: number;
-  };
+  let settingsOpen = $state(false);
 
-  const vtTotals = $derived((): VtTotalsCounts => {
-    const items = (scan?.items ?? []) as Array<{ verdict?: string }>;
-    let clean = 0,
-      detected = 0,
-      notScanned = 0;
-    for (const it of items) {
-      const v = String(it?.verdict || '').toLowerCase();
-      if (v === 'clean') clean += 1;
-      else if (v === 'malicious' || v === 'suspicious') detected += 1;
-      else notScanned += 1;
-    }
-    return { clean, detected, notScanned, total: items.length };
+  useVtScan();
+  useCleanerScan();
+
+  onMount(() => {
+    initDownloadListener();
+    startDownloadIntegrityWatch(20000);
+    startInstallPresenceWatch(20000);
+  });
+
+  onDestroy(() => {
+    disposeDownloadListener();
+    stopDownloadIntegrityWatch();
+    stopInstallPresenceWatch();
   });
 
   type MenuIcon = Component<IconProps>;
-  type AppRoute =
-    | '/dashboard'
-    | '/optimize'
-    | '/downloader'
-    | '/cleaner';
-
-  type ButtonSnippetContext = {
-    props?: Record<string, unknown> & { class?: string };
-  };
+  type AppRoute = '/dashboard' | '/optimize' | '/downloader' | '/cleaner';
 
   const menuItems: Array<{
     href: AppRoute;
@@ -357,281 +83,9 @@
     ).length
   );
 
-  const unlistenFns: Array<() => void> = [];
-  let settingsOpen = $state(false);
-  let vtKey = $state('');
-  let vtPersist = $state(true);
-  let vtKeySet = $state(false);
-  let vtBusy = $state(false);
-  let autoInstall = $state($settings.downloader.autoInstall);
-  let installMode = $state($settings.downloader.installMode);
-  let elevateInstall = $state($settings.downloader.elevate);
-  let fallbackOpen = $state($settings.downloader.fallbackOpen);
-  let verifyInstall = $state($settings.downloader.verifyInstall);
-  let catalogFilePath = $state($settings.downloader.downloadCatalogPath ?? '');
-
-  $effect(() => {
-    autoInstall = $settings.downloader.autoInstall;
-    installMode = $settings.downloader.installMode;
-    elevateInstall = $settings.downloader.elevate;
-    fallbackOpen = $settings.downloader.fallbackOpen;
-    verifyInstall = $settings.downloader.verifyInstall;
-  });
-
-  $effect(() => {
-    catalogFilePath = $settings.downloader.downloadCatalogPath ?? '';
-  });
-
-  $effect(() => {
-    updateDownloaderSettings({
-      autoInstall,
-      installMode,
-      elevate: elevateInstall,
-      fallbackOpen,
-      verifyInstall,
-    });
-  });
-
-  $effect(() => {
-    if (settingsOpen) {
-      (async () => {
-        try {
-          const st = (await invoke('vt_get_status')) as { key_set?: boolean };
-          vtKeySet = !!(st as any)?.key_set;
-        } catch { /* noop */ }
-      })();
-    }
-  });
-
-  async function saveVtKey() {
-    try {
-      vtBusy = true;
-      await invoke('vt_set_api_key', { key: vtKey || null, persist: vtPersist });
-      const st = (await invoke('vt_get_status')) as { key_set?: boolean };
-      vtKeySet = !!(st as any)?.key_set;
-      toast.success('VirusTotal key saved');
-      pushLog('SUCCESS', `VT key saved${vtPersist ? ' (persisted)' : ''}.`, 'Optimize');
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to save VirusTotal key');
-      pushLog('ERROR', `Saving VT key failed: ${String(e)}`, 'Optimize');
-    } finally {
-      vtBusy = false;
-    }
-  }
-
-  async function chooseCatalogFile() {
-    try {
-      const selected = await save({
-        title: 'Select catalog (JSON)',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-        defaultPath: catalogFilePath || 'avelonia-downloads.json',
-      });
-      if (typeof selected === 'string' && selected) {
-        updateDownloaderSettings({ downloadCatalogPath: selected });
-        toast.success('Download catalog file selected');
-      }
-    } catch (error) {
-      console.error('Failed to select catalog file', error);
-      toast.error('Unable to pick a catalog file');
-    }
-  }
-
-  function clearCatalogFile() {
-    if (!catalogFilePath) return;
-    updateDownloaderSettings({ downloadCatalogPath: '' });
-    toast.info('Download catalog cleared');
-  }
-
-  function applyVtBadges() {
-    try {
-      if ($page.url.pathname !== '/optimize') return;
-      const verdicts = $vtVerdicts;
-      if (!(verdicts instanceof Map)) return;
-      const container = document.querySelector('main');
-      if (!container) return;
-      const nameEls = container.querySelectorAll(
-        '[data-vt-scope="startup-list"] li .font-semibold, [data-vt-scope="registry-list"] li .font-semibold'
-      );
-      try {
-        const k = Array.from((($vtVerdicts as unknown as Map<string, string>) || new Map()).keys());
-        console.debug('[VT] applyVtBadges: verdict keys(n)=', k.length, 'sample=', k.slice(0, 10));
-        console.debug('[VT] applyVtBadges: candidates=', nameEls.length);
-      } catch { /* noop */ }
-      nameEls.forEach((el) => {
-        if (!(el instanceof HTMLElement)) return;
-        let name = '';
-        for (const n of Array.from(el.childNodes)) {
-          if (n.nodeType === Node.TEXT_NODE) {
-            const t = (n.nodeValue || '').trim();
-            if (t) {
-              name = t;
-              break;
-            }
-          }
-        }
-        if (!name) {
-          name = Array.from(el.childNodes)
-            .filter((n) => n.nodeType === Node.TEXT_NODE)
-            .map((n) => String((n as Text).nodeValue || '').trim())
-            .filter(Boolean)
-            .join(' ');
-        }
-        if (!name) return;
-        const key = name.trim().toLowerCase();
-        const lab = verdicts.get(key) as string | undefined;
-        const parent = el;
-        const existing = parent.querySelector(':scope > .vt-badge') as HTMLElement | null;
-        if (!lab) {
-          if (existing) existing.remove();
-          return;
-        }
-        const reason = lab === 'Not' ? reasonFor(name) || 'Not Scanned' : '';
-        const cls =
-          lab === 'Safe'
-            ? 'text-[10px] border-green-500/30 text-green-600 bg-green-500/10'
-            : lab === 'Sus'
-              ? 'text-[10px] border-red-500/30 text-red-600 bg-red-500/10'
-              : 'text-[10px] border-yellow-500/30 text-yellow-700 bg-yellow-500/10';
-        if (!existing) {
-          const span = document.createElement('span');
-          span.className = `vt-badge inline-flex items-center rounded border px-1 ml-2 ${cls}`;
-          span.textContent = lab as any;
-          if (reason) span.title = reason;
-          parent.appendChild(span);
-        } else {
-          existing.className = `vt-badge inline-flex items-center rounded border px-1 ml-2 ${cls}`;
-          (existing as HTMLElement).textContent = lab as any;
-          if (reason) existing.title = reason;
-          else existing.removeAttribute('title');
-        }
-      });
-    } catch { /* noop */ }
-  }
-
-  let vtApplyTimer: number | null = null;
-  let vtObserver: MutationObserver | null = null;
-
-  $effect(() => {
-    const _m = $vtVerdicts;
-    const p = $page.url.pathname;
-    if (p === '/optimize') {
-      if (vtApplyTimer !== null) clearTimeout(vtApplyTimer as unknown as number);
-      vtApplyTimer = setTimeout(() => applyVtBadges(), 120) as unknown as number;
-      try {
-        const container = document.querySelector('main');
-        if (container && !vtObserver) {
-          vtObserver = new MutationObserver(() => {
-            if (vtApplyTimer !== null) clearTimeout(vtApplyTimer as unknown as number);
-            vtApplyTimer = setTimeout(() => applyVtBadges(), 100) as unknown as number;
-          });
-          vtObserver.observe(container, { childList: true, subtree: true });
-        }
-      } catch { /* noop */ }
-    } else {
-      if (vtObserver) {
-        vtObserver.disconnect();
-        vtObserver = null;
-      }
-    }
-  });
-
-  $effect(() => {
-    const p = $page.url.pathname;
-    if (p !== '/optimize') return;
-    (async () => {
-      try {
-        const st = (await invoke('vt_get_status')) as { key_set?: boolean };
-        if ((st as any)?.key_set) {
-          if (!vtBusy) {
-            vtBusy = true;
-            const need = (await invoke('vt_scan_needed', { limit: 50 })) as [number, number];
-            const ns = Array.isArray(need) ? (need[0] ?? 0) : 0;
-            const nr = Array.isArray(need) ? (need[1] ?? 0) : 0;
-            if (ns + nr === 0) {
-              vtBusy = false;
-              return;
-            }
-            pushLog(
-              'INFO',
-              `VT scan starting (optimize): needed startup ${ns}, registry ${nr}.`,
-              'Optimize'
-            );
-            beginScan('optimize', { startup: ns, registry: nr });
-            toast.message('VirusTotal scan started', {
-              action: {
-                label: 'Open details',
-                onClick: () => {
-                  try {
-                    scanDialogOpen = true;
-                  } catch { /* noop */ }
-                },
-              },
-            });
-            const res = (await invoke('vt_scan_all', { limit: 50, force: false })) as [
-              number,
-              number,
-            ];
-            endScan({ startup: res?.[0], registry: res?.[1] });
-            toast.success('VirusTotal scan completed', {
-              action: {
-                label: 'Open details',
-                onClick: () => {
-                  try {
-                    scanDialogOpen = true;
-                  } catch { /* noop */ }
-                },
-              },
-            });
-            pushLog('SUCCESS', 'VT scan finished (optimize).', 'Optimize');
-          }
-        }
-      } catch { /* noop */ } finally {
-        vtBusy = false;
-      }
-    })();
-  });
-
-  async function runVtScanNow() {
-    try {
-      vtBusy = true;
-      pushLog('INFO', 'VT scan starting (manual).', 'Optimize');
-      beginScan('manual');
-      toast.message('VirusTotal scan started', {
-        action: {
-          label: 'Open details',
-          onClick: () => {
-            try {
-              scanDialogOpen = true;
-            } catch { /* noop */ }
-          },
-        },
-      });
-      const res = (await invoke('vt_scan_all', { limit: 50, force: true })) as [number, number];
-      endScan({ startup: res?.[0], registry: res?.[1] });
-      toast.success('VirusTotal scan completed', {
-        action: {
-          label: 'Open details',
-          onClick: () => {
-            try {
-              scanDialogOpen = true;
-            } catch { /* noop */ }
-          },
-        },
-      });
-      pushLog(
-        'SUCCESS',
-        `VT scan finished (manual): startup ${res?.[0] ?? 0}, registry ${res?.[1] ?? 0}.`,
-        'Optimize'
-      );
-    } catch (e) {
-      console.error(e);
-      toast.error('VirusTotal scan failed (set API key?)');
-      pushLog('ERROR', `VT scan failed (manual): ${String(e)}`, 'Optimize');
-    } finally {
-      vtBusy = false;
-    }
-  }
+  type ButtonSnippetContext = {
+    props?: Record<string, unknown> & { class?: string };
+  };
 </script>
 
 <ModeWatcher />
@@ -690,7 +144,7 @@
       <SidebarGroup>
         <SidebarGroupContent>
           <SidebarMenu>
-            {#each menuItems as item}
+            {#each menuItems as item (item.href)}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={$page.url.pathname === item.href}
@@ -772,89 +226,21 @@
 
       <SidebarGroup class="mt-auto pb-4">
         <SidebarGroupContent>
-          <Dialog bind:open={settingsOpen}>
-            <div class="px-3 py-3">
-              {#if collapsed}
-                <div class="flex flex-col items-center gap-2">
-                  {#snippet ThemeToggleTrigger({ props }: ButtonSnippetContext)}
-                    {@const rawProps = (props ?? {}) as Record<string, unknown> & {
-                      class?: string;
-                    }}
-                    {@const { class: propsClass, ...restWithoutClass } = rawProps}
-                    {@const restProps = restWithoutClass as Record<string, unknown>}
-                    <Button
-                      {...restProps}
-                      variant="outline"
-                      size="icon"
-                      class={cn('relative', propsClass)}
-                      onclick={toggleMode}
-                      aria-label="Toggle theme"
-                    >
-                      <Sun
-                        class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"
-                      />
-                      <Moon
-                        class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 transition-all! dark:rotate-0 dark:scale-100"
-                      />
-                    </Button>
-                  {/snippet}
-                  <Tooltip>
-                    <TooltipTrigger child={ThemeToggleTrigger} />
-                    <TooltipContent side="right" align="center">Toggle theme</TooltipContent>
-                  </Tooltip>
-
-                  {#snippet SettingsButtonContent({ props }: ButtonSnippetContext)}
-                    {@const rawProps = (props ?? {}) as Record<string, unknown> & {
-                      class?: string;
-                    }}
-                    {@const { class: propsClass, ...restWithoutClass } = rawProps}
-                    {@const restProps = restWithoutClass as Record<string, unknown>}
-                    <Button
-                      {...restProps}
-                      variant="outline"
-                      size="icon"
-                      class={cn('relative', propsClass)}
-                      aria-label="Open settings"
-                    >
-                      <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
-                    </Button>
-                  {/snippet}
-                  {#snippet SettingsTrigger({ props }: ButtonSnippetContext)}
-                    <DialogTrigger
-                      {...(props ?? {}) as Record<string, unknown>}
-                      child={SettingsButtonContent}
-                    />
-                  {/snippet}
-                  <Tooltip>
-                    <TooltipTrigger child={SettingsTrigger} />
-                    <TooltipContent side="right" align="center">Settings</TooltipContent>
-                  </Tooltip>
-                </div>
-              {:else}
-                <div class="flex items-center gap-3">
-                  {#snippet SettingsButtonExpanded({ props }: ButtonSnippetContext)}
-                    {@const rawProps = (props ?? {}) as Record<string, unknown> & {
-                      class?: string;
-                    }}
-                    {@const { class: propsClass, ...restWithoutClass } = rawProps}
-                    {@const restProps = restWithoutClass as Record<string, unknown>}
-                    <Button
-                      {...restProps}
-                      variant="outline"
-                      size="sm"
-                      class={cn('flex items-center gap-2', propsClass)}
-                      aria-label="Open settings"
-                    >
-                      <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
-                      <span>Settings</span>
-                    </Button>
-                  {/snippet}
-                  <DialogTrigger child={SettingsButtonExpanded} />
+          <div class="px-3 py-3">
+            {#if collapsed}
+              <div class="flex flex-col items-center gap-2">
+                {#snippet ThemeToggleTrigger({ props }: ButtonSnippetContext)}
+                  {@const rawProps = (props ?? {}) as Record<string, unknown> & {
+                    class?: string;
+                  }}
+                  {@const { class: propsClass, ...restWithoutClass } = rawProps}
+                  {@const restProps = restWithoutClass as Record<string, unknown>}
                   <Button
-                    onclick={toggleMode}
+                    {...restProps}
                     variant="outline"
                     size="icon"
-                    class="relative ml-auto"
+                    class={cn('relative', propsClass)}
+                    onclick={toggleMode}
                     aria-label="Toggle theme"
                   >
                     <Sun
@@ -864,146 +250,63 @@
                       class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 transition-all! dark:rotate-0 dark:scale-100"
                     />
                   </Button>
-                </div>
-              {/if}
-            </div>
+                {/snippet}
+                <Tooltip>
+                  <TooltipTrigger child={ThemeToggleTrigger} />
+                  <TooltipContent side="right" align="center">Toggle theme</TooltipContent>
+                </Tooltip>
 
-            <DialogContent class="sm:max-w-xl">
-              <div class="flex flex-col">
-                <DialogHeader>
-                  <DialogTitle>Settings</DialogTitle>
-                  <DialogDescription>Configure Avelonia preferences.</DialogDescription>
-                </DialogHeader>
-
-                <div class="space-y-6">
-                  <section class="space-y-3">
-                    <p class="text-sm font-medium">Downloads</p>
-                    <div class="grid gap-3">
-                      <label class="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          bind:checked={autoInstall}
-                          aria-controls="auto-install-advanced"
-                          aria-expanded={autoInstall}
-                        />
-                        <span>Auto-install downloaded installers</span>
-                      </label>
-
-                      {#if autoInstall}
-                        <div
-                          id="auto-install-advanced"
-                          class="rounded-md border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3 ml-0 sm:ml-4"
-                        >
-                          <div class="flex flex-col gap-2">
-                            <Label class="text-xs text-muted-foreground">Install mode</Label>
-                            <div class="max-w-[220px]">
-                              <Select type="single" bind:value={installMode}>
-                                <SelectTrigger placeholder="Select mode" />
-                                <SelectContent>
-                                  <SelectItem value="silent">Silent</SelectItem>
-                                  <SelectItem value="normal">Normal</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <label class="flex items-center gap-2 text-sm">
-                            <Checkbox bind:checked={elevateInstall} />
-                            <span>Run installers elevated (UAC)</span>
-                          </label>
-                          <label class="flex items-center gap-2 text-sm">
-                            <Checkbox bind:checked={fallbackOpen} />
-                            <span>Open normally if silent install fails</span>
-                          </label>
-                        </div>
-                      {/if}
-
-                      <label class="flex items-center gap-2 text-sm">
-                        <Checkbox bind:checked={verifyInstall} />
-                        <span>Verify installation in Uninstall registry</span>
-                      </label>
-                      <div class="space-y-2">
-                        <Label class="text-xs text-muted-foreground">Download catalog (.json)</Label>
-                        <Input
-                          value={catalogFilePath || 'Not configured'}
-                          readonly
-                          title={catalogFilePath || 'No catalog file selected'}
-                        />
-                        <div class="flex flex-wrap gap-2">
-                          <Button size="sm" variant="secondary" onclick={chooseCatalogFile}>
-                            Choose JSON file
-                          </Button>
-                          {#if catalogFilePath}
-                            <Button size="sm" variant="outline" onclick={clearCatalogFile}>Clear</Button>
-                          {/if}
-                        </div>
-                        <p class="text-xs text-muted-foreground">
-                          The selected JSON keeps the downloader catalog in sync with your saved paths.
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section class="space-y-3">
-                    <p class="text-sm font-medium">Security / VirusTotal</p>
-                    <div class="space-y-2">
-                      <Label class="text-xs text-muted-foreground">API key</Label>
-                      <Input
-                        type="password"
-                        placeholder="Paste your VT API key"
-                        bind:value={vtKey}
-                      />
-                      <label class="flex items-center gap-2 text-sm">
-                        <Checkbox bind:checked={vtPersist} />
-                        <span>Save key on this device</span>
-                      </label>
-                      <div class="flex gap-2">
-                        <Button onclick={saveVtKey} disabled={vtBusy}>Save key</Button>
-                        <Button
-                          variant="secondary"
-                          onclick={() => {
-                            void runVtScanNow();
-                          }}
-                          disabled={!vtKeySet || vtBusy}>Run scan now</Button
-                        >
-                      </div>
-                      {#if !vtKeySet}
-                        <p class="text-xs text-muted-foreground">
-                          Set an API key to enable reputation scans.
-                        </p>
-                      {/if}
-                    </div>
-                  </section>
-
-                  <section class="space-y-3">
-                    <p class="text-sm font-medium">Privacy & Data</p>
-                    <div class="flex items-center justify-between gap-3">
-                      <div>
-                        <p class="text-sm">System logs</p>
-                        <p class="text-xs text-muted-foreground">Clear all logs stored locally.</p>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        onclick={() => {
-                          try {
-                            clearLogs();
-                            toast.success('Logs cleared');
-                          } catch { /* noop */ }
-                        }}>Clear logs</Button
-                      >
-                    </div>
-                  </section>
-                </div>
-
-                <DialogFooter class="mt-6">
-                  <DialogClose>
-                    <Button variant="ghost">Close</Button>
-                  </DialogClose>
-                  <DialogClose>
-                    <Button>Done</Button>
-                  </DialogClose>
-                </DialogFooter>
+                {#snippet SettingsButtonContent({ props }: ButtonSnippetContext)}
+                  {@const rawProps = (props ?? {}) as Record<string, unknown> & {
+                    class?: string;
+                  }}
+                  {@const { class: propsClass, ...restWithoutClass } = rawProps}
+                  {@const restProps = restWithoutClass as Record<string, unknown>}
+                  <Button
+                    {...restProps}
+                    variant="outline"
+                    size="icon"
+                    class={cn('relative', propsClass)}
+                    aria-label="Open settings"
+                    onclick={() => (settingsOpen = true)}
+                  >
+                    <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
+                  </Button>
+                {/snippet}
+                <Tooltip>
+                  <TooltipTrigger child={SettingsButtonContent} />
+                  <TooltipContent side="right" align="center">Settings</TooltipContent>
+                </Tooltip>
               </div>
-            </DialogContent>
-          </Dialog>
+            {:else}
+              <div class="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="flex items-center gap-2"
+                  aria-label="Open settings"
+                  onclick={() => (settingsOpen = true)}
+                >
+                  <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
+                  <span>Settings</span>
+                </Button>
+                <Button
+                  onclick={toggleMode}
+                  variant="outline"
+                  size="icon"
+                  class="relative ml-auto"
+                  aria-label="Toggle theme"
+                >
+                  <Sun
+                    class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"
+                  />
+                  <Moon
+                    class="absolute h-[1.2rem] w-[1.2rem] text-current rotate-90 scale-0 transition-all! dark:rotate-0 dark:scale-100"
+                  />
+                </Button>
+              </div>
+            {/if}
+          </div>
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
@@ -1014,149 +317,7 @@
   </main>
 </SidebarProvider>
 
-{#snippet VtDetailsTrigger({ props }: ButtonSnippetContext)}
-  {@const rawProps = (props ?? {}) as Record<string, unknown> & { class?: string }}
-  {@const { class: propsClass, ...restWithoutClass } = rawProps}
-  {@const restProps = restWithoutClass as Record<string, unknown>}
-  <span role="none" onclick={(e: MouseEvent) => e.stopPropagation()}>
-    <Button
-      {...restProps}
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-label="Details"
-      class={propsClass}
-    >
-      <Ellipsis class="size-4" />
-    </Button>
-  </span>
-{/snippet}
-
-<Dialog bind:open={scanDialogOpen}>
-  <DialogContent class="sm:max-w-2xl">
-    <DialogHeader>
-      <DialogTitle>VirusTotal Scan</DialogTitle>
-      <DialogDescription>
-        {#if scan.phase === 'running'}
-          Scanning startup and registry items...
-        {:else if scan.phase === 'done'}
-          Scan finished.
-        {:else}
-          Idle. Trigger a scan from Settings.
-        {/if}
-      </DialogDescription>
-    </DialogHeader>
-    <div class="space-y-2 text-sm">
-      <p class="text-xs text-muted-foreground">
-        {#if scan.phase === 'running'}
-          Source: {scan.source ?? 'N/A'}
-        {:else}
-          {#if scan.startedAt}Started {new Date(scan.startedAt).toLocaleTimeString()}{/if}
-          {#if scan.finishedAt}
-            ? Finished {new Date(scan.finishedAt).toLocaleTimeString()}{/if}
-          ? Processed {scan.items?.length ?? 0} items
-          {#if (scan.expectedStartup ?? undefined) !== undefined || (scan.expectedRegistry ?? undefined) !== undefined}
-            ? Expected {scan.expectedStartup ?? '?'}/{scan.expectedRegistry ?? '?'}
-          {/if}
-        {/if}
-      </p>
-      <div class="mb-1 flex flex-wrap gap-2">
-        <Badge variant="secondary">Detected {vtTotals().detected}</Badge>
-        <Badge class="border-green-500/30 text-green-700 bg-green-500/10"
-          >Clean {vtTotals().clean}</Badge
-        >
-        <Badge class="border-yellow-500/30 text-yellow-700 bg-yellow-500/10"
-          >Not Scanned {vtTotals().notScanned}</Badge
-        >
-      </div>
-      <div class="max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/10">
-        <table class="w-full text-sm">
-          <thead
-            class="sticky top-0 bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70"
-          >
-            <tr>
-              <th class="text-left px-2 py-1">Subject</th>
-              <th class="text-left px-2 py-1">From</th>
-              <th class="text-left px-2 py-1">Verdict</th>
-              <th class="text-left px-2 py-1">Not detected</th>
-              <th class="text-left px-2 py-1">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each scan.items as it}
-              <tr>
-                <td class="px-2 py-1 truncate max-w-[40ch]">{it.subject}</td>
-                <td class="px-2 py-1">{it.source}</td>
-                <td class="px-2 py-1"
-                  >{it.verdict ||
-                    '-'}{#if it.reason && (!it.verdict || it.verdict.toLowerCase() === 'unknown')}
-                    <span class="text-muted-foreground">({it.reason})</span>{/if}</td
-                >
-                <td class="px-2 py-1">
-                  {#if typeof it.total_vendors === 'number'}
-                    {Math.max(0, (it.total_vendors || 0) - (it.positives || 0))}
-                  {:else if typeof it.harmless === 'number' || typeof it.undetected === 'number'}
-                    {(it.harmless || 0) + (it.undetected || 0)}
-                  {:else}
-                    -
-                  {/if}
-                </td>
-                <td class="px-2 py-1">
-                  {@render VtDetailsTrigger({ props: { onclick: () => toggleVtDetails(it) } })}
-                </td>
-              </tr>
-              {#if vtExpanded.has(vtKeyOf(it))}
-                <tr>
-                  <td class="px-2 py-2 text-xs text-muted-foreground" colspan="5">
-                    <div class="grid grid-cols-2 gap-2">
-                      <div>Malicious: {typeof it.malicious === 'number' ? it.malicious : '-'}</div>
-                      <div>
-                        Suspicious: {typeof it.suspicious === 'number' ? it.suspicious : '-'}
-                      </div>
-                      <div>Harmless: {typeof it.harmless === 'number' ? it.harmless : '-'}</div>
-                      <div>
-                        Undetected: {typeof it.undetected === 'number' ? it.undetected : '-'}
-                      </div>
-                    </div>
-                    {#if it.reason}
-                      <div class="mt-1">Reason: {it.reason}</div>
-                    {/if}
-                    {#if it.permalink}
-                      <div class="mt-2">
-                        <button
-                          type="button"
-                          class="px-0 text-xs text-white hover:text-emerald-600 underline-offset-4 hover:underline"
-                          onclick={() => {
-                            try {
-                              void openExternal(it.permalink as string);
-                            } catch { /* noop */ }
-                          }}
-                        >
-                          Open on VirusTotal
-                        </button>
-                      </div>
-                    {/if}
-                  </td>
-                </tr>
-              {/if}
-            {/each}
-            {#if (scan.items?.length ?? 0) === 0}
-              <tr
-                ><td colspan="5" class="px-2 py-3 text-center text-muted-foreground"
-                  >No items yet.</td
-                ></tr
-              >
-            {/if}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <DialogFooter>
-      <DialogClose>
-        <Button>Close</Button>
-      </DialogClose>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+<SettingsDialog bind:open={settingsOpen} />
+<VtScanDialog bind:open={scanDialogOpen} />
 
 <Toaster richColors closeButton duration={4000} position="bottom-right" />

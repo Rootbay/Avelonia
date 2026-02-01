@@ -209,8 +209,7 @@ export const BROWSERS_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Web',
     tags: ['Privacy', 'Security'],
-    downloadLink:
-      'https://www.torproject.org/dist/torbrowser/latest/torbrowser-install-win64.exe',
+    downloadLink: 'https://www.torproject.org/dist/torbrowser/latest/torbrowser-install-win64.exe',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -325,35 +324,35 @@ export const PRODUCTIVITY_DOWNLOADS: Download[] = [
     status: 'available',
     progress: 0,
   },
-    {
-      id: 41,
-      name: 'Obsidian',
-      description: 'Markdown-based knowledge base with backlinking',
-      size: '155 MB',
-      fileType: 'exe',
-      category: 'Productivity',
-      tags: ['Notes', 'Knowledge', 'Markdown'],
-      downloadLink: 'https://obsidian.md/download?platform=win',
-      eta: 'N/A',
-      status: 'available',
-      progress: 0,
-    },
-    {
-      id: 69,
-      name: 'Windows Terminal',
-      description: 'Modern terminal with tabs, panes, and GPU-accelerated text rendering',
-      size: '30 MB',
-      fileType: 'msixbundle',
-      category: 'Productivity',
-      tags: ['Terminal', 'Shell'],
-      downloadLink: 'https://aka.ms/terminal',
-      eta: 'N/A',
-      status: 'available',
-      progress: 0,
-    },
-    {
-      id: 42,
-      name: 'Todoist Desktop',
+  {
+    id: 41,
+    name: 'Obsidian',
+    description: 'Markdown-based knowledge base with backlinking',
+    size: '155 MB',
+    fileType: 'exe',
+    category: 'Productivity',
+    tags: ['Notes', 'Knowledge', 'Markdown'],
+    downloadLink: 'https://obsidian.md/download?platform=win',
+    eta: 'N/A',
+    status: 'available',
+    progress: 0,
+  },
+  {
+    id: 69,
+    name: 'Windows Terminal',
+    description: 'Modern terminal with tabs, panes, and GPU-accelerated text rendering',
+    size: '30 MB',
+    fileType: 'msixbundle',
+    category: 'Productivity',
+    tags: ['Terminal', 'Shell'],
+    downloadLink: 'https://aka.ms/terminal',
+    eta: 'N/A',
+    status: 'available',
+    progress: 0,
+  },
+  {
+    id: 42,
+    name: 'Todoist Desktop',
     description: 'Task manager with boards, reminders, and productivity views',
     size: '50 MB',
     fileType: 'exe',
@@ -372,8 +371,7 @@ export const PRODUCTIVITY_DOWNLOADS: Download[] = [
     fileType: 'zip',
     category: 'Productivity',
     tags: ['AI', 'Coding'],
-    downloadLink:
-      'https://api2.cursor.sh/updates/download/golden/win32-x64/cursor/2.0',
+    downloadLink: 'https://api2.cursor.sh/updates/download/golden/win32-x64/cursor/2.0',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -402,20 +400,17 @@ export const DEVELOPMENT_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Development',
     tags: ['Editor', 'IDE'],
-    downloadLink:
-      'https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user',
+    downloadLink: 'https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user',
     releases: [
       {
         label: 'Stable',
-        downloadLink:
-          'https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user',
+        downloadLink: 'https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user',
         size: '120 MB',
         fileType: 'exe',
       },
       {
         label: 'Insiders',
-        downloadLink:
-          'https://update.code.visualstudio.com/latest/win32-x64-user-insider/stable',
+        downloadLink: 'https://update.code.visualstudio.com/latest/win32-x64-user-insider/stable',
         size: '124 MB',
         fileType: 'exe',
       },
@@ -433,8 +428,7 @@ export const DEVELOPMENT_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Development',
     tags: ['Git', 'Collaboration'],
-    downloadLink:
-      'https://central.github.com/deployments/desktop/desktop/latest/win64',
+    downloadLink: 'https://central.github.com/deployments/desktop/desktop/latest/win64',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -447,27 +441,23 @@ export const DEVELOPMENT_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Development',
     tags: ['Runtime', 'Tools'],
-    downloadLink:
-      'https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe',
+    downloadLink: 'https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe',
     releases: [
       {
         label: '3.12.3 (Latest)',
-        downloadLink:
-          'https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe',
+        downloadLink: 'https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe',
         size: '26 MB',
         fileType: 'exe',
       },
       {
         label: '3.11.6 (LTS)',
-        downloadLink:
-          'https://www.python.org/ftp/python/3.11.6/python-3.11.6-amd64.exe',
+        downloadLink: 'https://www.python.org/ftp/python/3.11.6/python-3.11.6-amd64.exe',
         size: '25 MB',
         fileType: 'exe',
       },
       {
         label: '3.10.12 (Legacy)',
-        downloadLink:
-          'https://www.python.org/ftp/python/3.10.12/python-3.10.12-amd64.exe',
+        downloadLink: 'https://www.python.org/ftp/python/3.10.12/python-3.10.12-amd64.exe',
         size: '25 MB',
         fileType: 'exe',
       },
@@ -619,8 +609,7 @@ export const DEVELOPMENT_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Development',
     tags: ['IDE', 'Tools'],
-    downloadLink:
-      'https://data.services.jetbrains.com/products/download?code=TB&platform=Windows',
+    downloadLink: 'https://data.services.jetbrains.com/products/download?code=TB&platform=Windows',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -628,7 +617,8 @@ export const DEVELOPMENT_DOWNLOADS: Download[] = [
   {
     id: 70,
     name: 'Docker Desktop',
-    description: 'Container management for building and running Docker images with Kubernetes support',
+    description:
+      'Container management for building and running Docker images with Kubernetes support',
     size: '650 MB',
     fileType: 'exe',
     category: 'Development',
@@ -663,8 +653,7 @@ export const GAMING_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Gaming',
     tags: ['Games', 'Launcher'],
-    downloadLink:
-      'https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe',
+    downloadLink: 'https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -718,8 +707,7 @@ export const GAMING_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'Media',
     tags: ['Video', 'Audio'],
-    downloadLink:
-      'https://get.videolan.org/vlc/3.0.20/win64/vlc-3.0.20-win64.exe',
+    downloadLink: 'https://get.videolan.org/vlc/3.0.20/win64/vlc-3.0.20-win64.exe',
     eta: 'N/A',
     status: 'available',
     progress: 0,
@@ -782,7 +770,8 @@ export const SYSTEM_DOWNLOADS: Download[] = [
   {
     id: 32,
     name: 'NVIDIA App (GeForce Experience)',
-    description: 'Unified driver updates, recording, and capture experience for GeForce GPUs (formerly GeForce Experience)',
+    description:
+      'Unified driver updates, recording, and capture experience for GeForce GPUs (formerly GeForce Experience)',
     size: '165 MB',
     fileType: 'exe',
     category: 'System',
@@ -1026,8 +1015,7 @@ export const SYSTEM_DOWNLOADS: Download[] = [
     fileType: 'exe',
     category: 'System',
     tags: ['USB', 'Boot'],
-    downloadLink:
-      'https://github.com/pbatard/rufus/releases/download/v4.0/rufus-4.0.exe',
+    downloadLink: 'https://github.com/pbatard/rufus/releases/download/v4.0/rufus-4.0.exe',
     eta: 'N/A',
     status: 'available',
     progress: 0,

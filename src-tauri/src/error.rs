@@ -9,18 +9,24 @@ pub enum AppError {
     Cancelled,
 }
 
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::Internal(s) => write!(f, "Internal error: {}", s),
+            AppError::Io(e) => write!(f, "IO error: {}", e),
+            AppError::Tauri(s) => write!(f, "Tauri error: {}", s),
+            AppError::System(s) => write!(f, "System error: {}", s),
+            AppError::Cancelled => write!(f, "Operation cancelled"),
+        }
+    }
+}
+
 impl Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let msg = match self {
-            AppError::Internal(s) => s.clone(),
-            AppError::Io(e) => e.to_string(),
-            AppError::Tauri(s) => s.clone(),
-            AppError::System(s) => s.clone(),
-            AppError::Cancelled => "Operation cancelled".to_string(),
-        };
+        let msg = self.to_string();
         
         let code = match self {
             AppError::Internal(_) => "INTERNAL",
@@ -43,6 +49,12 @@ impl Serialize for AppError {
 impl From<std::io::Error> for AppError {
     fn from(err: std::io::Error) -> Self {
         AppError::Io(err)
+    }
+}
+
+impl From<tauri::Error> for AppError {
+    fn from(err: tauri::Error) -> Self {
+        AppError::Tauri(err.to_string())
     }
 }
 

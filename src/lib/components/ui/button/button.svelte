@@ -53,8 +53,7 @@
     children,
     ...restProps
   }: ButtonProps = $props();
-
-</script> 
+</script>
 
 {#if href && !disabled}
   <a

@@ -83,8 +83,8 @@ function logIgnoredError(context: string, error: unknown) {
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
-  } catch (error: unknown) {
-    console.error(`[Downloader:appLog] Failed to push log:`, error);
+  } catch (_error: unknown) {
+    console.error(`[Downloader:appLog] Failed to push log:`, _error);
   }
 }
 
@@ -96,7 +96,7 @@ async function maybeAutoInstall(id: number) {
     installQueue.push(id);
     void processInstallQueue();
   } catch (error: unknown) {
-    await appLog('ERROR', `Auto-install trigger failed for ID ${id}`);
+    await appLog('ERROR', `Auto-install trigger failed for ID ${id}: ${String(error)}`);
   }
 }
 
@@ -140,11 +140,11 @@ async function processInstallQueue() {
           `Attempting silent install of ${snap.name} (${ext.toUpperCase()})${downloader.elevate ? ' [elevated]' : ''}`
         );
         try {
-          await invoke('silent_install', { 
-            id, 
-            path, 
-            elevate: !!downloader.elevate, 
-            customFlags: snap.installFlags 
+          await invoke('silent_install', {
+            id,
+            path,
+            elevate: !!downloader.elevate,
+            customFlags: snap.installFlags,
           });
           await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
           autoInstallTried.add(id);
@@ -190,7 +190,7 @@ async function processInstallQueue() {
           }
         }
       } catch (error: unknown) {
-        await appLog('ERROR', `Verification process failed for ${snap.name}`);
+        await appLog('ERROR', `Verification process failed for ${snap.name}: ${String(error)}`);
       }
     }
   } finally {
@@ -365,9 +365,9 @@ async function performDownload(download: Download): Promise<void> {
       updateDownloadById(download.id, (draft) => {
         draft.eta = 'Verifying...';
       });
-      const isValid = await invoke<boolean>('verify_hash', { 
-        path: filePath, 
-        expectedHash: currentSnap.hash 
+      const isValid = await invoke<boolean>('verify_hash', {
+        path: filePath,
+        expectedHash: currentSnap.hash,
       });
       if (!isValid) {
         throw new Error('Integrity check failed: File hash mismatch');
@@ -377,7 +377,7 @@ async function performDownload(download: Download): Promise<void> {
     if (activeDownloads.has(download.id)) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await appLog('ERROR', `Download failed for ${download.name}: ${errorMessage}`);
-      
+
       updateDownloadById(download.id, (draft) => {
         if (draft.status !== 'available') {
           draft.status = 'failed';
@@ -411,13 +411,15 @@ export function initDownloadListener() {
       const dir = await downloadDir();
       const currentDownloads = get(downloads);
       const activePaths = currentDownloads
-        .filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
-        .map(d => d.targetPath ? d.targetPath + '.part' : null)
+        .filter(
+          (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+        )
+        .map((d) => (d.targetPath ? d.targetPath + '.part' : null))
         .filter((p): p is string => !!p);
-      
-      const count = await invoke<number>('cleanup_orphaned_downloads', { 
-        downloadDir: dir, 
-        activePaths 
+
+      const count = await invoke<number>('cleanup_orphaned_downloads', {
+        downloadDir: dir,
+        activePaths,
       });
       if (count > 0) {
         await appLog('INFO', `Cleaned up ${count} orphaned partial download files.`);
@@ -488,8 +490,7 @@ export function initDownloadListener() {
       }
     }
 
-    const shouldUpdateUi =
-      !previous || prevStatus !== newStatus || updatedSpeed || completed;
+    const shouldUpdateUi = !previous || prevStatus !== newStatus || updatedSpeed || completed;
 
     if (shouldUpdateUi) {
       updateDownloadById(id, (draft) => {
@@ -723,7 +724,7 @@ export async function cancelDownload(id: number) {
   });
 
   lastSample.delete(id);
-  
+
   if (!wasActive) {
     finalizeDownload(id);
   }

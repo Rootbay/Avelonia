@@ -6,6 +6,7 @@ A **desktop application** built with **Tauri v2**, **Svelte 5 runes mode**, **Ty
 # Setup / Build & Run
 
 Install dependencies:
+
 ```bash
 bun install
 ```
@@ -17,6 +18,7 @@ Production Build:
 **Desktop App (Tauri v2)**: `bun tauri build`
 
 Type-check the project:
+
 ```bash
 bun tsc --noEmit
 ```
@@ -24,21 +26,25 @@ bun tsc --noEmit
 # File-scoped Checks
 
 Type-check a single file:
+
 ```bash
 bun tsc --noEmit <file>
 ```
 
 Run ESLint on a single file:
+
 ```bash
 bun eslint --fix <file>
 ```
 
 Format a file with Prettier:
+
 ```bash
 bun prettier --write <file>
 ```
 
 Run a specific test file:
+
 ```bash
 bun test <path/to/file.test.ts>
 ```
@@ -74,27 +80,29 @@ Utilities, stores: camelCase or kebab-case as appropriate.
 Use **Vitest** (or compatible runner with Bun).
 Add unit tests for new logic.
 Run tests before committing:
-  ```bash
+  `bash
   bun test
-  ```
+  `
 
-  ```bash
+  `bash
   bun check
-  ```
+  `
 
-  ```bash
+  `bash
   bun lint
-  ```
+  `
 
 # Do’s & Don’ts
 
 ## Do:
+
 - Use TailwindCSS utilities instead of custom CSS.
 - Use shadcn-svelte components for UI consistency.
 - Keep components small and modular.
 - Use lucide icons consistently.
 
 ## Don’t:
+
 - Don’t use `any` unless unavoidable (add `TODO` if used).
 - Don’t hardcode secrets; use environment variables or config files.
 - Don’t add dependencies without reviewing size and compatibility.

@@ -23,15 +23,15 @@
     TableBody,
     TableCell,
   } from '$lib/components/ui/table';
-import {
-  Cpu,
-  MemoryStick,
-  HardDrive,
-  DownloadIcon,
-  ChevronRight,
-  ChevronDown,
-} from '@lucide/svelte';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+  import {
+    Cpu,
+    MemoryStick,
+    HardDrive,
+    DownloadIcon,
+    ChevronRight,
+    ChevronDown,
+  } from '@lucide/svelte';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const SYSTEM_INFO_CACHE_KEY = 'avelonia_dashboard_system_info_v1';
 
@@ -100,12 +100,6 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
-  function getTimestamp() {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
-
   function levelBadgeClass(level: LogLevel) {
     if (level === 'SUCCESS') return 'border-green-500/20 text-green-700 bg-green-500/10';
     if (level === 'INFO') return 'border-blue-500/20 text-blue-700 bg-blue-500/10';
@@ -124,7 +118,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   function describeDownloadTransition(
     dl: Download,
-    previousStatus: Download['status'] | undefined
+    _previousStatus: Download['status'] | undefined
   ): { level: LogLevel; message: string } | null {
     switch (dl.status) {
       case 'queued':
@@ -376,7 +370,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   const vtHeaderSet = $derived(new SvelteSet(vtGroups.map((g) => g.header)));
   let vtCollapsed = $state(new Set<number>());
   let vtKnownHeaders = $state(new Set<number>());
-  
+
   $effect(() => {
     const starts = new SvelteSet(vtGroups.map((g) => g.header));
     let changedCollapsed = false;
@@ -413,8 +407,6 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     vtCollapsed = new SvelteSet(vtCollapsed);
   }
 
-  const logsAfter = $derived(Math.max(0, $logStore.length - (logsStart + windowedLogs.length)));
-
   function markLogSkeletonRange(startIndex: number, endIndex: number) {
     try {
       for (let i = startIndex; i < endIndex; i++) logsSkeleton.add(i);
@@ -423,7 +415,9 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
         for (let i = startIndex; i < endIndex; i++) logsSkeleton.delete(i);
         logsSkeleton = new SvelteSet(logsSkeleton);
       }, 350);
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 
   function onLogsScroll(event: Event) {
@@ -495,10 +489,14 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
           setTimeout(() => {
             try {
               if (logsScrollEl) logsScrollEl.scrollTop = 0;
-            } catch { /* noop */ }
+            } catch {
+              /* noop */
+            }
           }, 0);
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }
     prevLogLen = total;
     if (logsVisible > total) logsVisible = total;
@@ -511,7 +509,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 <div class="space-y-6 text-foreground">
   <Card>
-    <CardHeader class="space-y-1">
+    <CardHeader>
       <CardTitle class="text-2xl">Welcome back!</CardTitle>
       <CardDescription>Your system status at a glance.</CardDescription>
     </CardHeader>
@@ -561,7 +559,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   <div class="grid gap-4 lg:grid-cols-2">
     <Card>
-      <CardHeader class="space-y-1">
+      <CardHeader>
         <div class="flex items-center gap-2">
           <DownloadIcon class="size-5 text-muted-foreground" />
           <CardTitle>Active Downloads</CardTitle>
@@ -617,7 +615,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     </Card>
 
     <Card>
-      <CardHeader class="space-y-1">
+      <CardHeader>
         <CardTitle>System Logs</CardTitle>
         <CardDescription>Live application and system events.</CardDescription>
       </CardHeader>
@@ -639,7 +637,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
             </TableHeader>
             <TableBody>
               {#if initialLogLoading}
-                {#each Array.from({ length: 6 }) as _, ii}
+                {#each Array.from({ length: 6 }) as _, ii (ii)}
                   <TableRow class="border-0!">
                     <TableCell class="w-20"
                       ><Skeleton class="h-3 w-14" aria-hidden="true" /></TableCell
@@ -665,7 +663,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                     ></td>
                   </tr>
                 {/if}
-                {#each windowedLogs as log, i (logsStart + i)}
+                {#each windowedLogs as log, i (log.timestamp + log.message + i)}
                   {#if logsSkeleton.has(logsStart + i)}
                     <TableRow class="border-0!" aria-hidden="true">
                       <TableCell class="w-20">
@@ -703,7 +701,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                       </TableCell>
                     </TableRow>
                     {#if !vtCollapsed.has(i)}
-                      {#each g.indices as gi}
+                      {#each g.indices as gi (gi)}
                         <TableRow class="border-0! hover:bg-muted/30">
                           <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
                             >{windowedLogs[gi].timestamp}</TableCell
@@ -729,7 +727,10 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
                         >{log.timestamp}</TableCell
                       >
                       <TableCell class="pr-4">
-                        <Badge variant="outline" class={'text-[11px] ' + levelBadgeClass(log.level)}>
+                        <Badge
+                          variant="outline"
+                          class={'text-[11px] ' + levelBadgeClass(log.level)}
+                        >
                           {log.level}
                         </Badge>
                       </TableCell>

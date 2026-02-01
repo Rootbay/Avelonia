@@ -25,7 +25,12 @@ export type NewDownloadEntry = {
 
 function normalizeStoredDownload(download: Download): Download {
   let status = download.status;
-  if (status === 'downloading' || status === 'pending' || status === 'queued' || status === 'failed') {
+  if (
+    status === 'downloading' ||
+    status === 'pending' ||
+    status === 'queued' ||
+    status === 'failed'
+  ) {
     status = 'available';
   }
   return { ...download, status };
@@ -247,9 +252,7 @@ function normalizeCatalogEntry(value: unknown): NewDownloadEntry | null {
     name,
     downloadLink,
     category:
-      typeof raw.category === 'string' && raw.category.trim()
-        ? raw.category.trim()
-        : 'General',
+      typeof raw.category === 'string' && raw.category.trim() ? raw.category.trim() : 'General',
   };
   if (typeof raw.description === 'string' && raw.description.trim()) {
     entry.description = raw.description.trim();

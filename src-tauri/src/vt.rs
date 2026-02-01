@@ -1,3 +1,4 @@
+use crate::AppError;
 use dashmap::DashMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
+
+use lnk::ShellLink;
+use lnk::encoding::WINDOWS_1252;
 
 const DEFAULT_TTL_SECS: u64 = 2 * 24 * 60 * 60;
 const PUBLIC_API_INTERVAL_SECS: u64 = 16;
@@ -43,10 +47,10 @@ pub struct CacheEntry {
 
 #[derive(Default)]
 pub struct VtState {
-    api_key: Mutex<Option<String>>,
-    cache: Arc<DashMap<String, CacheEntry>>,
-    last_req: Mutex<Option<u64>>,
-    cache_loaded: AtomicBool,
+    pub api_key: Mutex<Option<String>>,
+    pub cache: Arc<DashMap<String, CacheEntry>>,
+    pub last_req: Mutex<Option<u64>>,
+    pub cache_loaded: AtomicBool,
 }
 
 impl VtState {
@@ -54,7 +58,7 @@ impl VtState {
         Self::default()
     }
 
-    fn ensure_cache_loaded(&self) {
+    pub fn ensure_cache_loaded(&self) {
         if self.cache_loaded.load(Ordering::Acquire) {
             return;
         }
@@ -69,7 +73,7 @@ impl VtState {
         }
     }
 
-    fn reload_cache(&self) -> usize {
+    pub fn reload_cache(&self) -> usize {
         self.cache.clear();
         let map = load_cache_from_disk();
         let len = map.len();
@@ -178,15 +182,13 @@ fn save_key_to_disk(key: &str) {
     );
 }
 
-fn compute_sha256(path: &Path) -> Result<String, String> {
-    let f = File::open(path).map_err(|e| format!("open failed: {}", e))?;
+fn compute_sha256(path: &Path) -> Result<String, AppError> {
+    let f = File::open(path)?;
     let mut reader = BufReader::new(f);
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| format!("read failed: {}", e))?;
+        let n = reader.read(&mut buf)?;
         if n == 0 {
             break;
         }
@@ -195,14 +197,14 @@ fn compute_sha256(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry, String> {
+async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry, AppError> {
     let url = format!("https://www.virustotal.com/api/v3/files/{}", sha256);
     let resp = client
         .get(&url)
         .header("x-apikey", key)
         .send()
         .await
-        .map_err(|e| format!("VT request failed: {}", e))?;
+        .map_err(|e| AppError::Internal(format!("VT request failed: {}", e)))?;
 
     if resp.status().as_u16() == 404 {
         return Ok(CacheEntry {
@@ -220,7 +222,7 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
     }
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!("VT HTTP {}", status));
+        return Err(AppError::System(format!("VT HTTP {}", status)));
     }
 
     #[derive(Deserialize)]
@@ -256,7 +258,7 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
     let root: RespRoot = resp
         .json()
         .await
-        .map_err(|e| format!("VT parse failed: {}", e))?;
+        .map_err(|e| AppError::Internal(format!("VT parse failed: {}", e)))?;
 
     let mut positives: u32 = 0;
     let mut verdict = Verdict::Unknown;
@@ -318,10 +320,10 @@ async fn ensure_rate_limit(state: &VtState) {
 }
 
 async fn lookup_or_fetch(
-    state: &State<'_, VtState>,
+    state: &VtState,
     sha256: &str,
     force: bool,
-) -> Result<CacheEntry, String> {
+) -> Result<CacheEntry, AppError> {
     if !force {
         if let Some(entry) = state.cache.get(sha256) {
             let age = epoch_now().saturating_sub(entry.last_checked);
@@ -338,14 +340,14 @@ async fn lookup_or_fetch(
         .or_else(load_key_from_disk);
     let key = match key_opt {
         Some(k) => k,
-        None => return Err("VirusTotal API key not set".into()),
+        None => return Err(AppError::Internal("VirusTotal API key not set".into())),
     };
     let client = Client::builder()
         .user_agent("Avelonia/0.1 (vt)")
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|e| e.to_string())?;
-    ensure_rate_limit(&*state).await;
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    ensure_rate_limit(state).await;
     let fetched = vt_fetch(&client, &key, sha256).await?;
     state.cache.insert(sha256.to_string(), fetched.clone());
     save_cache_to_disk(&state.cache);
@@ -362,7 +364,7 @@ fn cache_needs_refresh(state: &VtState, sha256: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, String> {
+pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, AppError> {
     state.ensure_cache_loaded();
     let key_set = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
     Ok(VtStatus {
@@ -395,23 +397,23 @@ fn save_snapshot(s: &VtSnapshot) {
 }
 
 #[cfg(target_os = "windows")]
-fn collect_startup_keys_for_snapshot() -> Vec<String> {
+async fn collect_startup_keys_for_snapshot() -> Vec<String> {
     let mut out = Vec::new();
-    let items = resolve_startup_shortcut_targets();
+    let items = resolve_startup_shortcut_targets().await;
     for (_d, p) in items {
         out.push(p);
     }
     out
 }
 #[cfg(not(target_os = "windows"))]
-fn collect_startup_keys_for_snapshot() -> Vec<String> {
+async fn collect_startup_keys_for_snapshot() -> Vec<String> {
     Vec::new()
 }
 
 #[cfg(target_os = "windows")]
-fn collect_registry_keys_for_snapshot() -> Vec<String> {
+async fn collect_registry_keys_for_snapshot() -> Vec<String> {
     let mut out = Vec::new();
-    if let Ok(items) = crate::optimize::list_registry_run() {
+    if let Ok(items) = crate::optimize::list_registry_run().await {
         for it in items {
             out.push(format!("{}|{}|{}", it.hive, it.key, it.name));
         }
@@ -419,15 +421,15 @@ fn collect_registry_keys_for_snapshot() -> Vec<String> {
     out
 }
 #[cfg(not(target_os = "windows"))]
-fn collect_registry_keys_for_snapshot() -> Vec<String> {
+async fn collect_registry_keys_for_snapshot() -> Vec<String> {
     Vec::new()
 }
 
-fn build_current_snapshot(prev_last_scan: u64) -> VtSnapshot {
+async fn build_current_snapshot(prev_last_scan: u64) -> VtSnapshot {
     VtSnapshot {
         last_scan: prev_last_scan,
-        startup: collect_startup_keys_for_snapshot(),
-        registry: collect_registry_keys_for_snapshot(),
+        startup: collect_startup_keys_for_snapshot().await,
+        registry: collect_registry_keys_for_snapshot().await,
     }
 }
 
@@ -443,7 +445,7 @@ pub fn vt_set_api_key(
     state: State<'_, VtState>,
     key: Option<String>,
     persist: Option<bool>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let mut guard = state.api_key.lock().unwrap();
     *guard = key.clone();
     if let Some(true) = persist {
@@ -457,7 +459,7 @@ pub fn vt_set_api_key(
 }
 
 #[tauri::command]
-pub fn vt_clear_cache(state: State<'_, VtState>) -> Result<(), String> {
+pub fn vt_clear_cache(state: State<'_, VtState>) -> Result<(), AppError> {
     state.cache.clear();
     state.cache_loaded.store(false, Ordering::Release);
     let _ = fs::remove_file(cache_file_path());
@@ -466,16 +468,16 @@ pub fn vt_clear_cache(state: State<'_, VtState>) -> Result<(), String> {
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn vt_scan_needed(
+pub async fn vt_scan_needed(
     state: State<'_, VtState>,
     limit: Option<u32>,
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize), AppError> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(50).max(1).min(200) as usize;
     let mut need_startup = 0usize;
     let mut need_registry = 0usize;
 
-    let items = resolve_startup_shortcut_targets();
+    let items = resolve_startup_shortcut_targets().await;
     for (_display, path) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
         if !pb.exists() || !pb.is_file() {
@@ -488,7 +490,7 @@ pub fn vt_scan_needed(
         }
     }
 
-    let items = resolve_registry_run_targets();
+    let items = resolve_registry_run_targets().await;
     for (_display, path, _hive, _key, _name) in items.into_iter().take(limit) {
         let pb = PathBuf::from(&path);
         if !pb.exists() || !pb.is_file() {
@@ -506,27 +508,27 @@ pub fn vt_scan_needed(
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn vt_scan_needed(
+pub async fn vt_scan_needed(
     _state: State<'_, VtState>,
     _limit: Option<u32>,
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize), AppError> {
     Ok((0, 0))
 }
 
 #[tauri::command]
-pub fn vt_load_cache(state: State<'_, VtState>) -> Result<usize, String> {
+pub async fn vt_load_cache(state: State<'_, VtState>) -> Result<usize, AppError> {
     Ok(state.reload_cache())
 }
 
 #[cfg(target_os = "windows")]
-fn resolve_startup_shortcut_targets() -> Vec<(String /*display*/, String /*path*/)> {
+async fn resolve_startup_shortcut_targets() -> Vec<(String /*display*/, String /*path*/)> {
     let mut out = Vec::new();
-    if let Ok(items) = crate::optimize::list_startup_shortcuts() {
+    if let Ok(items) = crate::optimize::list_startup_shortcuts().await {
         for it in items {
             let display = it.name.clone();
             let p = std::path::PathBuf::from(&it.path);
             if p.exists() && p.is_file() {
-                if let Ok(link) = lnk::ShellLink::open(&p, lnk::encoding::WINDOWS_1252) {
+                if let Ok(link) = ShellLink::open(&p, WINDOWS_1252) {
                     if let Some(info) = link.link_info() {
                         let common = info.common_path_suffix().to_string();
                         let tgt = PathBuf::from(common);
@@ -599,7 +601,7 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
     let lower = first.to_lowercase();
     if lower.ends_with(".exe") && !lower.contains('\\') && !lower.contains('/') {
         let mut roots: Vec<PathBuf> = Vec::new();
-        if let Some(system_root) =
+        if let Some(system_root) = 
             std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
         {
             roots.push(PathBuf::from(&system_root).join("System32"));
@@ -637,7 +639,7 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
                 .map(|x| x.to_string_lossy().to_string())
             {
                 let mut roots: Vec<PathBuf> = Vec::new();
-                if let Some(system_root) =
+                if let Some(system_root) = 
                     std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
                 {
                     roots.push(PathBuf::from(&system_root).join("System32"));
@@ -661,7 +663,7 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn resolve_registry_run_targets() -> Vec<(
+async fn resolve_registry_run_targets() -> Vec<(
     String, /*display*/
     String, /*path*/
     String, /*hive*/
@@ -669,7 +671,7 @@ fn resolve_registry_run_targets() -> Vec<(
     String, /*name*/
 )> {
     let mut out = Vec::new();
-    if let Ok(items) = crate::optimize::list_registry_run() {
+    if let Ok(items) = crate::optimize::list_registry_run().await {
         for it in items {
             if let Some(img) = extract_exe_from_command(&it.command) {
                 out.push((it.command.clone(), img, it.hive, it.key, it.name));
@@ -683,14 +685,14 @@ fn resolve_registry_run_targets() -> Vec<(
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_startup(
     app: AppHandle,
-    state: State<'_, VtState>,
+    state: State<'_, Arc<VtState>>,
     limit: Option<u32>,
     force: Option<bool>,
-) -> Result<Vec<VtItemReport>, String> {
+) -> Result<Vec<VtItemReport>, AppError> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
-    let items = resolve_startup_shortcut_targets();
+    let items = resolve_startup_shortcut_targets().await;
     let mut out: Vec<VtItemReport> = Vec::new();
     for (display, path) in items.into_iter().take(limit) {
         let mut pb = PathBuf::from(&path);
@@ -719,7 +721,7 @@ pub async fn vt_scan_startup(
                 continue;
             }
             if ext == "lnk" {
-                if let Ok(link) = lnk::ShellLink::open(&pb, lnk::encoding::WINDOWS_1252) {
+                if let Ok(link) = ShellLink::open(&pb, WINDOWS_1252) {
                     if let Some(info) = link.link_info() {
                         let tgt = PathBuf::from(info.common_path_suffix().to_string());
                         if tgt.exists() {
@@ -824,7 +826,7 @@ pub async fn vt_scan_startup(
                 continue;
             }
         };
-        match lookup_or_fetch(&state, &sha, force).await {
+        match lookup_or_fetch(&**state, &sha, force).await {
             Ok(entry) => {
                 let total = entry.malicious_count
                     + entry.suspicious_count
@@ -864,17 +866,9 @@ pub async fn vt_scan_startup(
                 }
             }
             Err(e) => {
-                let es = e.to_lowercase();
-                let reason = if es.contains("api key not set") {
-                    "no-api-key"
-                } else if es.contains("http 429") {
-                    "rate-limited"
-                } else if es.contains("http ") {
-                    "http-error"
-                } else if es.contains("request failed") {
-                    "network-error"
-                } else {
-                    "unknown-error"
+                let reason = match e {
+                    AppError::Internal(ref s) if s.contains("API key") => "no-api-key",
+                    _ => "error",
                 };
                 let rep = VtItemReport {
                     subject: display.clone(),
@@ -902,15 +896,15 @@ pub async fn vt_scan_startup(
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_registry(
     app: AppHandle,
-    state: State<'_, VtState>,
+    state: State<'_, Arc<VtState>>,
     limit: Option<u32>,
     force: Option<bool>,
-) -> Result<Vec<VtItemReport>, String> {
+) -> Result<Vec<VtItemReport>, AppError> {
     state.ensure_cache_loaded();
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
     let mut out: Vec<VtItemReport> = Vec::new();
-    let items_full = crate::optimize::list_registry_run().unwrap_or_default();
+    let items_full = crate::optimize::list_registry_run().await.unwrap_or_default();
     for it in items_full.into_iter().take(limit) {
         let display = it.command.clone();
         let name = it.name.clone();
@@ -990,7 +984,7 @@ pub async fn vt_scan_registry(
                 continue;
             }
         };
-        match lookup_or_fetch(&state, &sha, force).await {
+        match lookup_or_fetch(&**state, &sha, force).await {
             Ok(entry) => {
                 let subj = if !name.trim().is_empty() {
                     name.clone()
@@ -1035,17 +1029,9 @@ pub async fn vt_scan_registry(
                 }
             }
             Err(e) => {
-                let es = e.to_lowercase();
-                let reason = if es.contains("api key not set") {
-                    "no-api-key"
-                } else if es.contains("http 429") {
-                    "rate-limited"
-                } else if es.contains("http ") {
-                    "http-error"
-                } else if es.contains("request failed") {
-                    "network-error"
-                } else {
-                    "unknown-error"
+                let reason = match e {
+                    AppError::Internal(ref s) if s.contains("API key") => "no-api-key",
+                    _ => "error",
                 };
                 let subj = if !name.trim().is_empty() {
                     name.clone()
@@ -1078,56 +1064,55 @@ pub async fn vt_scan_registry(
 #[cfg(target_os = "windows")]
 pub async fn vt_scan_all(
     app: AppHandle,
-    state: State<'_, VtState>,
+    state: State<'_, Arc<VtState>>,
     limit: Option<u32>,
     force: Option<bool>,
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize), AppError> {
     let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force)
-        .await?
-        .len();
-    let n2 = vt_scan_registry(app, state, limit, force).await?.len();
+        .await?;
+    let n2 = vt_scan_registry(app, state, limit, force).await?;
     let prev = load_snapshot();
-    let mut cur = build_current_snapshot(prev.last_scan);
+    let mut cur = build_current_snapshot(prev.last_scan).await;
     cur.last_scan = epoch_now();
     save_snapshot(&cur);
-    Ok((n1, n2))
+    Ok((n1.len(), n2.len()))
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn vt_scan_startup(
     _app: AppHandle,
-    _state: State<'_, VtState>,
+    _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
-) -> Result<Vec<VtItemReport>, String> {
+) -> Result<Vec<VtItemReport>, AppError> {
     Ok(Vec::new())
 }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn vt_scan_registry(
     _app: AppHandle,
-    _state: State<'_, VtState>,
+    _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
-) -> Result<Vec<VtItemReport>, String> {
+) -> Result<Vec<VtItemReport>, AppError> {
     Ok(Vec::new())
 }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn vt_scan_all(
     _app: AppHandle,
-    _state: State<'_, VtState>,
+    _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize), AppError> {
     Ok((0, 0))
 }
 
 #[tauri::command]
 pub async fn vt_auto_maybe_scan(
     app: AppHandle,
-    state: State<'_, VtState>,
-) -> Result<Option<String>, String> {
+    state: State<'_, Arc<VtState>>,
+) -> Result<Option<String>, AppError> {
     let prev = load_snapshot();
-    let mut cur = build_current_snapshot(prev.last_scan);
+    let mut cur = build_current_snapshot(prev.last_scan).await;
     let key_present = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
     let now = epoch_now();
     let reason = if has_new(&prev, &cur) {
@@ -1148,13 +1133,13 @@ pub async fn vt_auto_maybe_scan(
         save_snapshot(&cur);
         let _ = app.emit(
             "vt-autoscan-done",
-            &serde_json::json!({"reason": r, "startup": n1, "registry": n2}),
+            &serde_json::json!({"reason": r, "startup": n1, "registry": n2})
         );
         return Ok(Some(r.to_string()));
     }
     let _ = app.emit(
         "vt-autoscan-skip",
-        &serde_json::json!({"reason": "no-change"}),
+        &serde_json::json!({"reason": "no-change"})
     );
     Ok(None)
 }

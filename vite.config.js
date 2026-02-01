@@ -7,7 +7,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ command }) => {
   /** @type {import('vite').PluginOption[]} */
   const plugins = [
     sveltekit(),
@@ -84,7 +84,7 @@ export default defineConfig(({ command, mode }) => {
       target: 'es2020',
       minify: 'esbuild',
       rollupOptions: {
-        external: ['@tauri-apps/api/tauri']
+        external: ['@tauri-apps/api/tauri'],
       },
       esbuild: { drop: ['console', 'debugger'] },
     },

@@ -1,5 +1,8 @@
+use crate::AppError;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use rayon::prelude::*;
+use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -7,19 +10,17 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::thread;
 use tauri::{AppHandle, Emitter};
+use walkdir::WalkDir;
 
 static TEMP_CANCEL: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 use sysinfo::Disks;
 
 use lnk::ShellLink;
 use lnk::encoding::WINDOWS_1252;
-use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use walkdir::WalkDir;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{
@@ -32,11 +33,12 @@ pub struct CleanupStats {
     pub bytes_deleted: u64,
 }
 
-fn clear_directory_contents(root: &Path) -> Result<CleanupStats, String> {
+fn clear_directory_contents(root: &Path) -> Result<CleanupStats, AppError> {
     if !root.exists() || !root.is_dir() {
         return Ok(CleanupStats::default());
     }
     let mut stats = CleanupStats::default();
+    
     for entry in WalkDir::new(root)
         .min_depth(1)
         .contents_first(true)
@@ -61,15 +63,14 @@ fn clear_directory_contents(root: &Path) -> Result<CleanupStats, String> {
 }
 
 #[tauri::command]
-pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+pub async fn get_temp_files(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
     let mut temp_files = Vec::new();
     let mut scanned_count = 0;
 
+    let wp = crate::paths::WindowsPaths::get();
     let common_temp_paths: Vec<PathBuf> = vec![
-        env::var_os("TEMP").map(PathBuf::from).unwrap_or_default(),
-        env::var_os("LOCALAPPDATA")
-            .map(|p| PathBuf::from(p).join("Temp"))
-            .unwrap_or_default(),
+        wp.temp,
+        wp.local_app_data.join("Temp"),
         PathBuf::from("/tmp"),
         PathBuf::from("/private/tmp"),
         PathBuf::from("/var/tmp"),
@@ -91,8 +92,7 @@ pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, Strin
                         .emit(
                             "scan_progress",
                             format!("Scanned {} temporary files...", scanned_count),
-                        )
-                        .map_err(|e| e.to_string())?;
+                        )?;
                 }
             }
         }
@@ -102,26 +102,26 @@ pub fn get_temp_files(app_handle: tauri::AppHandle) -> Result<Vec<String>, Strin
 }
 
 #[tauri::command]
-pub fn get_temp_files_stream(
+pub async fn get_temp_files_stream(
     app_handle: AppHandle,
     batch_size: Option<usize>,
     max: Option<usize>,
-) -> Result<usize, String> {
+) -> Result<usize, AppError> {
     let bs = batch_size.unwrap_or(250).max(50).min(1000);
     let limit = max.unwrap_or(500_000);
     TEMP_CANCEL.store(false, Ordering::Relaxed);
 
-    let mut roots: Vec<PathBuf> = Vec::new();
     let wp = crate::paths::WindowsPaths::get();
+    let mut roots: Vec<PathBuf> = Vec::new();
 
-    roots.push(wp.temp.clone());
+    roots.push(wp.temp);
     roots.push(wp.local_app_data.join("Temp"));
 
     roots.push(PathBuf::from("/tmp"));
     roots.push(PathBuf::from("/private/tmp"));
     roots.push(PathBuf::from("/var/tmp"));
 
-    let local_app_data = wp.local_app_data;
+    let local_app_data = &wp.local_app_data;
     roots.push(local_app_data.join("Google/Chrome/User Data/Default/Cache"));
     roots.push(local_app_data.join("Google/Chrome/User Data/Default/Code Cache"));
 
@@ -140,11 +140,10 @@ pub fn get_temp_files_stream(
 
     roots.push(local_app_data.join("Microsoft/Windows/WER"));
 
-    let windir = wp.windir;
-    if !windir.as_os_str().is_empty() {
-        roots.push(windir.join("Logs"));
-        roots.push(windir.join("SoftwareDistribution/Download"));
-        roots.push(windir.join("Minidump"));
+    if !wp.windir.as_os_str().is_empty() {
+        roots.push(wp.windir.join("Logs"));
+        roots.push(wp.windir.join("SoftwareDistribution/Download"));
+        roots.push(wp.windir.join("Minidump"));
     }
 
     roots.sort();
@@ -154,38 +153,38 @@ pub fn get_temp_files_stream(
         .into_iter()
         .filter(|p| p.exists() && p.is_dir())
         .collect();
+    
     let (tx, rx) = mpsc::channel::<String>();
-    let mut handles = Vec::new();
+    let scanned_total = std::sync::atomic::AtomicUsize::new(0);
 
-    for root in active_roots {
+    active_roots.into_par_iter().for_each(|root| {
         let txc = tx.clone();
         let ah = app_handle.clone();
-        handles.push(thread::spawn(move || {
-            let mut scanned = 0usize;
-            for entry in walkdir::WalkDir::new(&root)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if TEMP_CANCEL.load(Ordering::Relaxed) {
-                    break;
-                }
-                if entry.file_type().is_file() {
-                    let _ = txc.send(entry.path().display().to_string());
-                }
-                scanned += 1;
-                if scanned % 2000 == 0 {
-                    let _ = ah.emit(
-                        "scan_progress",
-                        format!(
-                            "Scanned {} entries in {}...",
-                            scanned,
-                            root.file_name().and_then(|n| n.to_str()).unwrap_or("dir")
-                        ),
-                    );
-                }
+        
+        for entry in WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if TEMP_CANCEL.load(Ordering::Relaxed) {
+                break;
             }
-        }));
-    }
+            if entry.file_type().is_file() {
+                let _ = txc.send(entry.path().display().to_string());
+            }
+            
+            let c = scanned_total.fetch_add(1, Ordering::Relaxed);
+            if c % 2000 == 0 {
+                let _ = ah.emit(
+                    "scan_progress",
+                    format!(
+                        "Scanned {} entries in {}...",
+                        c,
+                        root.file_name().and_then(|n| n.to_str()).unwrap_or("dir")
+                    ),
+                );
+            }
+        }
+    });
     drop(tx);
 
     let mut total = 0usize;
@@ -200,179 +199,164 @@ pub fn get_temp_files_stream(
         }
         batch.push(p);
         if batch.len() >= bs {
-            let _ = app_handle.emit("cleaner-temp-batch", batch.clone());
+            app_handle.emit("cleaner-temp-batch", &batch)?;
             batch.clear();
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         if total >= limit {
             break;
         }
     }
     if !batch.is_empty() {
-        let _ = app_handle.emit("cleaner-temp-batch", batch);
+        app_handle.emit("cleaner-temp-batch", &batch)?;
     }
-    for h in handles {
-        let _ = h.join();
-    }
-    let _ = app_handle.emit("cleaner-temp-done", serde_json::json!({"total": total}));
+    
+    app_handle.emit("cleaner-temp-done", json!({"total": total}))?;
     Ok(total)
 }
 
 #[tauri::command]
-pub fn cancel_temp_scan() -> Result<(), String> {
+pub fn cancel_temp_scan() -> Result<(), AppError> {
     TEMP_CANCEL.store(true, Ordering::Relaxed);
     Ok(())
 }
 
-fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chunk: usize) {
+fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chunk: usize) -> Result<(), AppError> {
     if items.is_empty() {
-        return;
+        return Ok(())
     }
-    let mut start = 0usize;
-    let n = items.len();
-    while start < n {
-        let end = std::cmp::min(start + chunk, n);
-        let slice: Vec<(String, u64)> = items[start..end].to_vec();
-        let _ = app.emit(event, slice);
-        std::thread::sleep(std::time::Duration::from_millis(8));
-        start = end;
+    for slice in items.chunks(chunk) {
+        app.emit(event, slice)?;
+        std::thread::sleep(std::time::Duration::from_millis(5));
         if TEMP_CANCEL.load(Ordering::Relaxed) {
             break;
         }
     }
+    Ok(())
 }
 
-fn emit_chunked_strings(app: &AppHandle, event: &str, items: &[String], chunk: usize) {
+fn emit_chunked_strings(app: &AppHandle, event: &str, items: &[String], chunk: usize) -> Result<(), AppError> {
     if items.is_empty() {
-        return;
+        return Ok(())
     }
-    let mut start = 0usize;
-    let n = items.len();
-    while start < n {
-        let end = std::cmp::min(start + chunk, n);
-        let slice: Vec<String> = items[start..end].to_vec();
-        let _ = app.emit(event, slice);
-        std::thread::sleep(std::time::Duration::from_millis(8));
-        start = end;
+    for slice in items.chunks(chunk) {
+        app.emit(event, slice)?;
+        std::thread::sleep(std::time::Duration::from_millis(5));
         if TEMP_CANCEL.load(Ordering::Relaxed) {
             break;
         }
     }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn start_cleaner_scan(
+pub async fn start_cleaner_scan(
     app_handle: AppHandle,
     min_size_bytes: Option<u64>,
     max_temp: Option<usize>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Starting scan...");
         let _ = app.emit("cleaner-progress", "Scanning temporary files...");
-        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000)));
+        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000))).await;
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
-            let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"temp"}));
+            let _ = app.emit("cleaner-stopped", json!({"scope":"temp"}));
             return;
         }
 
         let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
         let _ = app.emit("cleaner-progress", "Scanning large files...");
-        match find_large_files_min(min, app.clone()) {
+        match find_large_files_min(min, app.clone()).await {
             Ok(list) => {
-                emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"large"}));
+                let _ = emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
+                let _ = app.emit("cleaner-done", json!({"scope":"large"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("large: {}", e));
+                let _ = app.emit("cleaner-error", format!("large: {:?}", e));
             }
         }
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
-            let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"large"}));
+            let _ = app.emit("cleaner-stopped", json!({"scope":"large"}));
             return;
         }
 
         let _ = app.emit("cleaner-progress", "Scanning duplicates...");
-        match find_duplicate_groups(app.clone()) {
+        match find_duplicate_groups(app.clone()).await {
             Ok(groups) => {
-                let mut start = 0usize;
-                let chunk = 60usize;
-                while start < groups.len() {
-                    let end = std::cmp::min(start + chunk, groups.len());
-                    let slice = &groups[start..end];
+                for slice in groups.chunks(60) {
                     let _ = app.emit("cleaner-dup-groups-batch", slice);
-                    start = end;
                     if TEMP_CANCEL.load(Ordering::Relaxed) {
                         break;
                     }
                 }
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"duplicate"}));
+                let _ = app.emit("cleaner-done", json!({"scope":"duplicate"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("duplicate: {}", e));
+                let _ = app.emit("cleaner-error", format!("duplicate: {:?}", e));
             }
         }
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
-            let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"duplicate"}));
+            let _ = app.emit("cleaner-stopped", json!({"scope":"duplicate"}));
             return;
         }
 
         let _ = app.emit("cleaner-progress", "Scanning empty folders...");
-        match find_empty_folders(app.clone()) {
+        match find_empty_folders(app.clone()).await {
             Ok(list) => {
-                emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"empty"}));
+                let _ = emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
+                let _ = app.emit("cleaner-done", json!({"scope":"empty"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("empty: {}", e));
+                let _ = app.emit("cleaner-error", format!("empty: {:?}", e));
             }
         }
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
-            let _ = app.emit("cleaner-stopped", serde_json::json!({"scope":"empty"}));
+            let _ = app.emit("cleaner-stopped", json!({"scope":"empty"}));
             return;
         }
 
         let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
-        match find_broken_shortcuts(app.clone()) {
+        match find_broken_shortcuts(app.clone()).await {
             Ok(list) => {
-                emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"shortcuts"}));
+                let _ = emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
+                let _ = app.emit("cleaner-done", json!({"scope":"shortcuts"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("shortcuts: {}", e));
+                let _ = app.emit("cleaner-error", format!("shortcuts: {:?}", e));
             }
         }
 
-        let _ = app.emit("cleaner-done", serde_json::json!({"scope":"all"}));
+        let _ = app.emit("cleaner-done", json!({"scope":"all"}));
     });
     Ok(())
 }
 
 #[tauri::command]
-pub fn cancel_cleaner_scan() -> Result<(), String> {
+pub fn cancel_cleaner_scan() -> Result<(), AppError> {
     TEMP_CANCEL.store(true, Ordering::Relaxed);
     Ok(())
 }
 
 #[tauri::command]
-pub fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> Result<(), String> {
+pub async fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
         let _ = app.emit("cleaner-progress", "Scanning large files...");
-        match find_large_files_min(min, app.clone()) {
+        match find_large_files_min(min, app.clone()).await {
             Ok(list) => {
-                emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"large"}));
+                let _ = emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
+                let _ = app.emit("cleaner-done", json!({"scope":"large"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("large: {}", e));
+                let _ = app.emit("cleaner-error", format!("large: {:?}", e));
             }
         }
     });
@@ -380,28 +364,23 @@ pub fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> R
 }
 
 #[tauri::command]
-pub fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), String> {
+pub async fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning duplicates...");
-        match find_duplicate_groups(app.clone()) {
+        match find_duplicate_groups(app.clone()).await {
             Ok(groups) => {
-                let mut start = 0usize;
-                let chunk = 60usize;
-                while start < groups.len() {
-                    let end = std::cmp::min(start + chunk, groups.len());
-                    let slice = &groups[start..end];
+                for slice in groups.chunks(60) {
                     let _ = app.emit("cleaner-dup-groups-batch", slice);
-                    start = end;
                     if TEMP_CANCEL.load(Ordering::Relaxed) {
                         break;
                     }
                 }
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"duplicate"}));
+                let _ = app.emit("cleaner-done", json!({"scope":"duplicate"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("duplicate: {}", e));
+                let _ = app.emit("cleaner-error", format!("duplicate: {:?}", e));
             }
         }
     });
@@ -409,18 +388,18 @@ pub fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn start_empty_scan(app_handle: AppHandle) -> Result<(), String> {
+pub async fn start_empty_scan(app_handle: AppHandle) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning empty folders...");
-        match find_empty_folders(app.clone()) {
+        match find_empty_folders(app.clone()).await {
             Ok(list) => {
-                emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"empty"}));
+                let _ = emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
+                let _ = app.emit("cleaner-done", json!({"scope":"empty"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("empty: {}", e));
+                let _ = app.emit("cleaner-error", format!("empty: {:?}", e));
             }
         }
     });
@@ -428,25 +407,25 @@ pub fn start_empty_scan(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn start_shortcut_scan(app_handle: AppHandle) -> Result<(), String> {
+pub async fn start_shortcut_scan(app_handle: AppHandle) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
-        match find_broken_shortcuts(app.clone()) {
+        match find_broken_shortcuts(app.clone()).await {
             Ok(list) => {
-                emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
-                let _ = app.emit("cleaner-done", serde_json::json!({"scope":"shortcuts"}));
+                let _ = emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
+                let _ = app.emit("cleaner-done", json!({"scope":"shortcuts"}));
             }
             Err(e) => {
-                let _ = app.emit("cleaner-error", format!("shortcuts: {}", e));
+                let _ = app.emit("cleaner-error", format!("shortcuts: {:?}", e));
             }
         }
     });
     Ok(())
 }
 
-fn _delete_files_helper(files: Vec<String>) -> Result<usize, String> {
+fn _delete_files_helper(files: Vec<String>) -> Result<usize, AppError> {
     let mut deleted_count = 0;
     let mut errors: Vec<String> = Vec::new();
     for file_path_str in files {
@@ -456,18 +435,14 @@ fn _delete_files_helper(files: Vec<String>) -> Result<usize, String> {
                 match fs::remove_file(&path) {
                     Ok(_) => deleted_count += 1,
                     Err(e) => {
-                        let msg = format!("Failed to delete file {}: {}", file_path_str, e);
-                        eprintln!("{}", msg);
-                        errors.push(msg);
+                        errors.push(format!("Failed to delete file {}: {}", file_path_str, e));
                     }
                 }
             } else if path.is_dir() {
                 match fs::remove_dir_all(&path) {
                     Ok(_) => deleted_count += 1,
                     Err(e) => {
-                        let msg = format!("Failed to delete directory {}: {}", file_path_str, e);
-                        eprintln!("{}", msg);
-                        errors.push(msg);
+                        errors.push(format!("Failed to delete directory {}: {}", file_path_str, e));
                     }
                 }
             }
@@ -476,70 +451,70 @@ fn _delete_files_helper(files: Vec<String>) -> Result<usize, String> {
     if errors.is_empty() {
         Ok(deleted_count)
     } else {
-        Err(errors.join("; "))
+        Err(AppError::System(errors.join("; ")))
     }
 }
 
 #[tauri::command]
-pub fn clean_temp_files(files: Vec<String>) -> Result<usize, String> {
+pub async fn clean_temp_files(files: Vec<String>) -> Result<usize, AppError> {
     _delete_files_helper(files)
 }
 
 #[tauri::command]
-pub fn delete_files(files: Vec<String>) -> Result<usize, String> {
+pub async fn delete_files(files: Vec<String>) -> Result<usize, AppError> {
     _delete_files_helper(files)
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn empty_recycle_bin() -> Result<(), String> {
+pub async fn empty_recycle_bin() -> Result<(), AppError> {
     unsafe {
         let flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
         let result = SHEmptyRecycleBinA(None, None, flags);
         if result.is_ok() {
             Ok(())
         } else {
-            Err(format!("Failed to empty recycle bin: {:?}", result))
+            Err(AppError::System(format!("Failed to empty recycle bin: {:?}", result)))
         }
     }
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn empty_recycle_bin() -> Result<(), String> {
-    Err("Emptying recycle bin is only supported on Windows.".to_string())
+pub async fn empty_recycle_bin() -> Result<(), AppError> {
+    Err(AppError::Internal("Emptying recycle bin is only supported on Windows.".to_string()))
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn quick_clear_user_temp() -> Result<CleanupStats, String> {
+pub async fn quick_clear_user_temp() -> Result<CleanupStats, AppError> {
     let user_temp = env::temp_dir();
     clear_directory_contents(&user_temp)
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn quick_clear_system_temp() -> Result<CleanupStats, String> {
+pub async fn quick_clear_system_temp() -> Result<CleanupStats, AppError> {
     if let Some(windir) = env::var_os("WINDIR") {
         let p = PathBuf::from(windir).join("Temp");
         return clear_directory_contents(&p);
     }
-    Err("WINDIR not set".into())
+    Err(AppError::System("WINDIR not set".into()))
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn quick_clear_prefetch() -> Result<CleanupStats, String> {
+pub async fn quick_clear_prefetch() -> Result<CleanupStats, AppError> {
     if let Some(windir) = env::var_os("WINDIR") {
         let p = PathBuf::from(windir).join("Prefetch");
         return clear_directory_contents(&p);
     }
-    Err("WINDIR not set".into())
+    Err(AppError::System("WINDIR not set".into()))
 }
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn quick_clear_recent() -> Result<CleanupStats, String> {
+pub async fn quick_clear_recent() -> Result<CleanupStats, AppError> {
     if let Some(appdata) = env::var_os("APPDATA") {
         let recent = PathBuf::from(appdata).join("Microsoft/Windows/Recent");
         if !recent.exists() || !recent.is_dir() {
@@ -570,33 +545,32 @@ pub fn quick_clear_recent() -> Result<CleanupStats, String> {
         }
         return Ok(stats);
     }
-    Err("APPDATA not set".into())
+    Err(AppError::System("APPDATA not set".into()))
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_user_temp() -> Result<CleanupStats, String> {
-    Err("Only on Windows".into())
+pub fn quick_clear_user_temp() -> Result<CleanupStats, AppError> {
+    Err(AppError::Internal("Only on Windows".into()))
 }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_system_temp() -> Result<CleanupStats, String> {
-    Err("Only on Windows".into())
+pub fn quick_clear_system_temp() -> Result<CleanupStats, AppError> {
+    Err(AppError::Internal("Only on Windows".into()))
 }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_prefetch() -> Result<CleanupStats, String> {
-    Err("Only on Windows".into())
+pub fn quick_clear_prefetch() -> Result<CleanupStats, AppError> {
+    Err(AppError::Internal("Only on Windows".into()))
 }
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_recent() -> Result<CleanupStats, String> {
-    Err("Only on Windows".into())
+pub fn quick_clear_recent() -> Result<CleanupStats, AppError> {
+    Err(AppError::Internal("Only on Windows".into()))
 }
 
-#[allow(dead_code)]
 #[tauri::command]
-pub fn get_drive_info() -> Result<(u64, u64), String> {
+pub async fn get_drive_info() -> Result<(u64, u64), AppError> {
     let mut total_disk_space: u64 = 0;
     let mut available_disk_space: u64 = 0;
 
@@ -610,36 +584,38 @@ pub fn get_drive_info() -> Result<(u64, u64), String> {
 }
 
 #[tauri::command]
-pub fn find_large_files(app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
+pub async fn find_large_files(app_handle: AppHandle) -> Result<Vec<(String, u64)>, AppError> {
     let min_size_bytes: u64 = 100 * 1024 * 1024;
-    find_large_files_min(min_size_bytes, app_handle)
+    find_large_files_min(min_size_bytes, app_handle).await
 }
 
 #[tauri::command]
-pub fn find_large_files_min(
+pub async fn find_large_files_min(
     min_size_bytes: u64,
-    app_handle: tauri::AppHandle,
-) -> Result<Vec<(String, u64)>, String> {
+    app_handle: AppHandle,
+) -> Result<Vec<(String, u64)>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
     let user_profile = wp.user_profile;
     if user_profile.as_os_str().is_empty() {
-        return Err("USERPROFILE not found".to_string());
+        return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    let downloads_path = user_profile.join("Downloads");
-    let desktop_path = user_profile.join("Desktop");
-    let documents_path = user_profile.join("Documents");
-    let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
+    
+    let paths_to_scan = vec![
+        user_profile.join("Downloads"),
+        user_profile.join("Desktop"),
+        user_profile.join("Documents"),
+    ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
 
     let results: Vec<(String, u64)> = paths_to_scan
-        .into_iter()
+        .into_par_iter()
         .flat_map(|root| {
-            walkdir::WalkDir::new(root)
+            WalkDir::new(root)
                 .into_iter()
                 .filter_map(|e| e.ok())
+                .par_bridge()
         })
-        .par_bridge()
         .filter_map(|entry| {
             if TEMP_CANCEL.load(Ordering::Relaxed) {
                 return None;
@@ -654,10 +630,9 @@ pub fn find_large_files_min(
             }
 
             if entry.file_type().is_file() {
-                let p = entry.path();
-                if let Ok(meta) = fs::metadata(p) {
-                    if meta.is_file() && meta.len() >= min_size_bytes {
-                        return Some((p.display().to_string(), meta.len()));
+                if let Ok(meta) = entry.metadata() {
+                    if meta.len() >= min_size_bytes {
+                        return Some((entry.path().display().to_string(), meta.len()));
                     }
                 }
             }
@@ -669,54 +644,49 @@ pub fn find_large_files_min(
 }
 
 #[tauri::command]
-pub fn find_large_files_top(
-    k: Option<usize>,
-    min_size_bytes: Option<u64>,
-    app_handle: tauri::AppHandle,
-) -> Result<Vec<(String, u64)>, String> {
-    let k = k.unwrap_or(1000).clamp(100, 10_000);
-    let min_size = min_size_bytes.unwrap_or(100 * 1024 * 1024);
+pub async fn find_large_files_top(
+    app_handle: AppHandle,
+    top: usize,
+) -> Result<Vec<(String, u64)>, AppError> {
+    let k = top.max(1).min(10_000);
+    let min_size = 100 * 1024 * 1024;
 
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
-    let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
+    let wp = crate::paths::WindowsPaths::get();
+    if wp.user_profile.as_os_str().is_empty() {
+        return Err(AppError::System("USERPROFILE not found".to_string()));
+    }
+    
+    let paths_to_scan = vec![
+        wp.user_profile.join("Downloads"),
+        wp.user_profile.join("Desktop"),
+        wp.user_profile.join("Documents"),
+    ];
 
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut scanned_count = 0usize;
-    let enum_cap: usize = 300_000;
-    for scan_path in paths_to_scan {
-        if scan_path.exists() && scan_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&scan_path)
+    let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    
+    let sized: Vec<(u64, String)> = paths_to_scan
+        .into_par_iter()
+        .flat_map(|root| {
+            WalkDir::new(root)
                 .into_iter()
                 .filter_map(|e| e.ok())
-            {
-                if files.len() >= enum_cap {
-                    break;
-                }
-                if entry.file_type().is_file() {
-                    files.push(entry.path().to_path_buf());
-                }
-                scanned_count += 1;
-                if scanned_count % 1000 == 0 {
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        format!("Scanned {} entries...", scanned_count),
-                    );
+                .par_bridge()
+        })
+        .filter_map(|entry| {
+            let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+            if c % 1000 == 0 {
+                let _ = app_handle.emit("scan_progress", format!("Scanned {} entries...", c));
+            }
+            
+            if entry.file_type().is_file() {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.len() >= min_size {
+                        return Some((meta.len(), entry.path().display().to_string()));
+                    }
                 }
             }
-        }
-    }
-
-    let sized: Vec<(u64, String)> = files
-        .par_iter()
-        .filter_map(|p| {
-            fs::metadata(p)
-                .ok()
-                .map(|m| (m.len(), p.display().to_string()))
+            None
         })
-        .filter(|(len, _)| *len >= min_size)
         .collect();
 
     let mut heap: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::with_capacity(k + 1);
@@ -738,41 +708,44 @@ pub fn find_large_files_top(
 }
 
 #[tauri::command]
-pub fn find_duplicate_files(app_handle: tauri::AppHandle) -> Result<Vec<(String, u64)>, String> {
-    let mut scanned_count = 0usize;
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
-    let paths_to_scan = vec![downloads_path, documents_path];
-    let mut files: Vec<PathBuf> = Vec::new();
-    for scan_path in &paths_to_scan {
-        if scan_path.exists() && scan_path.is_dir() {
-            for entry in WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    files.push(entry.path().to_path_buf());
-                }
-                scanned_count += 1;
-                if scanned_count % 500 == 0 {
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        format!("Scanned {} files...", scanned_count),
-                    );
-                }
-            }
-        }
+pub async fn find_duplicate_files(app_handle: AppHandle) -> Result<Vec<(String, u64)>, AppError> {
+    let wp = crate::paths::WindowsPaths::get();
+    if wp.user_profile.as_os_str().is_empty() {
+        return Err(AppError::System("USERPROFILE not found".to_string()));
     }
+    
+    let paths_to_scan = vec![
+        wp.user_profile.join("Downloads"),
+        wp.user_profile.join("Documents"),
+    ];
 
-    let sized: Vec<(u64, String)> = files
-        .par_iter()
-        .filter_map(|p| {
-            fs::metadata(p)
-                .ok()
-                .map(|m| (m.len(), p.display().to_string()))
+    let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    
+    let files: Vec<PathBuf> = paths_to_scan
+        .into_par_iter()
+        .flat_map(|root| {
+            WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .par_bridge()
+        })
+        .filter_map(|entry| {
+            if entry.file_type().is_file() {
+                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if c % 500 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", c));
+                }
+                return Some(entry.path().to_path_buf());
+            }
+            None
         })
         .collect();
+
     let mut size_buckets: HashMap<u64, Vec<String>> = HashMap::new();
-    for (sz, p) in sized {
-        size_buckets.entry(sz).or_default().push(p);
+    for p in files {
+        if let Ok(meta) = fs::metadata(&p) {
+            size_buckets.entry(meta.len()).or_default().push(p.display().to_string());
+        }
     }
 
     let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
@@ -826,31 +799,32 @@ fn calculate_partial_hash(path: &Path) -> Result<String, io::Error> {
 }
 
 #[tauri::command]
-pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
+pub async fn find_duplicate_groups(app_handle: AppHandle) -> Result<Vec<DuplicateGroup>, AppError> {
     let first_pass_limit: usize = 200_000;
     let hash_limit: usize = 15_000;
 
     let wp = crate::paths::WindowsPaths::get();
-    let user_profile = wp.user_profile;
-    if user_profile.as_os_str().is_empty() {
-        return Err("USERPROFILE not found".to_string());
+    if wp.user_profile.as_os_str().is_empty() {
+        return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    let downloads_path = user_profile.join("Downloads");
-    let documents_path = user_profile.join("Documents");
-    let desktop_path = user_profile.join("Desktop");
-    let paths_to_scan = vec![downloads_path, documents_path, desktop_path];
+    
+    let paths_to_scan = vec![
+        wp.user_profile.join("Downloads"),
+        wp.user_profile.join("Documents"),
+        wp.user_profile.join("Desktop"),
+    ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
     let size_buckets: DashMap<u64, Vec<String>> = DashMap::new();
 
     paths_to_scan
-        .into_iter()
+        .into_par_iter()
         .flat_map(|root| {
-            walkdir::WalkDir::new(root)
+            WalkDir::new(root)
                 .into_iter()
                 .filter_map(|e| e.ok())
+                .par_bridge()
         })
-        .par_bridge()
         .for_each(|entry| {
             if TEMP_CANCEL.load(Ordering::Relaxed) {
                 return;
@@ -866,14 +840,13 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
             }
 
             if entry.file_type().is_file() {
-                let p = entry.path();
-                if let Ok(meta) = fs::metadata(p) {
+                if let Ok(meta) = entry.metadata() {
                     let len = meta.len();
                     if len > 0 {
                         size_buckets
                             .entry(len)
                             .or_default()
-                            .push(p.display().to_string());
+                            .push(entry.path().display().to_string());
                     }
                 }
             }
@@ -965,7 +938,7 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
 }
 
 #[tauri::command]
-pub fn move_to_trash(files: Vec<String>) -> Result<usize, String> {
+pub async fn move_to_trash(files: Vec<String>) -> Result<usize, AppError> {
     let mut count = 0usize;
     for file in files {
         match trash::delete(&file) {
@@ -993,40 +966,44 @@ fn calculate_file_hash(path: &Path) -> Result<String, io::Error> {
 }
 
 #[tauri::command]
-pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let mut scanned_count = 0usize;
-
+pub async fn find_empty_folders(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
-    let user_profile = wp.user_profile;
-    if user_profile.as_os_str().is_empty() {
-        return Err("USERPROFILE not found".to_string());
+    if wp.user_profile.as_os_str().is_empty() {
+        return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    let downloads_path = user_profile.join("Downloads");
-    let desktop_path = user_profile.join("Desktop");
-    let documents_path = user_profile.join("Documents");
-    let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
+    
+    let paths_to_scan = vec![
+        wp.user_profile.join("Downloads"),
+        wp.user_profile.join("Desktop"),
+        wp.user_profile.join("Documents"),
+    ];
 
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for scan_path in paths_to_scan {
-        if scan_path.exists() && scan_path.is_dir() {
-            for entry in WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_dir() {
-                    dirs.push(entry.path().to_path_buf());
+    let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    
+    let dirs: Vec<PathBuf> = paths_to_scan
+        .into_par_iter()
+        .flat_map(|root| {
+            WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .par_bridge()
+        })
+        .filter_map(|entry| {
+            if entry.file_type().is_dir() {
+                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if c % 500 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} directories...", c));
                 }
-                scanned_count += 1;
-                if scanned_count % 500 == 0 {
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        format!("Scanned {} directories for empty folders...", scanned_count),
-                    );
-                }
+                return Some(entry.path().to_path_buf());
             }
-        }
-    }
+            None
+        })
+        .collect();
+
     let results: Vec<String> = dirs
-        .par_iter()
+        .into_par_iter()
         .filter_map(|d| {
-            if let Ok(mut rd) = fs::read_dir(d) {
+            if let Ok(mut rd) = fs::read_dir(&d) {
                 if rd.next().is_none() {
                     return Some(d.display().to_string());
                 }
@@ -1039,19 +1016,17 @@ pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, S
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let mut scanned_count = 0usize;
-
+pub async fn find_broken_shortcuts(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
-    let user_profile = wp.user_profile;
-    if user_profile.as_os_str().is_empty() {
-        return Err("USERPROFILE not found".to_string());
+    if wp.user_profile.as_os_str().is_empty() {
+        return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    let downloads_path = user_profile.join("Downloads");
-    let desktop_path = user_profile.join("Desktop");
-    let documents_path = user_profile.join("Documents");
-
-    let mut paths_to_scan = vec![downloads_path, desktop_path, documents_path];
+    
+    let mut paths_to_scan = vec![
+        wp.user_profile.join("Downloads"),
+        wp.user_profile.join("Desktop"),
+        wp.user_profile.join("Documents"),
+    ];
 
     if !wp.app_data.as_os_str().is_empty() {
         paths_to_scan.push(wp.app_data.join("Microsoft/Windows/Start Menu"));
@@ -1064,41 +1039,43 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
         paths_to_scan.push(p.join("Desktop"));
     }
 
-    let mut lnk_files: Vec<PathBuf> = Vec::new();
-    for scan_path in paths_to_scan {
-        if scan_path.exists() && scan_path.is_dir() {
-            for entry in WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext.eq_ignore_ascii_case("lnk") {
-                            lnk_files.push(path.to_path_buf());
-                        }
+    let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    
+    let lnk_files: Vec<PathBuf> = paths_to_scan
+        .into_par_iter()
+        .flat_map(|root| {
+            WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .par_bridge()
+        })
+        .filter_map(|entry| {
+            if entry.file_type().is_file() {
+                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if c % 400 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", c));
+                }
+                
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("lnk") {
+                        return Some(path.to_path_buf());
                     }
                 }
-                scanned_count += 1;
-                if scanned_count % 400 == 0 {
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        format!("Scanned {} files for broken shortcuts...", scanned_count),
-                    );
-                }
             }
-        }
-    }
+            None
+        })
+        .collect();
 
-    let _ = app_handle.emit(
-        "scan_progress",
-        format!("Found {} shortcuts. Verifying...", lnk_files.len()),
-    );
+    app_handle.emit("scan_progress", format!("Found {} shortcuts. Verifying...", lnk_files.len()))?;
 
     let results: Vec<String> = lnk_files
-        .par_iter()
+        .into_par_iter()
         .filter_map(|p| {
             if TEMP_CANCEL.load(Ordering::Relaxed) {
                 return None;
             }
-            match ShellLink::open(p, WINDOWS_1252) {
+            match ShellLink::open(&p, WINDOWS_1252) {
                 Ok(shell_link) => {
                     if let Some(link_info) = shell_link.link_info() {
                         let common_path_str = link_info.common_path_suffix();
@@ -1111,7 +1088,7 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
                         }
                     }
                 }
-                Err(_) => {}
+                Err(_) => {} // Ignore errors for now
             }
             None
         })
@@ -1121,13 +1098,13 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
 }
 
 #[tauri::command]
-pub fn move_files(files: Vec<String>, destination: String) -> Result<usize, String> {
+pub async fn move_files(files: Vec<String>, destination: String) -> Result<usize, AppError> {
     let dest = PathBuf::from(&destination);
     if !dest.exists() {
-        fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dest)?;
     }
     if !dest.is_dir() {
-        return Err("Destination is not a directory".into());
+        return Err(AppError::Internal("Destination is not a directory".into()));
     }
     let mut moved = 0usize;
     for f in files {
@@ -1180,17 +1157,17 @@ pub fn move_files(files: Vec<String>, destination: String) -> Result<usize, Stri
 }
 
 #[tauri::command]
-pub fn stat_paths(paths: Vec<String>) -> Result<Vec<(String, u64)>, String> {
+pub async fn stat_paths(paths: Vec<String>) -> Result<Vec<(String, u64)>, AppError> {
     let out: Vec<(String, u64)> = paths
-        .par_iter()
+        .into_par_iter()
         .map(|p| {
-            let pb = PathBuf::from(p);
+            let pb = PathBuf::from(&p);
             if let Ok(meta) = fs::metadata(&pb) {
                 if meta.is_file() {
-                    return (p.clone(), meta.len());
+                    return (p, meta.len());
                 }
             }
-            (p.clone(), 0)
+            (p, 0)
         })
         .collect();
     Ok(out)

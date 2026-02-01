@@ -136,12 +136,12 @@ export async function runPostCleanupDiagnostics(
     }>;
     const matches: string[] = [];
     for (const t of tasks) {
-      let cmd = (t as any)?.task_to_run || '';
+      let cmd = t.task_to_run || '';
       if (!cmd) {
         try {
           const details = (await invoke('get_task_details', { task_name: t.name })) as
-            | [string, string]
-            | any;
+            | [string, string, boolean, number]
+            | { task_to_run?: string };
           cmd = Array.isArray(details) ? (details[0] ?? '') : (details?.task_to_run ?? '');
         } catch {
           /* noop */

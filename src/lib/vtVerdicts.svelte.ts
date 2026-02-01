@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { SvelteMap } from 'svelte/reactivity';
 
 export type VerdictLabel = 'Safe' | 'Sus' | 'Not';
 
@@ -33,13 +33,13 @@ function normalizeKey(s: string): string {
 const STORAGE_KEY = 'avelonia_vt_verdicts_v1';
 const REASONS_KEY = 'avelonia_vt_reasons_v1';
 
-function loadPersisted(): Map<string, VerdictLabel> {
-  if (typeof window === 'undefined') return new Map();
+function loadPersisted(): SvelteMap<string, VerdictLabel> {
+  if (typeof window === 'undefined') return new SvelteMap();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return new Map();
+    if (!raw) return new SvelteMap();
     const obj = JSON.parse(raw) as Record<string, VerdictLabel>;
-    const m = new Map<string, VerdictLabel>();
+    const m = new SvelteMap<string, VerdictLabel>();
     for (const k of Object.keys(obj || {})) {
       const v = obj[k];
       if (v === 'Safe' || v === 'Sus' || v === 'Not') m.set(k, v as VerdictLabel);
@@ -47,34 +47,28 @@ function loadPersisted(): Map<string, VerdictLabel> {
     return m;
   } catch (error) {
     logVtError('loadPersisted', error);
-    return new Map();
+    return new SvelteMap();
   }
 }
 
-function persist(map: Map<string, VerdictLabel>) {
+function persist(map: SvelteMap<string, VerdictLabel> | Map<string, VerdictLabel>) {
   if (typeof window === 'undefined') return;
   try {
     const obj: Record<string, VerdictLabel> = {};
     for (const [k, v] of map.entries()) obj[k] = v;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
   } catch (error) {
     logVtError('persist', error);
   }
 }
 
-export const vtVerdicts = writable<Map<string, VerdictLabel>>(loadPersisted());
-
-vtVerdicts.subscribe((m) => {
-  persist(m);
-});
-
-function loadReasons(): Map<string, string> {
-  if (typeof window === 'undefined') return new Map();
+function loadReasons(): SvelteMap<string, string> {
+  if (typeof window === 'undefined') return new SvelteMap();
   try {
     const raw = localStorage.getItem(REASONS_KEY);
-    if (!raw) return new Map();
+    if (!raw) return new SvelteMap();
     const obj = JSON.parse(raw) as Record<string, string>;
-    const m = new Map<string, string>();
+    const m = new SvelteMap<string, string>();
     for (const k of Object.keys(obj || {})) {
       const v = obj[k];
       if (typeof v === 'string') m.set(k, v);
@@ -82,11 +76,11 @@ function loadReasons(): Map<string, string> {
     return m;
   } catch (error) {
     logVtError('loadReasons', error);
-    return new Map();
+    return new SvelteMap();
   }
 }
 
-function persistReasons(map: Map<string, string>) {
+function persistReasons(map: SvelteMap<string, string> | Map<string, string>) {
   if (typeof window === 'undefined') return;
   try {
     const obj: Record<string, string> = {};
@@ -97,76 +91,62 @@ function persistReasons(map: Map<string, string>) {
   }
 }
 
-export const vtReasons = writable<Map<string, string>>(loadReasons());
-vtReasons.subscribe((m) => persistReasons(m));
+export const vtVerdicts = loadPersisted();
+export const vtReasons = loadReasons();
+
+// Persistence logic using $effect (needs to be in a svelte context, or use a workaround)
+// For now, we'll manually persist on changes or use a simple subscribe-like pattern if possible.
+// Actually, in Svelte 5, we can use a class with getters/setters or just call persist functions.
+
+function handlePersist() {
+  persist(vtVerdicts);
+}
+
+function handlePersistReasons() {
+  persistReasons(vtReasons);
+}
 
 export function setVerdict(subject: string, label: VerdictLabel) {
   const key = normalizeKey(subject);
-  vtVerdicts.update((m) => {
-    const next = new Map(m);
-    next.set(key, label);
-    return next;
-  });
+  vtVerdicts.set(key, label);
+  handlePersist();
 }
 
 export function clearVerdict(subject: string) {
   const key = normalizeKey(subject);
-  vtVerdicts.update((m) => {
-    const next = new Map(m);
-    next.delete(key);
-    return next;
-  });
-  vtReasons.update((m) => {
-    const next = new Map(m);
-    next.delete(key);
-    return next;
-  });
+  vtVerdicts.delete(key);
+  vtReasons.delete(key);
+  handlePersist();
+  handlePersistReasons();
 }
 
 export function verdictFor(subject: string): VerdictLabel | undefined {
   const key = normalizeKey(subject);
-  let out: VerdictLabel | undefined;
-  vtVerdicts.subscribe((m) => {
-    out = m.get(key);
-  })();
-  return out;
+  return vtVerdicts.get(key);
 }
 
 export function reasonFor(subject: string): string | undefined {
   const key = normalizeKey(subject);
-  let out: string | undefined;
-  vtReasons.subscribe((m) => {
-    out = m.get(key);
-  })();
-  return out;
+  return vtReasons.get(key);
 }
 
 export function setVerdictFromReport(rep: VtReport) {
   const v = String(rep.verdict || '').toLowerCase();
+  const key = normalizeKey(rep.subject);
   if (v === 'clean') {
     setVerdict(rep.subject, 'Safe');
-    vtReasons.update((m) => {
-      const next = new Map(m);
-      next.delete(normalizeKey(rep.subject));
-      return next;
-    });
+    vtReasons.delete(key);
+    handlePersistReasons();
   } else if (v === 'suspicious' || v === 'malicious') {
     setVerdict(rep.subject, 'Sus');
-    vtReasons.update((m) => {
-      const next = new Map(m);
-      next.delete(normalizeKey(rep.subject));
-      return next;
-    });
+    vtReasons.delete(key);
+    handlePersistReasons();
   } else {
     setVerdict(rep.subject, 'Not');
     const rs = (rep.reason || '').toString();
     if (rs) {
-      const key = normalizeKey(rep.subject);
-      vtReasons.update((m) => {
-        const next = new Map(m);
-        next.set(key, rs);
-        return next;
-      });
+      vtReasons.set(key, rs);
+      handlePersistReasons();
     }
   }
 }
