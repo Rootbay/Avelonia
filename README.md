@@ -12,9 +12,3 @@ Avelonia is a comprehensive utility application designed to streamline and enhan
 - **Optimization:** Analyzes and optimizes system settings, startup items, and resource usage to boost overall performance and responsiveness.
 
 Avelonia is your go-to solution for a faster, cleaner, and more organized digital experience.
-
-### Recent Improvements
-
-- Download queue controls: Start All and Cancel Active actions in Downloader.
-- Small badge on the sidebar shows active/queued download count.
-- Clearer progress text: replaced garbled “Preparing”/speed separators with clean punctuation.
