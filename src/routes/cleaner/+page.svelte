@@ -182,7 +182,7 @@
   function resolveCleanerItems(value: CleanerItem[] | (() => CleanerItem[])) {
     return typeof value === 'function' ? (value as () => CleanerItem[])() : value;
   }
-  // Increased cap to 500k to allow all items (virtual scrolling handles performance)
+
   let unifiedCap = $state(500000);
   const UNIFIED_BUILD_STEP = 5000;
   const allItems = $derived.by<CleanerItem[]>(() => {
@@ -261,7 +261,6 @@
         }
       } catch { /* noop */ }
 
-      // Increased batch size significantly to handle fast backend
       const take = tempQueue.splice(0, Math.min(2500, tempQueue.length));
       const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
       if (next.length) {
@@ -869,14 +868,14 @@
     <CardContent>
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center gap-2">
-          <Input placeholder="Search path..." bind:value={q} class="w-[280px]" />
+          <Input placeholder="Search path..." bind:value={q} class="w-70" />
           <div class="flex items-center gap-2">
             <Label for="kind">Type</Label>
             <Select
               type="single"
               bind:value={filterKind}
             >
-              <SelectTrigger id="kind" class="w-[120px]">
+              <SelectTrigger id="kind" class="w-30">
                 <p class="truncate">
                   {filterKind === 'all'
                     ? 'All'

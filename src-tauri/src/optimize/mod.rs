@@ -63,127 +63,124 @@ pub struct OpResult {
 #[tauri::command]
 pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
     let mut items: Vec<StartupShortcut> = Vec::new();
-    if let Some(appdata) = env::var_os("APPDATA") {
-        let user_startup =
-            PathBuf::from(appdata).join("Microsoft/Windows/Start Menu/Programs/Startup");
-        if user_startup.exists() && user_startup.is_dir() {
-            for entry in WalkDir::new(&user_startup)
-                .min_depth(1)
-                .max_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if entry.file_type().is_file() {
-                    let p = entry.path();
-                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                        if fname.eq_ignore_ascii_case("desktop.ini") {
-                            continue;
-                        }
-                    }
-                    let mut allowed = false;
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk")
-                            || ext.eq_ignore_ascii_case("url")
-                            || ext.eq_ignore_ascii_case("exe")
-                        {
-                            allowed = true;
-                        }
-                    }
-                    if !allowed {
+    let wp = crate::paths::WindowsPaths::get();
+    
+    let user_startup = wp.startup_user();
+    if user_startup.exists() && user_startup.is_dir() {
+        for entry in WalkDir::new(&user_startup)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                let p = entry.path();
+                if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                    if fname.eq_ignore_ascii_case("desktop.ini") {
                         continue;
                     }
+                }
+                let mut allowed = false;
+                if let Some(ext) = p.extension() {
+                    if ext.eq_ignore_ascii_case("lnk")
+                        || ext.eq_ignore_ascii_case("url")
+                        || ext.eq_ignore_ascii_case("exe")
+                    {
+                        allowed = true;
+                    }
+                }
+                if !allowed {
+                    continue;
+                }
 
-                    let mut name = p
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk") {
-                            if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
-                                if let Some(li) = link.link_info() {
-                                    let target = li.common_path_suffix();
-                                    let target_name = PathBuf::from(target.to_string())
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .map(|s| s.to_string());
-                                    if let Some(n) = target_name {
-                                        name = n;
-                                    }
+                let mut name = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(ext) = p.extension() {
+                    if ext.eq_ignore_ascii_case("lnk") {
+                        if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
+                            if let Some(li) = link.link_info() {
+                                let target = li.common_path_suffix();
+                                let target_name = PathBuf::from(target.to_string())
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .map(|s| s.to_string());
+                                if let Some(n) = target_name {
+                                    name = n;
                                 }
                             }
                         }
                     }
-                    if name.is_empty() {
-                        name = p.display().to_string();
-                    }
-                    items.push(StartupShortcut {
-                        path: p.display().to_string(),
-                        name,
-                    });
                 }
+                if name.is_empty() {
+                    name = p.display().to_string();
+                }
+                items.push(StartupShortcut {
+                    path: p.display().to_string(),
+                    name,
+                });
             }
         }
     }
-    if let Some(programdata) = env::var_os("PROGRAMDATA") {
-        let all_startup =
-            PathBuf::from(programdata).join("Microsoft/Windows/Start Menu/Programs/StartUp");
-        if all_startup.exists() && all_startup.is_dir() {
-            for entry in WalkDir::new(&all_startup)
-                .min_depth(1)
-                .max_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if entry.file_type().is_file() {
-                    let p = entry.path();
-                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                        if fname.eq_ignore_ascii_case("desktop.ini") {
-                            continue;
-                        }
-                    }
-                    let mut allowed = false;
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk")
-                            || ext.eq_ignore_ascii_case("url")
-                            || ext.eq_ignore_ascii_case("exe")
-                        {
-                            allowed = true;
-                        }
-                    }
-                    if !allowed {
+
+    let all_startup = wp.startup_common();
+    if all_startup.exists() && all_startup.is_dir() {
+        for entry in WalkDir::new(&all_startup)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                let p = entry.path();
+                if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                    if fname.eq_ignore_ascii_case("desktop.ini") {
                         continue;
                     }
+                }
+                let mut allowed = false;
+                if let Some(ext) = p.extension() {
+                    if ext.eq_ignore_ascii_case("lnk")
+                        || ext.eq_ignore_ascii_case("url")
+                        || ext.eq_ignore_ascii_case("exe")
+                    {
+                        allowed = true;
+                    }
+                }
+                if !allowed {
+                    continue;
+                }
 
-                    let mut name = p
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(ext) = p.extension() {
-                        if ext.eq_ignore_ascii_case("lnk") {
-                            if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
-                                if let Some(li) = link.link_info() {
-                                    let target = li.common_path_suffix();
-                                    let target_name = PathBuf::from(target.to_string())
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .map(|s| s.to_string());
-                                    if let Some(n) = target_name {
-                                        name = n;
-                                    }
+                let mut name = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(ext) = p.extension() {
+                    if ext.eq_ignore_ascii_case("lnk") {
+                        if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
+                            if let Some(li) = link.link_info() {
+                                let target = li.common_path_suffix();
+                                let target_name = PathBuf::from(target.to_string())
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .map(|s| s.to_string());
+                                if let Some(n) = target_name {
+                                    name = n;
                                 }
                             }
                         }
                     }
-                    if name.is_empty() {
-                        name = p.display().to_string();
-                    }
-                    items.push(StartupShortcut {
-                        path: p.display().to_string(),
-                        name,
-                    });
                 }
+                if name.is_empty() {
+                    name = p.display().to_string();
+                }
+                items.push(StartupShortcut {
+                    path: p.display().to_string(),
+                    name,
+                });
             }
         }
     }
@@ -191,36 +188,60 @@ pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
 }
 
 fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i32) {
-    // === Sus-Analyzer 2.0: Score-Based System ===
-    
-    let cmd = task_to_run.to_lowercase().replace('"', "").trim().to_string();
+    let cmd = task_to_run
+        .to_lowercase()
+        .replace('"', "")
+        .trim()
+        .to_string();
     let auth = author.to_lowercase().trim().to_string();
     let tname = name.to_lowercase().trim().to_string();
-    
+
     let mut score = 0;
 
-    // --- STEP 1: CRITICAL TRUST (Immediate Pass) ---
-    
-    // Trusted Authors (Whitelist)
     let trusted_authors = [
-        "microsoft", "google", "mozilla", "adobe", "nvidia", "intel", "amd", 
-        "hp", "dell", "lenovo", "asus", "acer", "logitech", "razer", "corsair", 
-        "dropbox", "valve", "epic games", "discord", "spotify", "oracle",
+        "microsoft",
+        "google",
+        "mozilla",
+        "adobe",
+        "nvidia",
+        "intel",
+        "amd",
+        "hp",
+        "dell",
+        "lenovo",
+        "asus",
+        "acer",
+        "logitech",
+        "razer",
+        "corsair",
+        "dropbox",
+        "valve",
+        "epic games",
+        "discord",
+        "spotify",
+        "oracle",
     ];
     if trusted_authors.iter().any(|&a| auth.contains(a)) {
         score -= 1000;
     }
 
-    // Trusted Task Names (Whitelist)
     let trusted_names = [
-        "onedrive", "edgeupdate", "googleupdate", "firefox", "adobe", 
-        "geforce", "visual studio", "vscode", "teams", "office", "xbox",
+        "onedrive",
+        "edgeupdate",
+        "googleupdate",
+        "firefox",
+        "adobe",
+        "geforce",
+        "visual studio",
+        "vscode",
+        "teams",
+        "office",
+        "xbox",
     ];
     if trusted_names.iter().any(|&n| tname.contains(n)) {
         score -= 800;
     }
 
-    // Trusted Paths (Whitelist)
     let safe_paths = [
         "\\program files\\",
         "\\program files (x86)\\",
@@ -235,25 +256,30 @@ fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i
         score -= 500;
     }
 
-    // --- STEP 2: CRITICAL DANGER (Immediate Fail or High Points) ---
-
-    // Encoded Commands
     if cmd.contains(" -enc ") || cmd.contains(" -encodedcommand ") || cmd.contains("/b64") {
-        score += 1500; 
+        score += 1500;
     }
 
-    // Dangerous Interpreters
-    let dangerous_bins = ["wscript", "cscript", "mshta", "regsvr32", "rundll32", "bitsadmin", "certutil", "nc.exe"];
+    let dangerous_bins = [
+        "wscript",
+        "cscript",
+        "mshta",
+        "regsvr32",
+        "rundll32",
+        "bitsadmin",
+        "certutil",
+        "nc.exe",
+    ];
     if dangerous_bins.iter().any(|&b| cmd.contains(b)) {
         score += 800;
     }
 
-    // --- STEP 3: HEURISTIC INDICATORS ---
-
-    // Powershell Usage
     if cmd.contains("powershell") || cmd.contains("pwsh") {
-        score += 50; 
-        if cmd.contains("-w hidden") || cmd.contains("-windowstyle hidden") || cmd.contains("-noninteractive") {
+        score += 50;
+        if cmd.contains("-w hidden")
+            || cmd.contains("-windowstyle hidden")
+            || cmd.contains("-noninteractive")
+        {
             score += 200;
         }
         if cmd.contains("downloadstring") || cmd.contains("webrequest") || cmd.contains("iwr") {
@@ -269,25 +295,35 @@ fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i
         score += 100;
     }
 
-    // Suspicious Locations
     let in_temp = cmd.contains("\\temp\\") || cmd.contains("%temp%");
-    let in_appdata = cmd.contains("\\appdata\\") || cmd.contains("%appdata%") || cmd.contains("%localappdata%");
-    let in_user_root = cmd.contains("\\users\\") && !in_appdata && !cmd.contains("\\documents\\") && !cmd.contains("\\desktop\\");
+    let in_appdata =
+        cmd.contains("\\appdata\\") || cmd.contains("%appdata%") || cmd.contains("%localappdata%");
+    let in_user_root = cmd.contains("\\users\\")
+        && !in_appdata
+        && !cmd.contains("\\documents\\")
+        && !cmd.contains("\\desktop\\");
 
     if in_temp {
         score += 400;
     }
-    
-    // Scripts in User Profile
-    if (cmd.ends_with(".js") || cmd.ends_with(".vbs") || cmd.ends_with(".bat") || cmd.ends_with(".ps1")) 
+
+    if (cmd.ends_with(".js")
+        || cmd.ends_with(".vbs")
+        || cmd.ends_with(".bat")
+        || cmd.ends_with(".ps1"))
         && (cmd.contains("\\users\\") || cmd.contains("%userprofile%"))
     {
-        if in_appdata { score += 100; }
-        if in_user_root { score += 300; }
-        if in_temp { score += 500; }
+        if in_appdata {
+            score += 100;
+        }
+        if in_user_root {
+            score += 300;
+        }
+        if in_temp {
+            score += 500;
+        }
     }
 
-    // Special override for OneDrive which lives in AppData but is safe
     if cmd.contains("\\microsoft\\onedrive\\") {
         score = -1500;
     }
@@ -321,7 +357,7 @@ pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
                         let task_to_run = p.task_to_run.unwrap_or_default();
                         let name = p.name.unwrap_or_default();
                         let author = p.author.unwrap_or_default();
-                        
+
                         let (is_sus, score) = check_if_task_is_sus(&name, &task_to_run, &author);
 
                         tasks.push(ScheduledTask {
@@ -627,10 +663,10 @@ pub fn list_suspicious_tasks() -> Result<Vec<String>, String> {
                 continue;
             }
             let task_to_run = idx_run_opt.and_then(|i| rec.get(i)).unwrap_or("");
-            let author = ""; // schtasks /V might have author but let's keep it simple or expand if needed
-            
+            let author = "";
+
             let (sus, _score) = check_if_task_is_sus(&name, task_to_run, author);
-            
+
             if sus {
                 out.push(name);
             }
@@ -939,7 +975,7 @@ pub fn get_task_details(task_name: String) -> Result<(String, String, bool, i32)
                 .and_then(|i| rec.get(i))
                 .unwrap_or("")
                 .to_string();
-            
+
             let (is_sus, score) = check_if_task_is_sus(&task_name, &task_to_run, &author);
             return Ok((task_to_run, author, is_sus, score));
         }
@@ -971,18 +1007,16 @@ pub fn get_startup_folders() -> Result<Vec<String>, String> {
         }
     }
     if let Some(programdata) = env::var_os("PROGRAMDATA") {
-        let all_startup =
-            PathBuf::from(programdata.clone()).join("Microsoft/Windows/Start Menu/Programs/StartUp"); // Note: "StartUp" vs "Startup" check casing
-        // Windows is case-insensitive but let's be consistent. "Startup" is standard.
-        // Actually, let's just check if it exists.
+        let all_startup = PathBuf::from(programdata.clone())
+            .join("Microsoft/Windows/Start Menu/Programs/StartUp");
         if all_startup.exists() && all_startup.is_dir() {
-             out.push(all_startup.display().to_string());
+            out.push(all_startup.display().to_string());
         } else {
-             // Fallback for casing
-             let alt = PathBuf::from(programdata).join("Microsoft/Windows/Start Menu/Programs/Startup");
-             if alt.exists() && alt.is_dir() {
-                 out.push(alt.display().to_string());
-             }
+            let alt =
+                PathBuf::from(programdata).join("Microsoft/Windows/Start Menu/Programs/Startup");
+            if alt.exists() && alt.is_dir() {
+                out.push(alt.display().to_string());
+            }
         }
     }
     Ok(out)
@@ -991,8 +1025,8 @@ pub fn get_startup_folders() -> Result<Vec<String>, String> {
 #[cfg(target_os = "windows")]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StartupRegItem {
-    pub hive: String, // "HKCU"/"HKLM"
-    pub key: String,  // registry path
+    pub hive: String,
+    pub key: String,
     pub name: String,
     pub command: String,
 }

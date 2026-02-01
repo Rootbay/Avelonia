@@ -69,7 +69,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
     try {
       localStorage.setItem(SYSTEM_INFO_CACHE_KEY, JSON.stringify(snapshot));
     } catch {
-      // best-effort cache
+      // ignore
     }
   }
 
@@ -179,7 +179,6 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
       }
     };
 
-    // Delay initial fetch slightly to prevent navigation stutter
     const initialTimer = setTimeout(fetchData, 600);
     const intervalId = setInterval(fetchData, 5000);
 

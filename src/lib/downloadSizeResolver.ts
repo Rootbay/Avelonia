@@ -1,7 +1,8 @@
 import { loadBuiltInDownloads } from './builtInDownloads';
+import { invoke } from '@tauri-apps/api/core';
 
 const SIZE_CACHE_KEY = 'avelonia_builtin_download_size_cache';
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // refresh once per week
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const MAX_SIZE_FETCH_CONCURRENCY = 4;
 const IDLE_WAIT_TIMEOUT_MS = 150;
@@ -11,6 +12,12 @@ type SizeCacheEntry = {
   updatedAt: number;
 };
 type SizeCache = Record<string, SizeCacheEntry>;
+
+interface ProbeResult {
+  filename: string;
+  ext: string;
+  size: number | null;
+}
 
 function loadSizeCache(): SizeCache {
   if (typeof window === 'undefined') return {};
@@ -44,7 +51,7 @@ function saveSizeCache(cache: SizeCache) {
   try {
     localStorage.setItem(SIZE_CACHE_KEY, JSON.stringify(cache));
   } catch {
-    // best-effort cache
+    // ignore
   }
 }
 
@@ -70,24 +77,13 @@ async function waitForIdle(timeout = IDLE_WAIT_TIMEOUT_MS): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, timeout));
 }
 
-async function fetchContentLength(url: string): Promise<number | null> {
-  if (typeof fetch === 'undefined') {
-    return null;
-  }
+async function fetchRemoteSize(url: string): Promise<string | null> {
   try {
-    const response = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
-    if (!response.ok) {
-      return null;
+    const result = await invoke<ProbeResult>('probe_download', { url });
+    if (result && result.size) {
+      return formatBytes(result.size);
     }
-    const length = response.headers.get('content-length') ?? response.headers.get('Content-Length');
-    if (!length) {
-      return null;
-    }
-    const parsed = Number(length);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return null;
-    }
-    return parsed;
+    return null;
   } catch {
     return null;
   }
@@ -128,10 +124,10 @@ export async function resolveBuiltInDownloadSizes(): Promise<Record<string, stri
         }
         const { link, fallbackSize } = job;
         try {
-          const bytes = await fetchContentLength(link);
-          const resolvedSize = bytes === null ? fallbackSize : formatBytes(bytes);
-          cache[link] = { size: resolvedSize, updatedAt: now };
-          result[link] = resolvedSize;
+          const resolvedSize = await fetchRemoteSize(link);
+          const finalSize = resolvedSize || fallbackSize;
+          cache[link] = { size: finalSize, updatedAt: now };
+          result[link] = finalSize;
         } catch {
           cache[link] = { size: fallbackSize, updatedAt: now };
           result[link] = fallbackSize;

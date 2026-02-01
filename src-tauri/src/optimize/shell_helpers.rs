@@ -316,7 +316,46 @@ pub(crate) fn run_reg_elevated(args: &[&str]) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+pub(crate) fn is_elevated() -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token: HANDLE = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            size,
+            &mut size,
+        );
+
+        if result.is_err() {
+            return false;
+        }
+
+        elevation.TokenIsElevated != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub(crate) fn run_powershell_elevated(args: &[&str]) -> bool {
+    if is_elevated() {
+        return std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass"])
+            .args(args)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    }
+
     let arglist = {
         let items: Vec<String> = args
             .iter()
@@ -326,6 +365,35 @@ pub(crate) fn run_powershell_elevated(args: &[&str]) -> bool {
     };
     let ps = format!(
         "Start-Process -FilePath powershell -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        arglist
+    );
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn run_elevated(file: &str, args: &[&str]) -> bool {
+    if is_elevated() {
+        return std::process::Command::new(file)
+            .args(args)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    }
+
+    let arglist = {
+        let items: Vec<String> = args
+            .iter()
+            .map(|a| format!("'{}'", a.replace('\'', "''")))
+            .collect();
+        format!("@({})", items.join(", "))
+    };
+    let ps = format!(
+        "Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        file.replace('\'', "''"),
         arglist
     );
     std::process::Command::new("powershell")

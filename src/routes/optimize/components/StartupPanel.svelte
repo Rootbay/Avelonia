@@ -202,13 +202,10 @@
       }
       for (const folder of folders) {
         try {
-          // openPath works for directories on Windows (opens Explorer)
           await openPath(folder);
-          // Tiny delay to ensure Explorer handles multiple requests
           await new Promise(r => setTimeout(r, 200));
         } catch (err) {
           console.error("Failed to open folder:", folder, err);
-          // Fallback: try revealItemInDir (which opens parent, but better than nothing)
           try { await revealItemInDir(folder); } catch {}
         }
       }
@@ -346,7 +343,7 @@
         <div
           role="status"
           aria-busy="true"
-          class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          class="h-75 rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
         >
           <ul class="divide-y divide-border/60">
             {#each Array.from({ length: 8 }) as _, i}
@@ -365,7 +362,7 @@
         </div>
       {:else if filteredStartupItems.length > 0}
         <div
-          class="h-[300px] rounded-md bg-muted/10 overflow-y-auto"
+          class="h-75 rounded-md bg-muted/10 overflow-y-auto"
           bind:this={startupScrollEl}
           data-vt-scope="startup-list"
           onscroll={onStartupScroll}
@@ -425,7 +422,7 @@
         <div
           role="status"
           aria-busy="true"
-          class="h-[300px] rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
+          class="h-75 rounded-md border border-border/60 bg-muted/20 p-2 overflow-hidden"
         >
           <ul class="divide-y divide-border/60">
             {#each Array.from({ length: 6 }) as _, i}

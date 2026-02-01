@@ -16,6 +16,10 @@ mod installer;
 mod optimize;
 mod system_info;
 mod vt;
+mod paths;
+mod error;
+
+pub use error::AppError;
 
 #[derive(Default)]
 struct DownloadState(Arc<DashMap<u64, bool>>);
@@ -37,6 +41,32 @@ struct ProbeResult {
 #[tauri::command]
 fn path_exists(path: String) -> Result<bool, String> {
     Ok(std::path::Path::new(&path).exists())
+}
+
+#[tauri::command]
+async fn verify_hash(path: String, expected_hash: String) -> Result<bool, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file =
+        File::open(&path).map_err(|e| format!("Failed to open file for hashing: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536];
+
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed to read file for hashing: {}", e))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+
+    let result = hasher.finalize();
+    let actual_hash = format!("{:x}", result);
+
+    Ok(actual_hash.to_lowercase() == expected_hash.to_lowercase())
 }
 
 fn filename_from_cd<S: AsRef<str>>(cd: S) -> Option<String> {
@@ -128,8 +158,8 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
     let mut filename: Option<String> = None;
     let mut ext: Option<String> = None;
     let mut size: Option<u64> = None;
-    let head = client.head(&url).send().await;
-    if let Ok(resp) = head {
+
+    if let Ok(resp) = client.head(&url).send().await {
         if resp.status().is_success() {
             if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
                 if let Ok(s) = cd.to_str() {
@@ -150,13 +180,14 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
             }
         }
     }
+
     if filename.is_none() || ext.is_none() {
-        let get = client
+        if let Ok(resp) = client
             .get(&url)
             .header(reqwest::header::RANGE, "bytes=0-0")
             .send()
-            .await;
-        if let Ok(resp) = get {
+            .await
+        {
             if filename.is_none() {
                 if let Some(cd) = resp.headers().get(reqwest::header::CONTENT_DISPOSITION) {
                     if let Ok(s) = cd.to_str() {
@@ -222,6 +253,107 @@ async fn probe_download(url: String) -> Result<ProbeResult, String> {
     })
 }
 
+async fn download_file_inner(
+    app: &AppHandle,
+    id: u64,
+    url: &str,
+    path: &str,
+    state: &State<'_, DownloadState>,
+) -> Result<(), String> {
+    state.0.insert(id, false);
+    let temp_path = format!("{}.part", &path);
+    let mut downloaded: u64 = 0;
+
+    if let Ok(metadata) = std::fs::metadata(&temp_path) {
+        downloaded = metadata.len();
+    }
+
+    let client = Client::builder()
+        .user_agent("Avelonia/0.1 (tauri)")
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let mut request = client.get(url);
+    if downloaded > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
+    }
+
+    let res = request.send().await.map_err(|e| format!("Failed to get response: {}", e))?;
+    
+    // Check for HTTP errors (4xx, 5xx)
+    let res = res.error_for_status().map_err(|e| format!("Server returned error: {}", e))?;
+
+    let status = res.status();
+    let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+
+    if downloaded > 0 && !is_partial {
+        downloaded = 0;
+    }
+
+    let content_length = res.content_length().unwrap_or(0);
+    let total = if is_partial {
+        content_length + downloaded
+    } else {
+        content_length
+    };
+
+    let mut file = if downloaded == 0 {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp_path)
+    } else {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&temp_path)
+    }
+    .map_err(|e| format!("Failed to open temp file: {}", e))?;
+
+    let mut stream = res.bytes_stream();
+    while let Some(item) = stream.next().await {
+        if state.0.get(&id).map_or(false, |r| *r) {
+            return Ok(());
+        }
+
+        let chunk = item.map_err(|e: reqwest::Error| format!("Failed to download chunk: {}", e))?;
+        file.write_all(&chunk).map_err(|e| format!("Failed to write to file: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        let _ = app.emit(
+            "download-progress",
+            DownloadProgress {
+                id,
+                downloaded,
+                total,
+            },
+        );
+    }
+
+    let was_cancelled = state.0.get(&id).map_or(false, |r| *r);
+    if was_cancelled {
+        return Ok(());
+    }
+
+    if (total > 0 && downloaded >= total) || (total == 0 && downloaded > 0) {
+        let final_total = if total == 0 { downloaded } else { total };
+        let _ = app.emit(
+            "download-progress",
+            DownloadProgress {
+                id,
+                downloaded: final_total,
+                total: final_total,
+            },
+        );
+        std::fs::rename(&temp_path, &path).map_err(|e| format!("Failed to finalize download: {}", e))?;
+        Ok(())
+    } else {
+        Err("Download interrupted or incomplete".to_string())
+    }
+}
+
 #[tauri::command]
 async fn download_file(
     app: AppHandle,
@@ -230,131 +362,57 @@ async fn download_file(
     path: String,
     state: State<'_, DownloadState>,
 ) -> Result<(), String> {
-    println!(
-        "Rust: download_file called for ID: {}, URL: {}, Path: {}",
-        id, url, path
-    );
-    state.0.insert(id, false);
-
-    let client = Client::builder()
-        .user_agent("Avelonia/0.1 (tauri)")
-        .timeout(Duration::from_secs(300))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-    let res = client.get(&url).send().await.map_err(|e| {
-        println!("Rust Error: Failed to get response: {}", e);
-        format!("Failed to get response: {}", e)
-    })?;
-    println!("Rust: Got response for ID: {}", id);
-
-    if !res.status().is_success() {
-        let status = res.status();
-        println!("Rust Error: HTTP request failed for ID {}: {}", id, status);
-        return Err(format!("HTTP request failed: {}", status));
+    let mut last_err = String::new();
+    for attempt in 1..=3 {
+        match download_file_inner(&app, id, &url, &path, &state).await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_err = e;
+                if state.0.get(&id).map_or(false, |r| *r) {
+                    break;
+                }
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_secs(attempt * 2)).await;
+                }
+            }
+        }
     }
+    state.0.remove(&id);
+    println!("Rust: Download failed after 3 attempts: {}", last_err);
+    Err(format!("Download failed after 3 attempts: {}", last_err))
+}
 
-    if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE) {
-        if let Ok(s) = ct.to_str() {
-            if s.contains("text/html") {
-                println!("Rust Error: Content-Type is text/html for ID {}: {}", id, s);
-                return Err(format!("Invalid Content-Type: {}", s));
+#[tauri::command]
+
+fn cleanup_orphaned_downloads(
+    download_dir: String,
+    active_paths: Vec<String>,
+) -> Result<u64, String> {
+    let mut count = 0;
+
+    let active_set: std::collections::HashSet<String> = active_paths.into_iter().collect();
+
+    if let Ok(entries) = std::fs::read_dir(download_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            if path.extension().and_then(|s| s.to_str()) == Some("part") {
+                let path_str = path.to_string_lossy().to_string();
+
+                if !active_set.contains(&path_str) {
+                    if std::fs::remove_file(path).is_ok() {
+                        count += 1;
+                    }
+                }
             }
         }
     }
 
-    let total = res.content_length().unwrap_or(0);
-    if total > 0 {
-        println!("Rust: Content length for ID {}: {}", id, total);
-    } else {
-        println!("Rust: Unknown content length for ID {} (streaming)", id);
-    }
-
-    let temp_path = format!("{}.part", &path);
-    let mut file = File::create(&temp_path).map_err(|e| {
-        println!("Rust Error: Failed to create file {}: {}", path, e);
-        format!("Failed to create file: {}", e)
-    })?;
-    println!("Rust: Temp file created at {}", temp_path);
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-
-    while let Some(item) = stream.next().await {
-        if state.0.get(&id).map_or(false, |r| *r) {
-            println!("Rust: Download cancelled for ID: {}", id);
-            break;
-        }
-
-        let chunk = item.map_err(|e| {
-            println!("Rust Error: Failed to download chunk for ID {}: {}", id, e);
-            format!("Failed to download chunk: {}", e)
-        })?;
-        file.write_all(&chunk).map_err(|e| {
-            println!("Rust Error: Failed to write to file for ID {}: {}", id, e);
-            format!("Failed to write to file: {}", e)
-        })?;
-        downloaded += chunk.len() as u64;
-
-        if let Err(e) = app.emit(
-            "download-progress",
-            DownloadProgress {
-                id,
-                downloaded,
-                total,
-            },
-        ) {
-            println!(
-                "Rust Error: Failed to emit progress event for ID {}: {}",
-                id, e
-            );
-        }
-    }
-
-    let was_cancelled = state.0.get(&id).map_or(false, |r| *r);
-    if was_cancelled || (total > 0 && downloaded < total) {
-        if let Err(e) = std::fs::remove_file(&temp_path) {
-            println!(
-                "Rust: Failed to remove partial file for ID {} at {}: {}",
-                id, temp_path, e
-            );
-        } else {
-            println!("Rust: Removed partial file for ID {} at {}", id, temp_path);
-        }
-    } else {
-        let final_total = if total == 0 { downloaded } else { total };
-        if let Err(e) = app.emit(
-            "download-progress",
-            DownloadProgress {
-                id,
-                downloaded: final_total,
-                total: final_total,
-            },
-        ) {
-            println!(
-                "Rust Error: Failed to emit final progress for ID {}: {}",
-                id, e
-            );
-        }
-        if let Err(e) = std::fs::rename(&temp_path, &path) {
-            println!(
-                "Rust: Failed to rename {} to {} for ID {}: {}",
-                temp_path, path, id, e
-            );
-            let _ = std::fs::remove_file(&temp_path);
-            state.0.remove(&id);
-            return Err(format!("Failed to finalize download: {}", e));
-        } else {
-            println!("Rust: Renamed {} to {} for ID {}", temp_path, path, id);
-        }
-    }
-
-    state.0.remove(&id);
-    println!("Rust: Download finished for ID: {}", id);
-    Ok(())
+    Ok(count)
 }
 
 #[tauri::command]
 async fn cancel_download(id: u64, state: State<'_, DownloadState>) -> Result<(), String> {
-    println!("Rust: cancel_download called for ID: {}", id);
     state.0.insert(id, true);
     Ok(())
 }
@@ -405,9 +463,29 @@ fn move_download_catalog(from: String, to: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let system_state_arc = Arc::new(system_info::SystemState::new());
+    let system_state_clone = Arc::clone(&system_state_arc);
+
+    std::thread::spawn(move || {
+        loop {
+            {
+                if let Ok(mut sys) = system_state_clone.sys.lock() {
+                    sys.refresh_cpu_all();
+                    let usage = sys.global_cpu_usage();
+                    if let Ok(mut cpu_usage) = system_state_clone.cpu_usage.lock() {
+                        *cpu_usage = usage;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    });
+
     tauri::Builder::default()
         .manage(DownloadState::default())
+        .manage(installer::InstallState::default())
         .manage(vt::VtState::new())
+        .manage(system_state_arc)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -418,6 +496,8 @@ pub fn run() {
             read_download_catalog,
             write_download_catalog,
             move_download_catalog,
+            verify_hash,
+            cleanup_orphaned_downloads,
             cleaner::get_temp_files,
             cleaner::get_temp_files_stream,
             cleaner::cancel_temp_scan,
@@ -490,6 +570,7 @@ pub fn run() {
             installer::list_uninstall_entries,
             installer::verify_install,
             installer::is_installed,
+            installer::cancel_install,
             vt::vt_get_status,
             vt::vt_set_api_key,
             vt::vt_load_cache,

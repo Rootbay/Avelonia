@@ -2,6 +2,9 @@ use super::shell_helpers::run_powershell_commands;
 use super::update_profiles::apply_update_profile_impl;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use winreg::RegKey;
+use winreg::enums::*;
+use winreg::HKEY;
 
 #[derive(Serialize, Deserialize)]
 pub struct TweakApplyRequest {
@@ -17,81 +20,108 @@ pub struct TweakApplyResponse {
     pub profile_applied: Option<String>,
 }
 
+pub enum TweakAction {
+    RegistryValue {
+        hive: HKEY,
+        path: &'static str,
+        name: &'static str,
+        value: u32,
+    },
+    #[allow(dead_code)]
+    Script(Vec<String>),
+}
+
+struct TweakDefinition {
+    id: &'static str,
+    action: TweakAction,
+}
+
+impl TweakDefinition {
+    fn check_applied(&self) -> bool {
+        match &self.action {
+            TweakAction::RegistryValue { hive, path, name, value } => {
+                let key = RegKey::predef(*hive);
+                if let Ok(subkey) = key.open_subkey(path) {
+                    if let Ok(actual_value) = subkey.get_value::<u32, _>(name) {
+                        return actual_value == *value;
+                    }
+                }
+                false
+            }
+            TweakAction::Script(_) => false,
+        }
+    }
+
+    fn get_commands(&self) -> Vec<String> {
+        match &self.action {
+            TweakAction::RegistryValue { hive, path, name, value } => {
+                let hive_str = if *hive == HKEY_LOCAL_MACHINE { "HKLM" } else { "HKCU" };
+                vec![
+                    format!("New-Item -Path '{}:\\{}' -Force | Out-Null", hive_str, path),
+                    format!("Set-ItemProperty -Path '{}:\\{}' -Name '{}' -Value {} -Type DWord -Force", hive_str, path, name, value),
+                ]
+            }
+            TweakAction::Script(cmds) => cmds.clone(),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_tweak_definitions() -> Vec<TweakDefinition> {
+    vec![
+        TweakDefinition {
+            id: "disable_telemetry",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection",
+                name: "AllowTelemetry",
+                value: 0,
+            },
+        },
+        TweakDefinition {
+            id: "disable_gamedvr",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\GameDVR",
+                name: "AppCaptureEnabled",
+                value: 0,
+            },
+        },
+        TweakDefinition {
+            id: "disable_recall",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_CURRENT_USER,
+                path: "Software\\Microsoft\\Windows\\CurrentVersion\\Recall",
+                name: "Disabled",
+                value: 1,
+            },
+        },
+        TweakDefinition {
+            id: "show_file_extensions",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_CURRENT_USER,
+                path: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+                name: "HideFileExt",
+                value: 0,
+            },
+        },
+    ]
+}
+
 #[cfg(target_os = "windows")]
 fn script_for_tweak(id: &str) -> Vec<String> {
+    if let Some(def) = get_tweak_definitions().into_iter().find(|d| d.id == id) {
+        if def.check_applied() {
+            return Vec::new();
+        }
+        return def.get_commands();
+    }
+
     match id {
         "create_restore_point" => {
             vec![r#"Checkpoint-Computer -Description 'Avelonia Tweaks' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction SilentlyContinue | Out-Null"#.to_string()]
         }
         "disable_consumer_features" => vec![r#"@('dmwappushservice','DiagTrack','RetailDemo','XblAuthManager','XblGameSave','WaaSMedicSvc') | ForEach-Object { Stop-Service -Name $_ -Force -ErrorAction SilentlyContinue; Set-Service -Name $_ -StartupType Disabled -ErrorAction SilentlyContinue }"#.to_string()],
-        "disable_telemetry" => vec![
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' -Name 'AllowTelemetry' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name 'DisableTelemetry' -Value 1 -Type DWord -Force"#.to_string(),
-        ],
-        "disable_activity_history" => vec![
-            r#"New-Item -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ActivityHistory' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ActivityHistory' -Name 'PublishUserActivities' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ActivityHistory' -Name 'PublishUserActivitiesEnabled' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\ActivityHistory' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\ActivityHistory' -Name 'CaptureUserActivities' -Value 0 -Type DWord -Force"#.to_string(),
-        ],
-        "disable_explorer_discovery" => vec![
-            r#"New-Item -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'Start_TrackDocs' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'Start_TrackProgs' -Value 0 -Type DWord -Force"#.to_string(),
-        ],
-        "disable_gamedvr" => vec![
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR' -Name 'AppCaptureEnabled' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR' -Name 'AllowGameDVR' -Value 0 -Type DWord -Force"#.to_string(),
-        ],
-        "disable_hibernation" => vec![r#"powercfg -h off"#.to_string()],
-        "disable_homegroup" => vec![r#"@('HomeGroupProvider','HomeGroupListener') | ForEach-Object { Stop-Service -Name $_ -Force -ErrorAction SilentlyContinue; Set-Service -Name $_ -StartupType Disabled -ErrorAction SilentlyContinue }"#.to_string()],
-        "disable_location_tracking" => vec![
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -Name 'Value' -Value 'Deny' -Type String -Force"#.to_string(),
-            r#"New-Item -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -Name 'Value' -Value 'Deny' -Type String -Force"#.to_string(),
-        ],
-        "disable_storage_sense" => vec![
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StorageSenseGlobal' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StorageSenseGlobal' -Name 'StorageSenseEnabled' -Value 0 -Type DWord -Force"#.to_string(),
-        ],
-        "disable_wifi_sense" => vec![
-            r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config' -Name 'AutoConnectAllowedOEM' -Value 0 -Type DWord -Force"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config' -Name 'AutoConnectAllowedNonOEM' -Value 0 -Type DWord -Force"#.to_string(),
-        ],
-        "enable_end_task" => vec![
-            r#"$key='HKCR:\DesktopBackground\Shell\EndTask'"#.to_string(),
-            r#"New-Item -Path $key -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path $key -Name '(Default)' -Value 'End Task' -Force"#.to_string(),
-            r#"Set-ItemProperty -Path $key -Name 'Icon' -Value 'taskmgr.exe' -Force"#.to_string(),
-            r#"New-Item -Path "$key\Command" -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path "$key\Command" -Name '(Default)' -Value 'taskmgr.exe' -Force"#.to_string(),
-        ],
-        "run_disk_cleanup" => vec![r#"Start-Process cleanmgr -ArgumentList '/sagerun:99' -Wait | Out-Null"#.to_string()],
-        "terminal_powershell7_default" => vec![r#"$terminalPath = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
-if (Test-Path $terminalPath) {
-  $settings = Get-Content $terminalPath -Raw | ConvertFrom-Json
-  $profile = $settings.profiles.list | Where-Object { $_.name -like 'PowerShell 7*' } | Select-Object -First 1
-  if ($profile) {
-    $settings.profiles.default = $profile.guid
-    $settings | ConvertTo-Json -Depth 5 | Set-Content $terminalPath -Force
-  }
-}"#.to_string()],
-        "disable_powershell7_telemetry" => vec![
-            r#"[Environment]::SetEnvironmentVariable('POWERSHELL_TELEMETRY_OPTOUT','1','Machine')"#.to_string(),
-            r#"[Environment]::SetEnvironmentVariable('POWERSHELL_UPDATECHECK','0','Machine')"#.to_string(),
-        ],
-        "disable_recall" => vec![
-            r#"New-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Recall' -Force | Out-Null"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Recall' -Name 'Disabled' -Value 1 -Type DWord -Force"#.to_string(),
-            r#"Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Recall' -Name 'NoActivityCollector' -Value 1 -Type DWord -Force"#.to_string(),
-        ],
         "set_hibernation_default" => vec![r#"powercfg -h on"#.to_string()],
         "services_manual" => vec![r#"@('WaaSMedicSvc','XblGameSave','XblAuthManager','DiagTrack') | ForEach-Object { Set-Service -Name $_ -StartupType Manual -ErrorAction SilentlyContinue }"#.to_string()],
         "debloat_brave" => vec![

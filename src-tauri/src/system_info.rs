@@ -1,31 +1,43 @@
-use std::thread;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use sysinfo::System;
+use tauri::State;
 
-#[tauri::command]
-pub fn get_cpu_usage() -> Result<f32, String> {
-    let mut system = System::new();
-    system.refresh_cpu_all();
-    thread::sleep(Duration::from_millis(200));
-    system.refresh_cpu_all();
-    Ok(system.global_cpu_usage())
+pub struct SystemState {
+    pub sys: Mutex<System>,
+    pub cpu_usage: Mutex<f32>,
+}
+
+impl SystemState {
+    pub fn new() -> Self {
+        let mut sys = System::new();
+        sys.refresh_cpu_all();
+        Self {
+            sys: Mutex::new(sys),
+            cpu_usage: Mutex::new(0.0),
+        }
+    }
 }
 
 #[tauri::command]
-pub fn get_memory_usage() -> Result<u64, String> {
-    let mut system = System::new();
-    system.refresh_memory();
-    Ok(system.used_memory())
+pub fn get_cpu_usage(state: State<'_, Arc<SystemState>>) -> f32 {
+    *state.cpu_usage.lock().unwrap()
 }
 
 #[tauri::command]
-pub fn get_total_memory() -> Result<u64, String> {
-    let mut system = System::new();
-    system.refresh_memory();
-    Ok(system.total_memory())
+pub fn get_memory_usage(state: State<'_, Arc<SystemState>>) -> u64 {
+    let mut sys = state.sys.lock().unwrap();
+    sys.refresh_memory();
+    sys.used_memory()
 }
 
 #[tauri::command]
-pub fn get_boot_time() -> Result<u64, String> {
-    Ok(System::boot_time())
+pub fn get_total_memory(state: State<'_, Arc<SystemState>>) -> u64 {
+    let mut sys = state.sys.lock().unwrap();
+    sys.refresh_memory();
+    sys.total_memory()
+}
+
+#[tauri::command]
+pub fn get_boot_time() -> u64 {
+    System::boot_time()
 }

@@ -731,8 +731,7 @@
             const elevated = !!f?.elevated;
             const stderr = (f?.stderr || '').trim();
             const stdout = (f?.stdout || '').trim();
-            console.log({ name, step, elevated, stderr, stdout });
-          }
+              }
           console.groupEnd();
         } catch {
           // ignore
@@ -753,8 +752,7 @@
     try {
       const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
-      console.log("[Optimize] Tasks loaded with scores:", $state.snapshot(tasks));
-      tasksLoaded = true;
+        tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
       queueEnrichVisibleTasks(12);
     } catch (e) {

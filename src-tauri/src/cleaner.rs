@@ -1,3 +1,4 @@
+use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
@@ -8,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
-use dashmap::DashMap;
 
 static TEMP_CANCEL: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 use sysinfo::Disks;
@@ -108,71 +108,63 @@ pub fn get_temp_files_stream(
     max: Option<usize>,
 ) -> Result<usize, String> {
     let bs = batch_size.unwrap_or(250).max(50).min(1000);
-    // Increased limit to 500k to ensure we find everything
     let limit = max.unwrap_or(500_000);
     TEMP_CANCEL.store(false, Ordering::Relaxed);
 
     let mut roots: Vec<PathBuf> = Vec::new();
+    let wp = crate::paths::WindowsPaths::get();
 
-    // 1. Standard Temp Directories
-    if let Some(t) = env::var_os("TEMP").map(PathBuf::from) { roots.push(t); }
-    if let Some(l) = env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Temp")) { roots.push(l); }
-    
-    // Unix/Linux fallback
+    roots.push(wp.temp.clone());
+    roots.push(wp.local_app_data.join("Temp"));
+
     roots.push(PathBuf::from("/tmp"));
     roots.push(PathBuf::from("/private/tmp"));
     roots.push(PathBuf::from("/var/tmp"));
 
-    // 2. Advanced Windows Locations
-    if let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-        // Browsers: Chrome
-        roots.push(local_app_data.join("Google/Chrome/User Data/Default/Cache"));
-        roots.push(local_app_data.join("Google/Chrome/User Data/Default/Code Cache"));
-        
-        // Browsers: Edge
-        roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Cache"));
-        roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Code Cache"));
+    let local_app_data = wp.local_app_data;
+    roots.push(local_app_data.join("Google/Chrome/User Data/Default/Cache"));
+    roots.push(local_app_data.join("Google/Chrome/User Data/Default/Code Cache"));
 
-        // Browsers: Firefox (Generic profile scan)
-        let firefox_profiles = local_app_data.join("Mozilla/Firefox/Profiles");
-        if firefox_profiles.exists() {
-            if let Ok(entries) = fs::read_dir(firefox_profiles) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    roots.push(entry.path().join("cache2"));
-                    roots.push(entry.path().join("jumpListCache"));
-                }
+    roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Cache"));
+    roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Code Cache"));
+
+    let firefox_profiles = local_app_data.join("Mozilla/Firefox/Profiles");
+    if firefox_profiles.exists() {
+        if let Ok(entries) = fs::read_dir(firefox_profiles) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                roots.push(entry.path().join("cache2"));
+                roots.push(entry.path().join("jumpListCache"));
             }
         }
-
-        // Windows Error Reporting (WER)
-        roots.push(local_app_data.join("Microsoft/Windows/WER"));
     }
 
-    if let Some(windir) = env::var_os("WINDIR").map(PathBuf::from) {
+    roots.push(local_app_data.join("Microsoft/Windows/WER"));
+
+    let windir = wp.windir;
+    if !windir.as_os_str().is_empty() {
         roots.push(windir.join("Logs"));
-        roots.push(windir.join("SoftwareDistribution/Download")); // Windows Update Cache
+        roots.push(windir.join("SoftwareDistribution/Download"));
         roots.push(windir.join("Minidump"));
     }
 
-    // Deduplicate paths to avoid scanning the same folder twice (e.g. TEMP vs LOCALAPPDATA/Temp)
     roots.sort();
     roots.dedup();
 
-    // Filter out non-existent directories
-    let active_roots: Vec<PathBuf> = roots.into_iter().filter(|p| p.exists() && p.is_dir()).collect();
-
+    let active_roots: Vec<PathBuf> = roots
+        .into_iter()
+        .filter(|p| p.exists() && p.is_dir())
+        .collect();
     let (tx, rx) = mpsc::channel::<String>();
     let mut handles = Vec::new();
-    
+
     for root in active_roots {
         let txc = tx.clone();
         let ah = app_handle.clone();
         handles.push(thread::spawn(move || {
             let mut scanned = 0usize;
-            // Use WalkDir but be careful with permissions in system folders
             for entry in walkdir::WalkDir::new(&root)
                 .into_iter()
-                .filter_map(|e| e.ok()) // Skips permission denied errors silently
+                .filter_map(|e| e.ok())
             {
                 if TEMP_CANCEL.load(Ordering::Relaxed) {
                     break;
@@ -181,9 +173,15 @@ pub fn get_temp_files_stream(
                     let _ = txc.send(entry.path().display().to_string());
                 }
                 scanned += 1;
-                // Throttle progress updates per thread to avoid flooding
                 if scanned % 2000 == 0 {
-                    let _ = ah.emit("scan_progress", format!("Scanned {} entries in {}...", scanned, root.file_name().and_then(|n| n.to_str()).unwrap_or("dir")));
+                    let _ = ah.emit(
+                        "scan_progress",
+                        format!(
+                            "Scanned {} entries in {}...",
+                            scanned,
+                            root.file_name().and_then(|n| n.to_str()).unwrap_or("dir")
+                        ),
+                    );
                 }
             }
         }));
@@ -204,7 +202,6 @@ pub fn get_temp_files_stream(
         if batch.len() >= bs {
             let _ = app_handle.emit("cleaner-temp-batch", batch.clone());
             batch.clear();
-            // Tiny sleep to yield to UI thread if overwhelmed
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         if total >= limit {
@@ -274,7 +271,6 @@ pub fn start_cleaner_scan(
     std::thread::spawn(move || {
         let _ = app.emit("cleaner-progress", "Starting scan...");
         let _ = app.emit("cleaner-progress", "Scanning temporary files...");
-        // Increased scan limit to 500k
         let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000)));
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
@@ -624,10 +620,14 @@ pub fn find_large_files_min(
     min_size_bytes: u64,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<(String, u64)>, String> {
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
+    let wp = crate::paths::WindowsPaths::get();
+    let user_profile = wp.user_profile;
+    if user_profile.as_os_str().is_empty() {
+        return Err("USERPROFILE not found".to_string());
+    }
+    let downloads_path = user_profile.join("Downloads");
+    let desktop_path = user_profile.join("Desktop");
+    let documents_path = user_profile.join("Documents");
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
@@ -812,22 +812,37 @@ pub struct DuplicateGroup {
     pub files: Vec<String>,
 }
 
+fn calculate_partial_hash(path: &Path) -> Result<String, io::Error> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 16384]; // 16KB prefix
+
+    let bytes_read = file.read(&mut buffer)?;
+    if bytes_read > 0 {
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 #[tauri::command]
 pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
-    let first_pass_limit: usize = 200_000; // Increased limit slightly
+    let first_pass_limit: usize = 200_000;
     let hash_limit: usize = 15_000;
 
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
-    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
+    let wp = crate::paths::WindowsPaths::get();
+    let user_profile = wp.user_profile;
+    if user_profile.as_os_str().is_empty() {
+        return Err("USERPROFILE not found".to_string());
+    }
+    let downloads_path = user_profile.join("Downloads");
+    let documents_path = user_profile.join("Documents");
+    let desktop_path = user_profile.join("Desktop");
     let paths_to_scan = vec![downloads_path, documents_path, desktop_path];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
-    // Use DashMap for parallel collection of file sizes
     let size_buckets: DashMap<u64, Vec<String>> = DashMap::new();
 
-    // 1. Parallel Walk & Size Collection
     paths_to_scan
         .into_iter()
         .flat_map(|root| {
@@ -837,29 +852,28 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
         })
         .par_bridge()
         .for_each(|entry| {
-             if TEMP_CANCEL.load(Ordering::Relaxed) {
+            if TEMP_CANCEL.load(Ordering::Relaxed) {
                 return;
             }
-            
-            // Limit check (soft limit via atomic counter)
+
             let current = scanned_count.fetch_add(1, Ordering::Relaxed);
             if current >= first_pass_limit {
                 return;
             }
 
             if current % 1000 == 0 {
-                let _ = app_handle.emit(
-                    "scan_progress",
-                    format!("Scanned {} files...", current),
-                );
+                let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", current));
             }
 
             if entry.file_type().is_file() {
                 let p = entry.path();
                 if let Ok(meta) = fs::metadata(p) {
                     let len = meta.len();
-                    if len > 0 { // Ignore empty files
-                         size_buckets.entry(len).or_default().push(p.display().to_string());
+                    if len > 0 {
+                        size_buckets
+                            .entry(len)
+                            .or_default()
+                            .push(p.display().to_string());
                     }
                 }
             }
@@ -869,25 +883,51 @@ pub fn find_duplicate_groups(app_handle: tauri::AppHandle) -> Result<Vec<Duplica
         return Ok(Vec::new());
     }
 
-    // 2. Hashing (Only for groups > 1)
-    let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
-    let mut hashed_count = 0usize;
-
-    // Filter to get only groups with potential duplicates
+    // Second pass: Partial hash (first 16KB)
+    let mut partial_hash_buckets: HashMap<String, Vec<String>> = HashMap::new();
     let potential_dupes: Vec<(u64, Vec<String>)> = size_buckets
         .into_iter()
         .filter(|(_, v)| v.len() > 1)
         .collect();
-    
-    // Process hashing in chunks to respect cancellation and limits
-    for (_size, group) in potential_dupes {
+
+    for (size, group) in potential_dupes {
+        let partial_hashes: Vec<(String, String)> = group
+            .par_iter()
+            .filter_map(|p| {
+                if TEMP_CANCEL.load(Ordering::Relaxed) {
+                    return None;
+                }
+                let path = PathBuf::from(p);
+                match calculate_partial_hash(&path) {
+                    Ok(h) => Some((format!("{}_{}", size, h), p.clone())),
+                    Err(_) => None,
+                }
+            })
+            .collect();
+
+        for (h, p) in partial_hashes {
+            partial_hash_buckets.entry(h).or_default().push(p);
+        }
+    }
+
+    // Third pass: Full hash
+    let mut file_hashes: HashMap<String, Vec<String>> = HashMap::new();
+    let mut hashed_count = 0usize;
+
+    let final_potential_dupes: Vec<Vec<String>> = partial_hash_buckets
+        .into_iter()
+        .filter(|(_, v)| v.len() > 1)
+        .map(|(_, v)| v)
+        .collect();
+
+    for group in final_potential_dupes {
         if hashed_count >= hash_limit {
             break;
         }
-        
+
         let remaining = hash_limit.saturating_sub(hashed_count);
         let batch: Vec<String> = group.into_iter().take(remaining).collect();
-        
+
         let hashed_batch: Vec<(String, String)> = batch
             .par_iter()
             .filter_map(|p| {
@@ -956,10 +996,14 @@ fn calculate_file_hash(path: &Path) -> Result<String, io::Error> {
 pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
     let mut scanned_count = 0usize;
 
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
+    let wp = crate::paths::WindowsPaths::get();
+    let user_profile = wp.user_profile;
+    if user_profile.as_os_str().is_empty() {
+        return Err("USERPROFILE not found".to_string());
+    }
+    let downloads_path = user_profile.join("Downloads");
+    let desktop_path = user_profile.join("Desktop");
+    let documents_path = user_profile.join("Documents");
     let paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -998,21 +1042,26 @@ pub fn find_empty_folders(app_handle: tauri::AppHandle) -> Result<Vec<String>, S
 pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
     let mut scanned_count = 0usize;
 
-    let user_profile = env::var_os("USERPROFILE").ok_or("USERPROFILE not found".to_string())?;
-    let downloads_path = PathBuf::from(&user_profile).join("Downloads");
-    let desktop_path = PathBuf::from(&user_profile).join("Desktop");
-    let documents_path = PathBuf::from(&user_profile).join("Documents");
+    let wp = crate::paths::WindowsPaths::get();
+    let user_profile = wp.user_profile;
+    if user_profile.as_os_str().is_empty() {
+        return Err("USERPROFILE not found".to_string());
+    }
+    let downloads_path = user_profile.join("Downloads");
+    let desktop_path = user_profile.join("Desktop");
+    let documents_path = user_profile.join("Documents");
 
     let mut paths_to_scan = vec![downloads_path, desktop_path, documents_path];
 
-    if let Some(appdata) = env::var_os("APPDATA") {
-        paths_to_scan.push(PathBuf::from(appdata).join("Microsoft/Windows/Start Menu"));
+    if !wp.app_data.as_os_str().is_empty() {
+        paths_to_scan.push(wp.app_data.join("Microsoft/Windows/Start Menu"));
     }
-    if let Some(programdata) = env::var_os("PROGRAMDATA").or(env::var_os("ALLUSERSPROFILE")) {
-        paths_to_scan.push(PathBuf::from(programdata).join("Microsoft/Windows/Start Menu"));
+    if !wp.program_data.as_os_str().is_empty() {
+        paths_to_scan.push(wp.program_data.join("Microsoft/Windows/Start Menu"));
     }
-    if let Some(public) = env::var_os("PUBLIC") {
-        paths_to_scan.push(PathBuf::from(public).join("Desktop"));
+    let public = env::var_os("PUBLIC").map(PathBuf::from);
+    if let Some(p) = public {
+        paths_to_scan.push(p.join("Desktop"));
     }
 
     let mut lnk_files: Vec<PathBuf> = Vec::new();
@@ -1037,10 +1086,12 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
             }
         }
     }
-    
-    let _ = app_handle.emit("scan_progress", format!("Found {} shortcuts. Verifying...", lnk_files.len()));
 
-    // Process in parallel using Rayon and lnk crate
+    let _ = app_handle.emit(
+        "scan_progress",
+        format!("Found {} shortcuts. Verifying...", lnk_files.len()),
+    );
+
     let results: Vec<String> = lnk_files
         .par_iter()
         .filter_map(|p| {
@@ -1049,18 +1100,14 @@ pub fn find_broken_shortcuts(app_handle: tauri::AppHandle) -> Result<Vec<String>
             }
             match ShellLink::open(p, WINDOWS_1252) {
                 Ok(shell_link) => {
-                    // Stable check using link_info
                     if let Some(link_info) = shell_link.link_info() {
                         let common_path_str = link_info.common_path_suffix();
                         let target_path = PathBuf::from(common_path_str.to_string());
-                        
-                        // Basic check: does the target exist?
+
                         if !target_path.exists() {
-                             // Double check if it's a special system path or argument-based shortcut which we might misidentify
-                             // For safety, we only report it if we are sure it looks like a file path (contains slashes)
-                             if common_path_str.contains('\\') || common_path_str.contains('/') {
-                                 return Some(p.display().to_string());
-                             }
+                            if common_path_str.contains('\\') || common_path_str.contains('/') {
+                                return Some(p.display().to_string());
+                            }
                         }
                     }
                 }

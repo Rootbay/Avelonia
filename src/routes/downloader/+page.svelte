@@ -18,7 +18,6 @@
     CardHeader,
     CardTitle,
   } from '$lib/components/ui/card';
-  import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
   import { Skeleton } from '$lib/components/ui/skeleton/index.js';
@@ -91,19 +90,10 @@
     { value: 'failed', label: 'Failed' },
   ];
 
-  const sortOptions: Array<{ value: SortKey; label: string }> = [
-    { value: 'name', label: 'Name' },
-    { value: 'size', label: 'Size' },
-    { value: 'fileType', label: 'File Type' },
-    { value: 'category', label: 'Category' },
-    { value: 'eta', label: 'ETA' },
-    { value: 'status', label: 'Status' },
-  ];
-
   let statusGroup = $state<StatusGroup>('all');
   let sortBy = $state<SortKey>('name');
   let sortDirection = $state<'asc' | 'desc'>('asc');
-  let selectedIds = $state(new SvelteSet<number>());
+  let selectedIds = new SvelteSet<number>();
   const isSelected = (id: number) => selectedIds.has(id);
   let selectAllCheckbox: HTMLInputElement | null = null;
   let announce = $state('');
@@ -265,19 +255,6 @@
     addCategory = '';
     toast.success('Added to list');
   }
-
-  const activeFilterCount = $derived.by(() => {
-    let c = 0;
-    if (debouncedSearchTerm.trim()) c += 1;
-    if (filters.fileType) c += 1;
-    if (filters.category) c += 1;
-    if (filters.minSize) c += 1;
-    if (filters.maxSize) c += 1;
-    if (filters.eta) c += 1;
-    if (filters.status) c += 1;
-    if (statusGroup !== 'all') c += 1;
-    return c;
-  });
 
   function isEditableEventTarget(event: Event): boolean {
     const target = event.target as HTMLElement | null;
@@ -564,7 +541,7 @@
   let downloadsStart = $state(0);
   let downloadsVisible = $state(10);
   const VIEW_CHUNK = 30;
-  let skeletonIds = $state(new SvelteSet<number>());
+  let skeletonIds = new SvelteSet<number>();
   let _downloadsScrollTick = false;
 
   const windowedDownloads = $derived(
@@ -740,16 +717,6 @@
   const filteredTotalBytes = $derived(
     filteredDownloads.reduce((sum, d) => sum + toBytes(d.size), 0)
   );
-
-  function handleClearFilters() {
-    searchTerm = '';
-    filters.fileType = '';
-    filters.category = '';
-    filters.minSize = '';
-    filters.maxSize = '';
-    filters.eta = '';
-    filters.status = '';
-  }
 
   function startAll() {
     const list = get(downloads);
@@ -1009,14 +976,6 @@
     lastSelectedIndex = index;
   }
 
-  function invertSelection() {
-    const next = new SvelteSet<number>();
-    for (const d of filteredDownloads) {
-      if (!selectedIds.has(d.id)) next.add(d.id);
-    }
-    selectedIds = next;
-  }
-
   function handleHeaderKey(e: KeyboardEvent, key: SortKey) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -1085,23 +1044,40 @@
 <div class="space-y-6">
   <div class="sr-only" aria-live="polite">{announce}</div>
 
-  <Card class="bg-card/80 shadow-sm">
-    <CardHeader>
-      <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
-      <CardDescription>Search, filter, and manage app downloads.</CardDescription>
-    </CardHeader>
-      <CardContent class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-      <span>Showing {filteredDownloadStats.available} / {globalDownloadStats.total}</span>
-      <Separator orientation="vertical" class="hidden h-4 md:flex" />
-      <span>Size: {formatBytes(filteredTotalBytes)}</span>
-      <Separator orientation="vertical" class="hidden h-4 md:flex" />
-      <span class="text-primary">Active: {globalDownloadStats.active}</span>
-      <span class="text-emerald-500">Completed: {globalDownloadStats.completed}</span>
-      <span class="text-destructive">Failed: {globalDownloadStats.failed}</span>
-    </CardContent>
-  </Card>
-
-  <Dialog bind:open={showInstallInfo}>
+    <Card class="bg-card/80 shadow-sm">
+      <CardHeader>
+        <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardDescription>Search, filter, and manage app downloads.</CardDescription>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-muted-foreground">
+            <div class="flex items-center gap-1.5">
+              <span class="size-1.5 rounded-full bg-border"></span>
+              <span>Showing {filteredDownloadStats.available} / {globalDownloadStats.total}</span>
+            </div>
+            <Separator orientation="vertical" class="hidden h-3 md:flex" />
+            <div class="flex items-center gap-1.5">
+              <span>{formatBytes(filteredTotalBytes)}</span>
+            </div>
+            <Separator orientation="vertical" class="hidden h-3 md:flex" />
+            <div class="flex items-center gap-1.5">
+              <span class="size-1.5 rounded-full bg-primary"></span>
+              <span class="text-primary">{globalDownloadStats.active} Active</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-1.5 rounded-full bg-emerald-500"></span>
+              <span class="text-emerald-500">{globalDownloadStats.completed} Done</span>
+            </div>
+            {#if globalDownloadStats.failed > 0}
+              <div class="flex items-center gap-1.5">
+                <span class="size-1.5 rounded-full bg-destructive"></span>
+                <span class="text-destructive">{globalDownloadStats.failed} Failed</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
+    <Dialog bind:open={showInstallInfo}>
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>Silent install (beta)</DialogTitle>
@@ -1206,10 +1182,10 @@
   </Dialog>
 
   <Card class="bg-card/70 shadow-sm">
-    <CardHeader class="gap-4 pb-2">
+    <CardHeader class="">
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center gap-3">
-          <div class="flex min-w-[260px] flex-1">
+          <div class="flex min-w-65 flex-1">
             <Input
               class="w-full"
               placeholder="Search downloads..."
@@ -1268,7 +1244,7 @@
             </Button>
           </div>
           <Sheet bind:open={actionsOpen}>
-            <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+            <SheetContent side="right" class="w-85 sm:w-95 p-4 sm:p-6">
               <SheetHeader class="space-y-1 p-0">
                 <SheetTitle>Bulk actions</SheetTitle>
                 <SheetDescription
@@ -1542,7 +1518,7 @@
           </Sheet>
 
           <Sheet bind:open={optionsOpen}>
-            <SheetContent side="right" class="w-[340px] sm:w-[380px] p-4 sm:p-6">
+            <SheetContent side="right" class="w-85 sm:w-95 p-4 sm:p-6">
               <SheetHeader class="space-y-1 p-0">
                 <SheetTitle>Beta options</SheetTitle>
                 <SheetDescription>Defaults for postâ€‘download behavior.</SheetDescription>
@@ -1667,10 +1643,10 @@
         bind:this={downloadsScrollEl}
         onscroll={onDownloadsScroll}
       >
-        <Table ref={tableEl} class="min-w-[960px]">
+        <Table ref={tableEl} class="min-w-240 table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead class="w-10">
+              <TableHead class="w-20">
                 <span class="flex justify-center">
                   <input
                     bind:this={selectAllCheckbox}
@@ -1691,7 +1667,7 @@
                   />
                 </span>
               </TableHead>
-              <TableHead>
+              <TableHead class="w-[35%]">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('name')}
@@ -1703,7 +1679,7 @@
                     />{/if}
                 </button>
               </TableHead>
-              <TableHead>
+              <TableHead class="w-28">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('size')}
@@ -1715,19 +1691,19 @@
                     />{/if}
                 </button>
               </TableHead>
-              <TableHead>
+              <TableHead class="w-24">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('fileType')}
                   onkeydown={(event) => handleHeaderKey(event, 'fileType')}
                 >
-                  <span>File Type</span>
+                  <span>Type</span>
                   {#if sortBy === 'fileType'}<ArrowUpDown
                       class={`size-3 ${sortDirection === 'asc' ? 'rotate-180' : ''}`}
                     />{/if}
                 </button>
               </TableHead>
-              <TableHead>
+              <TableHead class="w-32">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('category')}
@@ -1739,7 +1715,7 @@
                     />{/if}
                 </button>
               </TableHead>
-              <TableHead>
+              <TableHead class="w-28">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('eta')}
@@ -1751,7 +1727,7 @@
                     />{/if}
                 </button>
               </TableHead>
-              <TableHead class="w-[180px] pl-6 sm:pl-8">
+              <TableHead class="w-52 pl-8">
                 <button
                   class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"
                   onclick={() => setSort('status')}
@@ -1769,7 +1745,7 @@
             {#if initialLoading}
               {#each Array.from({ length: 6 }) as _, ii}
                 <TableRow class="border-0!" aria-hidden="true">
-                  <TableCell class="w-[60px]">
+                  <TableCell class="w-15">
                     <div class="flex items-center gap-2">
                       <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
                       <Skeleton class="h-8 w-8 rounded-md" aria-hidden="true" />
@@ -1793,7 +1769,7 @@
                   <TableCell class="hidden md:table-cell">
                     <Skeleton class="h-3 w-12" aria-hidden="true" />
                   </TableCell>
-                  <TableCell class="w-[180px] pl-6 sm:pl-8">
+                  <TableCell class="w-45 pl-6 sm:pl-8">
                     <Skeleton class="h-3 w-16" aria-hidden="true" />
                   </TableCell>
                 </TableRow>
@@ -1810,7 +1786,7 @@
               {#each windowedDownloads as download, i (download.id)}
                 {#if skeletonIds.has(download.id)}
                   <TableRow class="border-0!" aria-hidden="true">
-                    <TableCell class="w-[60px]">
+                    <TableCell class="w-15">
                       <div class="flex items-center gap-2">
                         <Skeleton class="h-5 w-5 rounded-md" aria-hidden="true" />
                         <Skeleton class="h-8 w-8 rounded-md" aria-hidden="true" />
@@ -1834,7 +1810,7 @@
                     <TableCell class="hidden md:table-cell">
                       <Skeleton class="h-3 w-12" aria-hidden="true" />
                     </TableCell>
-                    <TableCell class="w-[180px] pl-6 sm:pl-8">
+                    <TableCell class="w-45 pl-6 sm:pl-8">
                       <Skeleton class="h-3 w-16" aria-hidden="true" />
                     </TableCell>
                   </TableRow>
@@ -1865,21 +1841,40 @@
           </TableBody>
         </Table>
       </div>
-
-      {#if selectedIds.size > 0}
-        <div class="pointer-events-none">
-          <div
-            class="pointer-events-auto md:absolute md:bottom-4 md:right-4 fixed bottom-6 right-6 z-20 rounded-md border bg-card/95 backdrop-blur p-2 shadow-md flex items-center gap-2"
-          >
-            <Badge variant="secondary">{selectedIds.size} selected</Badge>
-            <Button size="sm" onclick={startSelected}>Start</Button>
-            <Button size="sm" variant="destructive" onclick={cancelSelected}>Cancel</Button>
-            <Button size="sm" variant="ghost" onclick={() => (actionsOpen = true)}>More</Button>
-          </div>
-        </div>
-      {/if}
     </CardContent>
   </Card>
+
+  {#if selectedIds.size > 0}
+    <div class="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <div
+        class="flex items-center gap-3 rounded-xl border bg-card/95 p-3 shadow-2xl backdrop-blur-md ring-1 ring-border/50"
+      >
+        <div class="flex flex-col border-r pr-3">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
+            >Selection</span
+          >
+          <span class="text-sm font-semibold">{selectedIds.size} items</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <Button size="sm" class="h-8" onclick={startSelected}>
+            <Play class="mr-2 size-3.5" />
+            Start
+          </Button>
+          <Button size="sm" variant="outline" class="h-8 border-destructive/20 text-destructive hover:bg-destructive/10" onclick={cancelSelected}>
+            <CircleX class="mr-2 size-3.5" />
+            Cancel
+          </Button>
+          <Separator orientation="vertical" class="mx-1 h-6" />
+          <Button size="sm" variant="ghost" class="h-8 px-2" onclick={() => (actionsOpen = true)} title="All actions">
+            <ListChecks class="size-4" />
+          </Button>
+          <Button size="sm" variant="ghost" class="h-8 px-2" onclick={clearSelection} title="Clear selection">
+            <CircleX class="size-4 opacity-50" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <Dialog bind:open={showHelp}>
     <DialogContent>

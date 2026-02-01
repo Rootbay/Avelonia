@@ -13,6 +13,8 @@ export type DownloadRelease = {
   downloadLink: string;
   size?: string;
   fileType?: string;
+  hash?: string;
+  installFlags?: string;
 };
 
 export interface Download {
@@ -24,6 +26,8 @@ export interface Download {
   category: string;
   tags?: string[];
   downloadLink: string;
+  hash?: string;
+  installFlags?: string;
   releases?: DownloadRelease[];
   selectedReleaseLabel?: string;
   eta: string;
@@ -53,6 +57,7 @@ const UI_UPDATE_MS = 700;
 const EMA_ALPHA = 0.25;
 const activeDownloads = new Set<number>();
 const pendingQueue: number[] = [];
+let processingQueue = false;
 
 const reservedPaths = new Set<string>();
 const downloadPathReservations = new Map<number, string>();
@@ -79,7 +84,7 @@ async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
   } catch (error: unknown) {
-    logIgnoredError('appLog', error);
+    console.error(`[Downloader:appLog] Failed to push log:`, error);
   }
 }
 
@@ -91,7 +96,7 @@ async function maybeAutoInstall(id: number) {
     installQueue.push(id);
     void processInstallQueue();
   } catch (error: unknown) {
-    logIgnoredError('maybeAutoInstall', error);
+    await appLog('ERROR', `Auto-install trigger failed for ID ${id}`);
   }
 }
 
@@ -119,7 +124,7 @@ async function processInstallQueue() {
           `Launching installer (interactive) for ${snap.name}${downloader.elevate ? ' [elevated]' : ''}`
         );
         try {
-          await invoke('launch_installer', { path, elevate: !!downloader.elevate });
+          await invoke('launch_installer', { id, path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Installer launched: ${snap.name}`);
         } catch (installerLaunchError: unknown) {
           await appLog(
@@ -135,7 +140,12 @@ async function processInstallQueue() {
           `Attempting silent install of ${snap.name} (${ext.toUpperCase()})${downloader.elevate ? ' [elevated]' : ''}`
         );
         try {
-          await invoke('silent_install', { path, elevate: !!downloader.elevate });
+          await invoke('silent_install', { 
+            id, 
+            path, 
+            elevate: !!downloader.elevate, 
+            customFlags: snap.installFlags 
+          });
           await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
           autoInstallTried.add(id);
         } catch (silentInstallError: unknown) {
@@ -180,7 +190,7 @@ async function processInstallQueue() {
           }
         }
       } catch (error: unknown) {
-        logIgnoredError('processInstallQueue verify', error);
+        await appLog('ERROR', `Verification process failed for ${snap.name}`);
       }
     }
   } finally {
@@ -210,7 +220,7 @@ async function checkAndMarkInstalled(id: number) {
       }
     }
   } catch (error: unknown) {
-    logIgnoredError('checkAndMarkInstalled', error);
+    console.debug(`[Downloader:checkAndMarkInstalled] ${error}`);
   }
 }
 
@@ -223,7 +233,7 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
     }, delayMs) as unknown as number;
     postCompleteTimers.set(id, timer);
   } catch (error: unknown) {
-    logIgnoredError('schedulePostCompleteCheck', error);
+    console.error(`[Downloader:schedulePostCompleteCheck] ${error}`);
   }
 }
 
@@ -289,35 +299,41 @@ function removeFromQueue(id: number) {
 }
 
 function processQueue() {
-  while (activeDownloads.size < MAX_CONCURRENT_DOWNLOADS && pendingQueue.length > 0) {
-    const nextId = pendingQueue.shift();
-    if (typeof nextId !== 'number') break;
+  if (processingQueue) return;
+  processingQueue = true;
+  try {
+    while (activeDownloads.size < MAX_CONCURRENT_DOWNLOADS && pendingQueue.length > 0) {
+      const nextId = pendingQueue.shift();
+      if (typeof nextId !== 'number') break;
 
-    if (activeDownloads.has(nextId)) {
-      continue;
-    }
+      if (activeDownloads.has(nextId)) {
+        continue;
+      }
 
-    const snapshot = getDownloadSnapshot(nextId);
-    if (!snapshot || !snapshot.downloadLink) {
+      const snapshot = getDownloadSnapshot(nextId);
+      if (!snapshot || !snapshot.downloadLink) {
+        updateDownloadById(nextId, (draft) => {
+          draft.status = 'failed';
+          draft.progress = 0;
+          draft.speed = '';
+          draft.eta = 'Invalid Link';
+          draft.targetPath = undefined;
+        });
+        continue;
+      }
+
+      activeDownloads.add(nextId);
       updateDownloadById(nextId, (draft) => {
-        draft.status = 'failed';
+        draft.status = 'pending';
         draft.progress = 0;
         draft.speed = '';
-        draft.eta = 'Failed';
-        draft.targetPath = undefined;
+        draft.eta = 'Preparing.';
       });
-      continue;
+
+      void performDownload({ ...snapshot });
     }
-
-    activeDownloads.add(nextId);
-    updateDownloadById(nextId, (draft) => {
-      draft.status = 'pending';
-      draft.progress = 0;
-      draft.speed = '';
-      draft.eta = 'Preparing.';
-    });
-
-    void performDownload({ ...snapshot });
+  } finally {
+    processingQueue = false;
   }
 }
 
@@ -325,7 +341,7 @@ async function performDownload(download: Download): Promise<void> {
   try {
     const filePath = await getDownloadPath(download);
     if (!filePath) {
-      throw new Error('Failed to resolve download path');
+      throw new Error('Could not resolve a valid storage path');
     }
 
     if (!activeDownloads.has(download.id)) {
@@ -343,22 +359,33 @@ async function performDownload(download: Download): Promise<void> {
       url: download.downloadLink,
       path: filePath,
     });
+
+    const currentSnap = getDownloadSnapshot(download.id);
+    if (currentSnap && currentSnap.hash && currentSnap.status !== 'available') {
+      updateDownloadById(download.id, (draft) => {
+        draft.eta = 'Verifying...';
+      });
+      const isValid = await invoke<boolean>('verify_hash', { 
+        path: filePath, 
+        expectedHash: currentSnap.hash 
+      });
+      if (!isValid) {
+        throw new Error('Integrity check failed: File hash mismatch');
+      }
+    }
   } catch (error: unknown) {
     if (activeDownloads.has(download.id)) {
-      console.error(`Failed to start download for ${download.name}:`, error);
-      void (async () => {
-        try {
-          await appLog('ERROR', 'Download failed to start: ' + download.name);
-        } catch (innerError) {
-          logIgnoredError('performDownload appLog', innerError);
-        }
-      })();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await appLog('ERROR', `Download failed for ${download.name}: ${errorMessage}`);
+      
       updateDownloadById(download.id, (draft) => {
-        draft.status = 'failed';
-        draft.progress = 0;
-        draft.speed = '';
-        draft.eta = 'Failed';
-        draft.targetPath = undefined;
+        if (draft.status !== 'available') {
+          draft.status = 'failed';
+          draft.progress = 0;
+          draft.speed = '';
+          draft.eta = 'Failed';
+          draft.targetPath = undefined;
+        }
       });
     }
   } finally {
@@ -379,6 +406,27 @@ function finalizeDownload(id: number) {
 export function initDownloadListener() {
   if (progressUnlisten) return;
 
+  void (async () => {
+    try {
+      const dir = await downloadDir();
+      const currentDownloads = get(downloads);
+      const activePaths = currentDownloads
+        .filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued')
+        .map(d => d.targetPath ? d.targetPath + '.part' : null)
+        .filter((p): p is string => !!p);
+      
+      const count = await invoke<number>('cleanup_orphaned_downloads', { 
+        downloadDir: dir, 
+        activePaths 
+      });
+      if (count > 0) {
+        await appLog('INFO', `Cleaned up ${count} orphaned partial download files.`);
+      }
+    } catch (error) {
+      console.warn('Orphaned cleanup failed', error);
+    }
+  })();
+
   progressUnlisten = listen('download-progress', (event) => {
     const { id, downloaded, total } = event.payload as {
       id: number;
@@ -393,7 +441,13 @@ export function initDownloadListener() {
     const now = Date.now();
     const previous = lastSample.get(id);
     const snapshot = getDownloadSnapshot(id);
-    const prevStatus = snapshot?.status ?? 'pending';
+    if (!snapshot) return;
+
+    const prevStatus = snapshot.status;
+    if (prevStatus === 'available' || prevStatus === 'completed' || prevStatus === 'failed') {
+      return;
+    }
+
     const completed = total > 0 && downloaded >= total;
     const newStatus = completed ? 'completed' : 'downloading';
 
@@ -660,8 +714,6 @@ export async function cancelDownload(id: number) {
     }
   }
 
-  releasePath(id);
-
   updateDownloadById(id, (draft) => {
     draft.status = 'available';
     draft.progress = 0;
@@ -671,7 +723,11 @@ export async function cancelDownload(id: number) {
   });
 
   lastSample.delete(id);
-  finalizeDownload(id);
+  
+  if (!wasActive) {
+    finalizeDownload(id);
+  }
+
   void (async () => {
     const snap = getDownloadSnapshot(id);
     if (snap) await appLog('WARN', 'Canceled download: ' + snap.name);
@@ -691,6 +747,12 @@ export function setDownloadRelease(id: number, releaseLabel: string) {
     }
     if (next.fileType) {
       draft.fileType = next.fileType;
+    }
+    if (next.hash) {
+      draft.hash = next.hash;
+    }
+    if (next.installFlags) {
+      draft.installFlags = next.installFlags;
     }
   });
 }

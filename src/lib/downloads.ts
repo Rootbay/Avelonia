@@ -25,7 +25,7 @@ export type NewDownloadEntry = {
 
 function normalizeStoredDownload(download: Download): Download {
   let status = download.status;
-  if (status === 'downloading' || status === 'pending' || status === 'queued') {
+  if (status === 'downloading' || status === 'pending' || status === 'queued' || status === 'failed') {
     status = 'available';
   }
   return { ...download, status };
@@ -77,7 +77,6 @@ async function syncBuiltInDownloads(builtIn: Download[]) {
   downloads.update((current) => {
     let hasChange = false;
     const next = current.map((item) => {
-      // Only sync built-in downloads (typically IDs < 100)
       if (item.id >= 100) return item;
 
       const match = builtIn.find((b) => b.name === item.name);
