@@ -182,10 +182,11 @@
   function resolveCleanerItems(value: CleanerItem[] | (() => CleanerItem[])) {
     return typeof value === 'function' ? (value as () => CleanerItem[])() : value;
   }
-  let unifiedCap = $state(3000);
-  const UNIFIED_BUILD_STEP = 2000;
+  // Increased cap to 500k to allow all items (virtual scrolling handles performance)
+  let unifiedCap = $state(500000);
+  const UNIFIED_BUILD_STEP = 5000;
   const allItems = $derived.by<CleanerItem[]>(() => {
-    const cap = Math.max(500, unifiedCap);
+    const cap = unifiedCap;
     const items: CleanerItem[] = [];
     const seen = new SvelteSet<string>();
     const term = qDeb.trim().toLowerCase();
@@ -200,50 +201,36 @@
     }
     for (const f of tempFiles) {
       tryPush({ path: f.path, size: f.size, kind: 'temp' });
-      if (items.length >= cap) return items;
+      if (items.length >= cap) break;
     }
     for (const f of largeFiles) {
       tryPush({ path: f.path, size: f.size, kind: 'large' });
-      if (items.length >= cap) return items;
+      if (items.length >= cap) break;
     }
     for (const f of duplicateFiles) {
       tryPush({ path: f.path, size: f.size, kind: 'duplicate' });
-      if (items.length >= cap) return items;
+      if (items.length >= cap) break;
     }
     for (const f of emptyFolders) {
       tryPush({ path: f.path, size: f.size, kind: 'empty' });
-      if (items.length >= cap) return items;
+      if (items.length >= cap) break;
     }
     for (const f of brokenShortcuts) {
       tryPush({ path: f.path, size: f.size, kind: 'shortcut' });
-      if (items.length >= cap) return items;
+      if (items.length >= cap) break;
     }
     if (dupGroups.length > 0) {
       for (const g of dupGroups) {
         for (const p of g.files) {
           tryPush({ path: p, size: g.size, kind: 'duplicate', groupId: g.hash });
-          if (items.length >= cap) return items;
+          if (items.length >= cap) break;
         }
       }
     }
-    return items;
-  });
-
-  let allItemsList = $state<CleanerItem[]>([]);
-  $effect(() => {
-    allItemsList = resolveCleanerItems(allItems);
-  });
-  const getAllItemsList = () => allItemsList;
-
-  $effect(() => {
-    const _fk = filterKind;
-    const _q = qDeb;
-    const _exc = exclusions.length;
-    unifiedCap = 3000;
-  });
-
-  const selectedCount = $derived(selectedPaths.size);
-  const selectedSize = $derived.by(() => {
+        return items;
+      });
+    
+      const selectedCount = $derived(selectedPaths.size);  const selectedSize = $derived.by(() => {
     let sum = 0;
     const s = selectedPaths;
     for (const it of getAllItemsList()) {
@@ -274,7 +261,8 @@
         }
       } catch { /* noop */ }
 
-      const take = tempQueue.splice(0, Math.min(scanning ? 80 : 400, tempQueue.length));
+      // Increased batch size significantly to handle fast backend
+      const take = tempQueue.splice(0, Math.min(2500, tempQueue.length));
       const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
       if (next.length) {
         const remaining = Math.max(0, MAX_TEMP_ITEMS - tempFiles.length);
@@ -310,7 +298,7 @@
           return;
         }
       } catch { /* noop */ }
-      const take = largeQueue.splice(0, Math.min(800, largeQueue.length));
+      const take = largeQueue.splice(0, Math.min(2500, largeQueue.length));
       const next = take.map(([p, s]) => ({ path: p, size: s }));
       if (next.length) largeFiles = [...largeFiles, ...next];
       if (largeQueue.length > 0) scheduleLargeFlush();
@@ -336,7 +324,7 @@
           return;
         }
       } catch { /* noop */ }
-      const take = dupGroupsQueue.splice(0, Math.min(60, dupGroupsQueue.length));
+      const take = dupGroupsQueue.splice(0, Math.min(500, dupGroupsQueue.length));
       if (take.length) {
         dupGroups = [...dupGroups, ...take];
         const flat = take.flatMap((g) =>
@@ -367,7 +355,7 @@
           return;
         }
       } catch { /* noop */ }
-      const take = emptyQueue.splice(0, Math.min(1200, emptyQueue.length));
+      const take = emptyQueue.splice(0, Math.min(2500, emptyQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) emptyFolders = [...emptyFolders, ...next];
       if (emptyQueue.length > 0) scheduleEmptyFlush();
@@ -393,7 +381,7 @@
           return;
         }
       } catch { /* noop */ }
-      const take = shortcutQueue.splice(0, Math.min(1200, shortcutQueue.length));
+      const take = shortcutQueue.splice(0, Math.min(2500, shortcutQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) brokenShortcuts = [...brokenShortcuts, ...next];
       if (shortcutQueue.length > 0) scheduleShortcutFlush();
@@ -432,6 +420,7 @@
   });
 
   let unifiedDisplayList = $state<CleanerItem[]>([]);
+  const getAllItemsList = () => allItems;
   $effect(() => {
     unifiedDisplayList = resolveCleanerItems(unifiedDisplayed);
   });

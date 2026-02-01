@@ -33,6 +33,7 @@ pub struct ScheduledTask {
     pub task_to_run: String,
     pub author: String,
     pub is_sus: bool,
+    pub score: i32,
 }
 
 #[derive(Serialize, Clone)]
@@ -189,6 +190,111 @@ pub fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, String> {
     Ok(items)
 }
 
+fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i32) {
+    // === Sus-Analyzer 2.0: Score-Based System ===
+    
+    let cmd = task_to_run.to_lowercase().replace('"', "").trim().to_string();
+    let auth = author.to_lowercase().trim().to_string();
+    let tname = name.to_lowercase().trim().to_string();
+    
+    let mut score = 0;
+
+    // --- STEP 1: CRITICAL TRUST (Immediate Pass) ---
+    
+    // Trusted Authors (Whitelist)
+    let trusted_authors = [
+        "microsoft", "google", "mozilla", "adobe", "nvidia", "intel", "amd", 
+        "hp", "dell", "lenovo", "asus", "acer", "logitech", "razer", "corsair", 
+        "dropbox", "valve", "epic games", "discord", "spotify", "oracle",
+    ];
+    if trusted_authors.iter().any(|&a| auth.contains(a)) {
+        score -= 1000;
+    }
+
+    // Trusted Task Names (Whitelist)
+    let trusted_names = [
+        "onedrive", "edgeupdate", "googleupdate", "firefox", "adobe", 
+        "geforce", "visual studio", "vscode", "teams", "office", "xbox",
+    ];
+    if trusted_names.iter().any(|&n| tname.contains(n)) {
+        score -= 800;
+    }
+
+    // Trusted Paths (Whitelist)
+    let safe_paths = [
+        "\\program files\\",
+        "\\program files (x86)\\",
+        "\\windows\\system32\\",
+        "\\windows\\syswow64\\",
+        "\\microsoft\\onedrive\\",
+        "\\microsoft\\teams\\",
+        "\\microsoft\\edge\\",
+        "\\google\\chrome\\",
+    ];
+    if safe_paths.iter().any(|&p| cmd.contains(p)) {
+        score -= 500;
+    }
+
+    // --- STEP 2: CRITICAL DANGER (Immediate Fail or High Points) ---
+
+    // Encoded Commands
+    if cmd.contains(" -enc ") || cmd.contains(" -encodedcommand ") || cmd.contains("/b64") {
+        score += 1500; 
+    }
+
+    // Dangerous Interpreters
+    let dangerous_bins = ["wscript", "cscript", "mshta", "regsvr32", "rundll32", "bitsadmin", "certutil", "nc.exe"];
+    if dangerous_bins.iter().any(|&b| cmd.contains(b)) {
+        score += 800;
+    }
+
+    // --- STEP 3: HEURISTIC INDICATORS ---
+
+    // Powershell Usage
+    if cmd.contains("powershell") || cmd.contains("pwsh") {
+        score += 50; 
+        if cmd.contains("-w hidden") || cmd.contains("-windowstyle hidden") || cmd.contains("-noninteractive") {
+            score += 200;
+        }
+        if cmd.contains("downloadstring") || cmd.contains("webrequest") || cmd.contains("iwr") {
+            score += 300;
+        }
+    }
+
+    if cmd.contains("cmd.exe /c") || cmd.contains("cmd /c") {
+        score += 50;
+    }
+
+    if cmd.contains("http://") || cmd.contains("https://") {
+        score += 100;
+    }
+
+    // Suspicious Locations
+    let in_temp = cmd.contains("\\temp\\") || cmd.contains("%temp%");
+    let in_appdata = cmd.contains("\\appdata\\") || cmd.contains("%appdata%") || cmd.contains("%localappdata%");
+    let in_user_root = cmd.contains("\\users\\") && !in_appdata && !cmd.contains("\\documents\\") && !cmd.contains("\\desktop\\");
+
+    if in_temp {
+        score += 400;
+    }
+    
+    // Scripts in User Profile
+    if (cmd.ends_with(".js") || cmd.ends_with(".vbs") || cmd.ends_with(".bat") || cmd.ends_with(".ps1")) 
+        && (cmd.contains("\\users\\") || cmd.contains("%userprofile%"))
+    {
+        if in_appdata { score += 100; }
+        if in_user_root { score += 300; }
+        if in_temp { score += 500; }
+    }
+
+    // Special override for OneDrive which lives in AppData but is safe
+    if cmd.contains("\\microsoft\\onedrive\\") {
+        score = -1500;
+    }
+
+    (score > 200, score)
+}
+
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
@@ -213,28 +319,19 @@ pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
                 if let Ok(list) = parsed {
                     for p in list {
                         let task_to_run = p.task_to_run.unwrap_or_default();
-                        let cmd_lower = task_to_run.to_lowercase();
-                        let is_sus = cmd_lower.contains("powershell")
-                            || cmd_lower.contains("wscript")
-                            || cmd_lower.contains("cscript")
-                            || cmd_lower.contains("mshta")
-                            || cmd_lower.contains("regsvr32")
-                            || cmd_lower.contains("rundll32")
-                            || cmd_lower.contains("cmd.exe /c")
-                            || cmd_lower.contains("/b64")
-                            || cmd_lower.contains(" -enc ")
-                            || cmd_lower.contains("%temp%")
-                            || cmd_lower.contains("appdata")
-                            || cmd_lower.contains("http://")
-                            || cmd_lower.contains("https://");
+                        let name = p.name.unwrap_or_default();
+                        let author = p.author.unwrap_or_default();
+                        
+                        let (is_sus, score) = check_if_task_is_sus(&name, &task_to_run, &author);
 
                         tasks.push(ScheduledTask {
-                            name: p.name.unwrap_or_default(),
+                            name,
                             next_run_time: p.next_run_time.unwrap_or_default(),
                             status: p.status.unwrap_or_default(),
                             task_to_run,
-                            author: p.author.unwrap_or_default(),
+                            author,
                             is_sus,
+                            score,
                         });
                     }
                 }
@@ -350,20 +447,7 @@ pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
                 .unwrap_or("")
                 .to_string();
 
-            let cmd_lower = task_to_run.to_lowercase();
-            let is_sus = cmd_lower.contains("powershell")
-                || cmd_lower.contains("wscript")
-                || cmd_lower.contains("cscript")
-                || cmd_lower.contains("mshta")
-                || cmd_lower.contains("regsvr32")
-                || cmd_lower.contains("rundll32")
-                || cmd_lower.contains("cmd.exe /c")
-                || cmd_lower.contains("/b64")
-                || cmd_lower.contains(" -enc ")
-                || cmd_lower.contains("%temp%")
-                || cmd_lower.contains("appdata")
-                || cmd_lower.contains("http://")
-                || cmd_lower.contains("https://");
+            let (is_sus, score) = check_if_task_is_sus(&name, &task_to_run, &author);
 
             tasks.push(ScheduledTask {
                 name,
@@ -372,6 +456,7 @@ pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
                 task_to_run,
                 author,
                 is_sus,
+                score,
             });
         }
     }
@@ -459,6 +544,7 @@ pub fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, String> {
                 task_to_run: String::new(),
                 author: String::new(),
                 is_sus: false,
+                score: 0,
             });
         }
     }
@@ -541,20 +627,10 @@ pub fn list_suspicious_tasks() -> Result<Vec<String>, String> {
                 continue;
             }
             let task_to_run = idx_run_opt.and_then(|i| rec.get(i)).unwrap_or("");
-            let cmd_lower = task_to_run.to_lowercase();
-            let sus = cmd_lower.contains("powershell")
-                || cmd_lower.contains("wscript")
-                || cmd_lower.contains("cscript")
-                || cmd_lower.contains("mshta")
-                || cmd_lower.contains("regsvr32")
-                || cmd_lower.contains("rundll32")
-                || cmd_lower.contains("cmd.exe /c")
-                || cmd_lower.contains("/b64")
-                || cmd_lower.contains(" -enc ")
-                || cmd_lower.contains("%temp%")
-                || cmd_lower.contains("appdata")
-                || cmd_lower.contains("http://")
-                || cmd_lower.contains("https://");
+            let author = ""; // schtasks /V might have author but let's keep it simple or expand if needed
+            
+            let (sus, _score) = check_if_task_is_sus(&name, task_to_run, author);
+            
             if sus {
                 out.push(name);
             }
@@ -792,7 +868,7 @@ pub fn end_scheduled_tasks(_names: Vec<String>) -> Result<OpResult, String> {
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn get_task_details(task_name: String) -> Result<(String, String), String> {
+pub fn get_task_details(task_name: String) -> Result<(String, String, bool, i32), String> {
     let tn = task_name.replace('"', "\"\"");
     let cmdline = format!("chcp 65001>nul & schtasks /Query /V /FO CSV /TN \"{}\"", tn);
     let output = Command::new("cmd")
@@ -802,7 +878,7 @@ pub fn get_task_details(task_name: String) -> Result<(String, String), String> {
 
     let stdout_bytes = output.stdout;
     if stdout_bytes.is_empty() {
-        return Ok((String::new(), String::new()));
+        return Ok((String::new(), String::new(), false, 0));
     }
 
     let first_line_end = stdout_bytes
@@ -863,16 +939,18 @@ pub fn get_task_details(task_name: String) -> Result<(String, String), String> {
                 .and_then(|i| rec.get(i))
                 .unwrap_or("")
                 .to_string();
-            return Ok((task_to_run, author));
+            
+            let (is_sus, score) = check_if_task_is_sus(&task_name, &task_to_run, &author);
+            return Ok((task_to_run, author, is_sus, score));
         }
     }
 
-    Ok((String::new(), String::new()))
+    Ok((String::new(), String::new(), false, 0))
 }
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn get_task_details(_task_name: String) -> Result<(String, String), String> {
+pub fn get_task_details(_task_name: String) -> Result<(String, String, bool, i32), String> {
     Err("get_task_details is only implemented on Windows".into())
 }
 
@@ -888,12 +966,24 @@ pub fn get_startup_folders() -> Result<Vec<String>, String> {
     if let Some(appdata) = env::var_os("APPDATA") {
         let user_startup =
             PathBuf::from(appdata).join("Microsoft/Windows/Start Menu/Programs/Startup");
-        out.push(user_startup.display().to_string());
+        if user_startup.exists() && user_startup.is_dir() {
+            out.push(user_startup.display().to_string());
+        }
     }
     if let Some(programdata) = env::var_os("PROGRAMDATA") {
         let all_startup =
-            PathBuf::from(programdata).join("Microsoft/Windows/Start Menu/Programs/StartUp");
-        out.push(all_startup.display().to_string());
+            PathBuf::from(programdata.clone()).join("Microsoft/Windows/Start Menu/Programs/StartUp"); // Note: "StartUp" vs "Startup" check casing
+        // Windows is case-insensitive but let's be consistent. "Startup" is standard.
+        // Actually, let's just check if it exists.
+        if all_startup.exists() && all_startup.is_dir() {
+             out.push(all_startup.display().to_string());
+        } else {
+             // Fallback for casing
+             let alt = PathBuf::from(programdata).join("Microsoft/Windows/Start Menu/Programs/Startup");
+             if alt.exists() && alt.is_dir() {
+                 out.push(alt.display().to_string());
+             }
+        }
     }
     Ok(out)
 }

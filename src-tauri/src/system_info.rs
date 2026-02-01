@@ -5,9 +5,9 @@ use sysinfo::System;
 #[tauri::command]
 pub fn get_cpu_usage() -> Result<f32, String> {
     let mut system = System::new();
-    system.refresh_all();
-    thread::sleep(Duration::from_millis(500));
-    system.refresh_all();
+    system.refresh_cpu_all();
+    thread::sleep(Duration::from_millis(200));
+    system.refresh_cpu_all();
     Ok(system.global_cpu_usage())
 }
 

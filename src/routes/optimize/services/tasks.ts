@@ -7,6 +7,7 @@ export type ScheduledTask = {
   task_to_run: string;
   author: string;
   is_sus: boolean;
+  score: number;
 };
 
 export type TaskAction = 'disable' | 'enable' | 'delete' | 'run' | 'end' | '';
@@ -23,13 +24,13 @@ export async function listSuspiciousTasks(): Promise<string[]> {
 
 export async function getTaskDetails(
   taskName: string
-): Promise<[string, string] | { task_to_run?: string; author?: string }> {
-  return (await invoke('get_task_details', { task_name: taskName })) as
-    | [string, string]
-    | {
-        task_to_run?: string;
-        author?: string;
-      };
+): Promise<[string, string, boolean, number]> {
+  return (await invoke('get_task_details', { task_name: taskName })) as [
+    string,
+    string,
+    boolean,
+    number,
+  ];
 }
 
 export async function executeTaskAction(action: TaskAction, names: string[]): Promise<any> {
