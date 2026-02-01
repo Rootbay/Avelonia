@@ -676,22 +676,10 @@
     enrichInFlight += 1;
     try {
       const result = await getTaskDetails(name);
-      let task_to_run = '';
-      let author = '';
-      if (Array.isArray(result)) {
-        task_to_run = result[0] ?? '';
-        author = result[1] ?? '';
-      } else if (result && typeof result === 'object') {
-        task_to_run = result.task_to_run ?? '';
-        author = result.author ?? '';
-      }
-      const baseSus = isCommandSuspicious(task_to_run);
-      let finalSus = baseSus;
-      if (!includeMicrosoftInSus && isUnderMicrosoft(name)) {
-        finalSus = isHardCommandSuspicious(task_to_run);
-      }
+      const [task_to_run, author, is_sus, score] = result;
+      
       tasks = tasks.map((t) =>
-        t.name === name ? { ...t, task_to_run, author, is_sus: finalSus } : t
+        t.name === name ? { ...t, task_to_run, author, is_sus, score } : t
       );
     } catch (e) {
       // ignore
@@ -765,18 +753,9 @@
     try {
       const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
+      console.log("[Optimize] Tasks loaded with scores:", $state.snapshot(tasks));
       tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
-      try {
-        const susNames = await listSuspiciousTasks();
-        if (Array.isArray(susNames) && susNames.length) {
-          const initial = includeMicrosoftInSus
-            ? susNames
-            : susNames.filter((nm) => !isUnderMicrosoft(nm));
-          const susSet = new Set(initial);
-          tasks = tasks.map((t) => (susSet.has(t.name) ? { ...t, is_sus: true } : t));
-        }
-      } catch { /* noop */ }
       queueEnrichVisibleTasks(12);
     } catch (e) {
       console.error(e);
@@ -1799,8 +1778,15 @@
                               <Badge
                                 variant="outline"
                                 class="text-[10px] border-red-500/30 text-red-600 bg-red-500/10"
-                                >SUS</Badge
-                            >{/if}
+                                >SUS ({t.score})</Badge
+                              >
+                            {:else if t.score !== undefined}
+                              <Badge
+                                variant="outline"
+                                class="text-[10px] opacity-60"
+                                >{t.score}</Badge
+                              >
+                            {/if}
                           </div>
                           <div
                             class="mt-1 text-xs text-muted-foreground font-mono truncate max-w-[80ch]"

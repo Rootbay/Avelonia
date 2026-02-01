@@ -196,15 +196,25 @@
   async function openStartupFolders() {
     try {
       const folders: string[] = await invoke('get_startup_folders');
+      if (!folders || folders.length === 0) {
+          toast.info("No startup folders found.");
+          return;
+      }
       for (const folder of folders) {
         try {
+          // openPath works for directories on Windows (opens Explorer)
           await openPath(folder);
-        } catch {
-          /* noop */
+          // Tiny delay to ensure Explorer handles multiple requests
+          await new Promise(r => setTimeout(r, 200));
+        } catch (err) {
+          console.error("Failed to open folder:", folder, err);
+          // Fallback: try revealItemInDir (which opens parent, but better than nothing)
+          try { await revealItemInDir(folder); } catch {}
         }
       }
     } catch (e) {
       console.error(e);
+      toast.error("Failed to list startup folders");
     }
   }
 

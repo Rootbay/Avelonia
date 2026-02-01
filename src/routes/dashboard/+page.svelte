@@ -179,11 +179,13 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
       }
     };
 
-    fetchData();
+    // Delay initial fetch slightly to prevent navigation stutter
+    const initialTimer = setTimeout(fetchData, 600);
     const intervalId = setInterval(fetchData, 5000);
 
     return () => {
       fetchAbort = true;
+      clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
   });
@@ -454,14 +456,11 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   }
 
   onMount(() => {
-    const t = setTimeout(() => (initialLogLoading = false), 350);
-    return () => clearTimeout(t);
-  });
-
-  onMount(() => {
-    requestAnimationFrame(() => {
+    const t = setTimeout(() => {
+      initialLogLoading = false;
       logsReady = true;
-    });
+    }, 800);
+    return () => clearTimeout(t);
   });
 
   onMount(() => {
