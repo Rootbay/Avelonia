@@ -1,6 +1,11 @@
 <script lang="ts">
-  import { downloads, removeDownloadsByIds } from '$lib/downloads';
-  import { startDownload, cancelDownload, getDownloadPath } from '$lib/downloadManager';
+  import { downloads } from '$lib/downloads';
+  import {
+    cancelAndRemoveDownloads,
+    cancelDownload,
+    getDownloadPath,
+    startDownload,
+  } from '$lib/downloadManager';
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -251,10 +256,7 @@
         break;
       case 'deleteFiltered': {
         const filteredIds = filteredDownloads.map((d) => d.id);
-        filteredDownloads
-          .filter((d) => ['downloading', 'pending', 'queued'].includes(d.status))
-          .forEach((d) => cancelDownload(d.id));
-        removeDownloadsByIds(filteredIds);
+        cancelAndRemoveDownloads(filteredIds);
         selectedIds.clear();
         break;
       }
@@ -270,10 +272,7 @@
         break;
       case 'deleteSelected': {
         const ids = Array.from(selectedIds);
-        selected
-          .filter((d) => ['downloading', 'pending', 'queued'].includes(d.status))
-          .forEach((d) => cancelDownload(d.id));
-        removeDownloadsByIds(ids);
+        cancelAndRemoveDownloads(ids);
         selectedIds.clear();
         break;
       }

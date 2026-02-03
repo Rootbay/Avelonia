@@ -246,7 +246,10 @@ pub async fn download_file(
     let mut last_err = AppError::Internal("Unknown error".to_string());
     for attempt in 1..=3 {
         match download_file_inner(&app, id, &url, &path, &state).await {
-            Ok(_) => return Ok(()),
+            Ok(_) => {
+                state.0.remove(&id);
+                return Ok(());
+            }
             Err(e) => {
                 last_err = e;
                 if state.0.get(&id).map_or(false, |r| *r) {

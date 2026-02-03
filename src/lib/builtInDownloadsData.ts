@@ -988,7 +988,6 @@ export const SYSTEM_DOWNLOADS: Download[] = [
     category: 'System',
     tags: ['Search', 'Tools'],
     downloadLink: 'https://www.voidtools.com/Everything-1.4.1.1075.x64-Setup.exe',
-    hash: '0000000000000000000000000000000000000000000000000000000000000000',
     eta: 'N/A',
     status: 'available',
     progress: 0,

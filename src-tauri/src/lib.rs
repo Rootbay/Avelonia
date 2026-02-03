@@ -9,6 +9,7 @@ mod vt;
 mod paths;
 mod error;
 mod downloads;
+mod settings;
 
 pub use error::AppError;
 pub use downloads::DownloadState;
@@ -163,7 +164,10 @@ pub fn run() {
             vt::vt_scan_registry,
             vt::vt_scan_all,
             vt::vt_scan_needed,
-            vt::vt_auto_maybe_scan
+            vt::vt_auto_maybe_scan,
+            settings::settings_location,
+            settings::settings_read,
+            settings::settings_write
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

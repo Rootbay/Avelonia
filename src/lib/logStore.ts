@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+﻿import { writable } from 'svelte/store';
 
 export type LogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
 export type LogCategory = 'General' | 'Downloader' | 'Cleaner' | 'Optimize' | 'System';
@@ -152,3 +152,5 @@ export function clearLogs() {
     logStorageError('clear', error);
   }
 }
+
+

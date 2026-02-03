@@ -45,7 +45,7 @@
   <SheetContent side="right" class="w-85 sm:w-95 p-4 sm:p-6">
     <SheetHeader class="space-y-1 p-0">
       <SheetTitle>Beta options</SheetTitle>
-      <SheetDescription>Defaults for postâ€‘download behavior.</SheetDescription>
+      <SheetDescription>Defaults for post-download behavior.</SheetDescription>
     </SheetHeader>
     <div class="mt-3 space-y-6 text-sm">
       <div class="space-y-2">

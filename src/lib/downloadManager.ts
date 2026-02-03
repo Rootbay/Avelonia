@@ -1,5 +1,5 @@
-import { get } from 'svelte/store';
-import { downloads } from './downloads';
+﻿import { get } from 'svelte/store';
+import { downloads, removeDownloadsByIds } from './downloads';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { downloadDir, join } from '@tauri-apps/api/path';
@@ -62,7 +62,6 @@ let processingQueue = false;
 const reservedPaths = new Set<string>();
 const downloadPathReservations = new Map<number, string>();
 const usedPaths = new Set<string>();
-let usedPathsSeeded = false;
 const autoInstallTried = new Set<number>();
 const installQueue: number[] = [];
 let installBusy = false;
@@ -237,14 +236,16 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
   }
 }
 
-function seedUsedPaths() {
-  if (usedPathsSeeded) return;
-  for (const entry of get(downloads)) {
+function syncUsedPaths(list: Download[]) {
+  usedPaths.clear();
+  for (const entry of list) {
     if (entry.targetPath) {
       usedPaths.add(entry.targetPath);
     }
   }
-  usedPathsSeeded = true;
+  for (const reserved of reservedPaths) {
+    usedPaths.add(reserved);
+  }
 }
 
 function reservePath(id: number, path: string) {
@@ -257,6 +258,7 @@ function releasePath(id: number) {
   const reserved = downloadPathReservations.get(id);
   if (reserved) {
     reservedPaths.delete(reserved);
+    usedPaths.delete(reserved);
     downloadPathReservations.delete(id);
   }
 }
@@ -604,8 +606,6 @@ export function stopInstallPresenceWatch() {
 
 export async function getDownloadPath(dl: Download): Promise<string | null> {
   try {
-    seedUsedPaths();
-
     const downloadsPath = await downloadDir();
     if (!downloadsPath) {
       return null;
@@ -652,8 +652,6 @@ export async function getDownloadPath(dl: Download): Promise<string | null> {
 }
 
 export function startDownload(id: number) {
-  seedUsedPaths();
-
   const snapshot = getDownloadSnapshot(id);
   if (!snapshot || !snapshot.downloadLink) {
     return;
@@ -686,7 +684,6 @@ export function startDownload(id: number) {
     draft.progress = 0;
     draft.speed = '';
     draft.eta = 'Preparing.';
-    draft.targetPath = undefined;
   });
 
   void (async () => {
@@ -720,7 +717,6 @@ export async function cancelDownload(id: number) {
     draft.progress = 0;
     draft.speed = '';
     draft.eta = 'N/A';
-    draft.targetPath = undefined;
   });
 
   lastSample.delete(id);
@@ -733,6 +729,16 @@ export async function cancelDownload(id: number) {
     const snap = getDownloadSnapshot(id);
     if (snap) await appLog('WARN', 'Canceled download: ' + snap.name);
   })();
+}
+
+export function cancelAndRemoveDownloads(ids: number[]) {
+  const idSet = new Set(ids);
+  const list = get(downloads);
+  list
+    .filter((d) => idSet.has(d.id))
+    .filter((d) => ['downloading', 'pending', 'queued'].includes(d.status))
+    .forEach((d) => cancelDownload(d.id));
+  removeDownloadsByIds(ids);
 }
 
 export function setDownloadRelease(id: number, releaseLabel: string) {
@@ -757,3 +763,9 @@ export function setDownloadRelease(id: number, releaseLabel: string) {
     }
   });
 }
+
+downloads.subscribe((list) => {
+  syncUsedPaths(list);
+});
+
+
