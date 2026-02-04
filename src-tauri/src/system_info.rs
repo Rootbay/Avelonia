@@ -20,19 +20,19 @@ impl SystemState {
 
 #[tauri::command]
 pub fn get_cpu_usage(state: State<'_, Arc<SystemState>>) -> f32 {
-    *state.cpu_usage.lock().unwrap()
+    *state.cpu_usage.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[tauri::command]
 pub fn get_memory_usage(state: State<'_, Arc<SystemState>>) -> u64 {
-    let mut sys = state.sys.lock().unwrap();
+    let mut sys = state.sys.lock().unwrap_or_else(|e| e.into_inner());
     sys.refresh_memory();
     sys.used_memory()
 }
 
 #[tauri::command]
 pub fn get_total_memory(state: State<'_, Arc<SystemState>>) -> u64 {
-    let mut sys = state.sys.lock().unwrap();
+    let mut sys = state.sys.lock().unwrap_or_else(|e| e.into_inner());
     sys.refresh_memory();
     sys.total_memory()
 }

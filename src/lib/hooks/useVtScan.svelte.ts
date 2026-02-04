@@ -27,7 +27,6 @@ export function useVtScan() {
         'Optimize'
       );
     } catch (e) {
-      console.error(e);
       toast.error('VirusTotal scan failed (set API key?)');
       pushLog('ERROR', `VT scan failed (manual): ${String(e)}`, 'Optimize');
     } finally {
@@ -141,8 +140,10 @@ export function useVtScan() {
       }
       unlistenFns.push(unAlert);
 
-      const unReport = await listen<any>('vt-report', (ev) => {
-        const rep = ev.payload as import('$lib/vtVerdicts.svelte').VtReport;
+      const unReport = await listen<import('$lib/vtVerdicts.svelte').VtReport>(
+        'vt-report',
+        (ev) => {
+          const rep = ev.payload;
         try {
           setVerdictFromReport(rep);
           pushScanReport(rep);
@@ -152,7 +153,8 @@ export function useVtScan() {
         } catch {
           /* noop */
         }
-      });
+        }
+      );
       if (destroyed) {
         unReport();
         return;

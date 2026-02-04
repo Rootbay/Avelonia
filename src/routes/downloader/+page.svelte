@@ -28,6 +28,7 @@
   import BulkActionsSheet from '$lib/components/downloader/BulkActionsSheet.svelte';
   import DownloaderOptionsSheet from '$lib/components/downloader/DownloaderOptionsSheet.svelte';
   import DownloadsTable from '$lib/components/downloader/DownloadsTable.svelte';
+  import type { Download } from '$lib/downloadManager';
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
@@ -50,7 +51,8 @@
 
   type StatusGroup = 'all' | 'available' | 'active' | 'completed' | 'failed';
   let statusGroup = $state<StatusGroup>('all');
-  let sortBy = $state<string>('name');
+  type SortKey = 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
+  let sortBy = $state<SortKey>('name');
   let sortDirection = $state<'asc' | 'desc'>('asc');
   let selectedIds = new SvelteSet<number>();
 
@@ -98,10 +100,11 @@
     pending: 2,
     queued: 3,
     downloading: 4,
-    paused: 5,
-    completed: 6,
-    installed: 6,
-    failed: 7,
+    verifying: 5,
+    paused: 6,
+    completed: 7,
+    installed: 7,
+    failed: 8,
   };
 
   const filteredDownloads = $derived(
@@ -138,7 +141,7 @@
             case 'failed':
               return download.status === 'failed';
             case 'active':
-              return ['downloading', 'pending', 'queued'].includes(download.status);
+              return ['downloading', 'pending', 'queued', 'verifying'].includes(download.status);
             default:
               return true;
           }
@@ -155,8 +158,8 @@
         );
       })
       .sort((a, b) => {
-        let valA = (a as Record<string, any>)[sortBy];
-        let valB = (b as Record<string, any>)[sortBy];
+        let valA: Download[SortKey] | string | number | undefined = a[sortBy];
+        let valB: Download[SortKey] | string | number | undefined = b[sortBy];
         if (sortBy === 'size') {
           valA = toBytes(valA);
           valB = toBytes(valB);
@@ -182,9 +185,9 @@
       cancelable = 0;
     for (const d of list) {
       if (d.status === 'available' && d.downloadLink) startable++;
-      if (['downloading', 'pending', 'queued'].includes(d.status)) {
+      if (['downloading', 'pending', 'queued', 'verifying'].includes(d.status)) {
         active++;
-        cancelable++;
+        if (d.status !== 'verifying') cancelable++;
       }
       if (d.status === 'completed') completed++;
       if (d.status === 'failed') failed++;

@@ -79,7 +79,11 @@
 
   const activeCount = $derived(
     $downloads.filter(
-      (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+      (d) =>
+        d.status === 'downloading' ||
+        d.status === 'pending' ||
+        d.status === 'queued' ||
+        d.status === 'verifying'
     ).length
   );
 

@@ -28,7 +28,8 @@ function nowTs(): string {
 }
 
 function logStorageError(context: string, error: unknown) {
-  console.warn(`[LogStore:${context}]`, error);
+  void context;
+  void error;
 }
 
 function load(): LogEntry[] {

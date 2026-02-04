@@ -1,3 +1,5 @@
+import { pushLog } from '$lib/logStore';
+
 export type FileEntry = { path: string; size?: number };
 export type DuplicateGroup = { hash: string; size: number; files: string[] };
 
@@ -31,7 +33,7 @@ export function loadCleanerCache(): CleanerCache | null {
       timestamp: Number(parsed.timestamp) || Date.now(),
     } as CleanerCache;
   } catch (error) {
-    console.warn('[CleanerCache] unable to load cache', error);
+    pushLog('WARN', `Cleaner cache load failed: ${String(error)}`, 'Cleaner');
     return null;
   }
 }
@@ -41,6 +43,6 @@ export function saveCleanerCache(cache: CleanerCache): void {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
   } catch (error) {
-    console.warn('[CleanerCache] unable to persist cache', error);
+    pushLog('WARN', `Cleaner cache persist failed: ${String(error)}`, 'Cleaner');
   }
 }

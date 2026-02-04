@@ -72,7 +72,7 @@
   } from './services/registry';
   import type { StartupRegItem, CleanupDiagnostics, RegistryAttempt } from './services/registry';
   import { listScheduledTasks, getTaskDetails, executeTaskAction } from './services/tasks';
-  import type { ScheduledTask, TaskAction } from './services/tasks';
+  import type { ScheduledTask, TaskAction, TaskActionResult } from './services/tasks';
   import {
     NETWORK_PRESETS,
     flushDns as flushDnsCommand,
@@ -110,7 +110,6 @@
   let registryPurgeStartupApproved = $state(false);
   let registryDeleteTasksByMatch = $state(false);
   let registryRemoveWMIByMatch = $state(false);
-  let registryUserRebooted = $state(false);
   let showPostCleanup = $state(false);
   let postDiagLoading = $state(false);
   let postDiag: CleanupDiagnostics | null = $state(null);
@@ -156,6 +155,8 @@
 
   $effect(() => {
     const _p = regPreset;
+    void regHasExeImage;
+    void regHasExePath;
     applyRegPreset(_p);
   });
 
@@ -211,7 +212,6 @@
     registryPurgeStartupApproved = false;
     registryDeleteTasksByMatch = false;
     registryRemoveWMIByMatch = false;
-    registryUserRebooted = false;
 
     const ids = pendingRegistry.map(regId);
     const anyRebooted = ids.some((id) => registryHistory[id]?.rebootConfirmed);
@@ -290,18 +290,18 @@
             const n = await disableServices(names);
             if (n > 0) toast.message(`Disabled ${n} related service${n === 1 ? '' : 's'}.`);
           } catch (e) {
-            console.warn('disable_services failed', e);
+            pushLog('WARN', `disable_services failed: ${String(e)}`, 'Optimize');
           }
         }
       } catch (e) {
-        console.warn('list_services failed', e);
+        pushLog('WARN', `list_services failed: ${String(e)}`, 'Optimize');
       }
       if (registryBlockIFEO && images.length) {
         try {
           const n = await blockProcessIfeo(images, true);
           if (n > 0) toast.success(`Blocked ${n} process${n === 1 ? '' : 'es'} via IFEO.`);
         } catch (e) {
-          console.warn('block_process_ifeo failed', e);
+          pushLog('WARN', `block_process_ifeo failed: ${String(e)}`, 'Optimize');
         }
       }
       let dorScheduled = false;
@@ -313,7 +313,7 @@
             dorScheduled = true;
           }
         } catch (e) {
-          console.warn('schedule_delete_on_reboot failed', e);
+          pushLog('WARN', `schedule_delete_on_reboot failed: ${String(e)}`, 'Optimize');
         }
       }
       if (registryPurgeStartupApproved) {
@@ -322,7 +322,7 @@
           const n = await purgeStartupApproved(names);
           if (n > 0) toast.message(`Purged StartupApproved for ${n} entr${n === 1 ? 'y' : 'ies'}.`);
         } catch (e) {
-          console.warn('purge_startup_approved failed', e);
+          pushLog('WARN', `purge_startup_approved failed: ${String(e)}`, 'Optimize');
         }
       }
       if (registryDeleteTasksByMatch && (images.length || paths.length)) {
@@ -330,7 +330,7 @@
           const n = await deleteTasksByMatch(images, paths);
           if (n > 0) toast.message(`Deleted ${n} related scheduled task${n === 1 ? '' : 's'}.`);
         } catch (e) {
-          console.warn('delete_tasks_by_match failed', e);
+          pushLog('WARN', `delete_tasks_by_match failed: ${String(e)}`, 'Optimize');
         }
       }
       if (registryRemoveWMIByMatch && (images.length || paths.length)) {
@@ -338,7 +338,7 @@
           const n = await removeWmiSubscriptionsByMatch(images, paths);
           if (n > 0) toast.message('Removed WMI event subscriptions matching target.');
         } catch (e) {
-          console.warn('remove_wmi_subscriptions_by_match failed', e);
+          pushLog('WARN', `remove_wmi_subscriptions_by_match failed: ${String(e)}`, 'Optimize');
         }
       }
 
@@ -354,12 +354,12 @@
         postDiag = diag;
         showPostCleanup = true;
       } catch (e) {
-        console.warn('post cleanup diagnostics failed', e);
+        pushLog('WARN', `post cleanup diagnostics failed: ${String(e)}`, 'Optimize');
       } finally {
         postDiagLoading = false;
       }
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Cleanup diagnostics failed: ${String(e)}`, 'Optimize');
       message = `Failed to remove registry entries: ${e}`;
       toast.error(message);
     } finally {
@@ -395,7 +395,7 @@
           }) as RegistryAttempt;
           registryHistory[id] = {
             attempts: (prev.attempts ?? 0) + 1,
-            rebootConfirmed: prev.rebootConfirmed || registryUserRebooted,
+            rebootConfirmed: prev.rebootConfirmed || false,
             lastOptions: {
               force: registryForce,
               ifeo: registryBlockIFEO,
@@ -425,7 +425,6 @@
       registryPurgeStartupApproved = false;
       registryDeleteTasksByMatch = false;
       registryRemoveWMIByMatch = false;
-      registryUserRebooted = false;
     }
   }
 
@@ -472,7 +471,7 @@
         toast.success('Removal appears persistent (no reappearance detected).');
       }
     } catch (e) {
-      console.warn('monitorRegistryWatchdog failed', e);
+      pushLog('WARN', `monitorRegistryWatchdog failed: ${String(e)}`, 'Optimize');
     }
   }
 
@@ -480,7 +479,7 @@
     try {
       await navigator.clipboard.writeText(txt);
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Registry scan failed: ${String(e)}`, 'Optimize');
     }
   }
 
@@ -490,20 +489,14 @@
     try {
       const res = await listRegistryRun();
       startupRegItems = Array.isArray(res) ? res : [];
-      try {
-        console.debug(
-          '[VT] registry items loaded:',
-          startupRegItems.length,
-          startupRegItems.map((i) => i.name).slice(0, 10)
-        );
-      } catch {
-        /* noop */
-      }
-      selectedReg = new SvelteSet();
+      pushLog('INFO', `Registry items loaded: ${startupRegItems.length}`, 'Optimize');
+      const keep = new SvelteSet(selectedReg);
+      const ids = new Set(startupRegItems.map(regId));
+      selectedReg = new SvelteSet(Array.from(keep).filter((k) => ids.has(k)));
       registryLoaded = true;
       registryVisible = Math.min(startupRegItems.length, 50);
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Suspicious items scan failed: ${String(e)}`, 'Optimize');
     } finally {
       loadingRegistry = false;
     }
@@ -540,7 +533,7 @@
         registryVisible = Math.min(Math.max(50, registryVisible), startupRegItems.length);
       }
     } catch {
-      /* noop */
+      pushLog('WARN', 'Failed to poll registry items', 'Optimize');
     } finally {
       _registryPollBusy = false;
     }
@@ -577,7 +570,7 @@
         toast.warning(`Detected ${updates} recurring entries after reboot. Marked as suspicious.`);
       }
     } catch (e) {
-      console.warn('scanSuspiciousAfterReboot failed', e);
+      pushLog('WARN', `scanSuspiciousAfterReboot failed: ${String(e)}`, 'Optimize');
     }
   }
   function toggleReg(it: StartupRegItem) {
@@ -630,6 +623,7 @@
   let showTaskConfirm = $state(false);
   let pendingAction = $state<TaskAction>('');
   let pendingNames = $state<string[]>([]);
+  let taskActionLoading = $state(false);
 
   $effect(() => {
     const t = setTimeout(() => (tasksQueryDeb = tasksQuery), 220);
@@ -645,6 +639,10 @@
     }
     enrichInFlight += 1;
     try {
+      const current = tasks.find((t) => t.name === name);
+      if (current && current.task_to_run && current.author) {
+        return;
+      }
       const result = await getTaskDetails(name);
       const [task_to_run, author, is_sus, score] = result;
 
@@ -660,6 +658,8 @@
   }
 
   function queueEnrichVisibleTasks(limit = 10) {
+    const needEnrich = tasks.some((t) => !t.task_to_run || !t.author);
+    if (!needEnrich) return;
     const slice = tasks.slice(0, Math.max(tasksVisible, 200));
     let queued = 0;
     for (const t of slice) {
@@ -682,35 +682,41 @@
       message = 'Select an action and at least one task.';
       return;
     }
+    if (taskActionLoading) return;
+    taskActionLoading = true;
     try {
       const res = await executeTaskAction(taskAction, names);
-      const success = Number((res as any)?.success ?? (res as any) ?? 0);
-      const elevated = Number((res as any)?.elevated ?? 0);
-      const stopped = Number((res as any)?.stopped ?? 0);
+      const normalized: TaskActionResult =
+        typeof res === 'number' ? { success: res } : res ?? {};
+      const success = Number(normalized.success ?? 0);
+      const elevated = Number(normalized.elevated ?? 0);
+      const stopped = Number(normalized.stopped ?? 0);
       let parts: string[] = [`${taskAction} affected ${success} task(s)`];
       if (elevated > 0) parts.push(`used elevation for ${elevated}`);
       if (stopped > 0) parts.push(`stopped ${stopped} before delete`);
       message = parts.join(' · ');
-      const fails = (res as any)?.failures as Array<any> | undefined;
+      const fails = normalized.failures;
       if (Array.isArray(fails) && fails.length) {
         try {
-          console.groupCollapsed(`[tasks] ${taskAction} failures (${fails.length})`);
+          pushLog('WARN', `${taskAction} failures (${fails.length})`, 'Optimize');
           for (const f of fails) {
             const stderr = (f?.stderr || '').trim();
-            const stdout = (f?.stdout || '').trim();
-            if (stderr) console.error(stderr);
-            if (stdout) console.log(stdout);
+            if (stderr) {
+              pushLog('WARN', `Task error: ${stderr}`, 'Optimize');
+            }
           }
-          console.groupEnd();
         } catch {
           // ignore
         }
       }
-      await loadTasks();
+      await reloadTasks();
       selectedTasks = new SvelteSet();
     } catch (e) {
-      console.error(e);
-      message = `Action failed: ${e}`;
+      const msg = `Action failed: ${String(e)}`;
+      pushLog('ERROR', msg, 'Optimize');
+      message = msg;
+    } finally {
+      taskActionLoading = false;
     }
   }
 
@@ -721,14 +727,22 @@
     try {
       const res = await listScheduledTasks();
       tasks = Array.isArray(res) ? res : [];
+      if (selectedTasks.size > 0) {
+        const keep = new Set(tasks.map((t) => t.name));
+        selectedTasks = new SvelteSet(Array.from(selectedTasks).filter((n) => keep.has(n)));
+      }
       tasksLoaded = true;
       tasksVisible = Math.min(tasks.length, 50);
       queueEnrichVisibleTasks(12);
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Failed to load scheduled tasks: ${String(e)}`, 'Optimize');
     } finally {
       loadingTasks = false;
     }
+  }
+  async function reloadTasks() {
+    tasksLoaded = false;
+    await loadTasks();
   }
   function onTasksScroll(event: Event) {
     const target = event.currentTarget as HTMLElement | null;
@@ -755,11 +769,11 @@
 
   const suspectEntries = $derived(
     Object.entries(registryHistory)
-      .filter(([, v]) => !!(v as any)?.suspicious)
+      .filter(([, v]) => !!v?.suspicious)
       .map(([id, v]) => {
         const [hive, key, name] = id.split('|');
-        const reason = (v as any)?.suspiciousReason || 'Reappeared after cleanup';
-        const lastStrategy = (v as any)?.lastStrategy || '';
+        const reason = v?.suspiciousReason || 'Reappeared after cleanup';
+        const lastStrategy = v?.lastStrategy || '';
         return { id, hive, key, name, reason, lastStrategy };
       })
   );
@@ -787,10 +801,17 @@
 
   let showSuspectLog = $state(false);
 
+  function isMicrosoftTask(t: ScheduledTask): boolean {
+    const author = (t.author || '').toLowerCase();
+    const name = (t.name || '').toLowerCase();
+    return author.includes('microsoft') || name.startsWith('\\microsoft\\windows');
+  }
+
   const filteredTasks = $derived(
     tasks.filter((t) => {
       const q = tasksQueryDeb.trim().toLowerCase();
       if (taskFilter === 'sus' && !t.is_sus) return false;
+      if (taskFilter === 'sus' && !includeMicrosoftInSus && isMicrosoftTask(t)) return false;
       const status = (t.status || '').toLowerCase();
       if (!includeDisabled && status.includes('disable')) return false;
       const next = (t.next_run_time || '').trim().toLowerCase();
@@ -907,6 +928,7 @@
   let tracerouteTarget = $state('1.1.1.1');
   let dnsLookupTarget = $state('example.com');
   let networkTestLoading = $state(false);
+  let networkActionLoading = $state(false);
   let networkTestResult = $state('');
   let networkTestLabel = $state('');
 
@@ -935,7 +957,7 @@
       networkSummary = await getNetworkSummary();
       networkSummaryFetchedAt = Date.now();
     } catch (error: unknown) {
-      console.error('network summary failed', error);
+      pushLog('ERROR', `network summary failed: ${String(error)}`, 'Optimize');
       const text = error instanceof Error ? error.message : 'Failed to refresh network summary';
       toast.error(text);
       networkSummary = null;
@@ -945,6 +967,7 @@
   }
 
   async function runNetworkTest(label: string, action: () => Promise<string>) {
+    if (networkTestLoading || networkActionLoading) return;
     networkTestLoading = true;
     networkTestLabel = label;
     networkTestResult = '';
@@ -978,6 +1001,7 @@
   const selectedPreset = $derived(NETWORK_PRESETS.find((item) => item.id === activeNetworkPreset));
 
   async function applyNetworkPreset(id: NetworkPresetId) {
+    if (networkTestLoading || networkActionLoading) return;
     const preset = NETWORK_PRESETS.find((item) => item.id === id);
     if (!preset) return;
     activeNetworkPreset = id;
@@ -992,6 +1016,8 @@
   }
 
   async function runNetworkAction(label: string, action: () => Promise<string>): Promise<boolean> {
+    if (networkActionLoading || networkTestLoading) return false;
+    networkActionLoading = true;
     try {
       const output = await action();
       const message = (output ?? '').trim();
@@ -1001,7 +1027,7 @@
       await refreshNetworkStatus();
       return true;
     } catch (error: unknown) {
-      console.error(error);
+      pushLog('ERROR', `Optimize error: ${String(error)}`, 'Optimize');
       const text =
         error instanceof Error
           ? error.message
@@ -1011,6 +1037,8 @@
       toast.error(text);
       addNetworkHistory(label, text, false);
       return false;
+    } finally {
+      networkActionLoading = false;
     }
   }
 
@@ -1361,7 +1389,7 @@
                   try {
                     await restartSystem();
                   } catch (e) {
-                    console.error(e);
+                    pushLog('ERROR', `Registry history check failed: ${String(e)}`, 'Optimize');
                     toast.error('Could not restart the system');
                   }
                 }}
@@ -1402,7 +1430,7 @@
             >
               <Trash2 class="size-4" />
             </Button>
-            {#if Object.values(registryHistory).some((r: any) => r?.suspicious)}
+            {#if Object.values(registryHistory).some((r) => r?.suspicious)}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1414,6 +1442,11 @@
               </Button>
             {/if}
           </div>
+          {#if rebootDetected}
+            <Badge variant="secondary" class="text-[10px] uppercase tracking-wide">
+              Reboot detected
+            </Badge>
+          {/if}
           <div class="flex items-center gap-2">
             <div class="relative flex-1">
               <SearchIcon
@@ -1478,7 +1511,7 @@
                       />
                       <span class="font-semibold">
                         {it.name}
-                        {#if (registryHistory[regId(it)] as any)?.suspicious}
+                        {#if registryHistory[regId(it)]?.suspicious}
                           <Badge variant="destructive" class="ml-2">Suspicious</Badge>
                         {/if}
                       </span>
@@ -1607,7 +1640,8 @@
                       : taskFilter === 'sus' &&
                           (includeDisabled || includeNoNext || includeMicrosoftInSus)
                         ? 'Suspicious + extras'
-                        : !taskFilter && (includeDisabled || includeNoNext || includeMicrosoftInSus)
+                        : taskFilter === 'all' &&
+                            (includeDisabled || includeNoNext || includeMicrosoftInSus)
                           ? 'Custom filters'
                           : 'Filters'}
                   </p>
@@ -1650,9 +1684,11 @@
               <Button
                 size="sm"
                 variant="secondary"
-                onclick={loadTasks}
+                onclick={reloadTasks}
                 title="Refresh tasks"
-                aria-label="Refresh tasks"><RefreshCw class="mr-2 size-4" /> Refresh</Button
+                aria-label="Refresh tasks"
+                disabled={loadingTasks || taskActionLoading}
+                ><RefreshCw class="mr-2 size-4" /> Refresh</Button
               >
               <Select type="single" bind:value={taskAction}>
                 <SelectTrigger class="w-40">
@@ -1681,9 +1717,9 @@
               <Button
                 size="sm"
                 onclick={requestRunSelected}
-                disabled={!taskAction || selectedTasks.size === 0}
+                disabled={!taskAction || selectedTasks.size === 0 || taskActionLoading}
                 title="Run action"
-                aria-label="Run action">Run</Button
+                aria-label="Run action">{taskActionLoading ? 'Running...' : 'Run'}</Button
               >
               <Button
                 size="sm"
@@ -1970,6 +2006,7 @@
               onclick={flushDns}
               title="Flush DNS Cache"
               aria-label="Flush DNS Cache"
+              disabled={networkActionLoading || networkTestLoading}
             >
               <RefreshCcw class="size-4" /><span class="ml-1 hidden sm:inline">Flush DNS</span>
             </Button>
@@ -1979,6 +2016,7 @@
               onclick={resetWinsock}
               title="Reset Winsock"
               aria-label="Reset Winsock"
+              disabled={networkActionLoading || networkTestLoading}
             >
               <RotateCcw class="size-4" /><span class="ml-1 hidden sm:inline">Reset Winsock</span>
             </Button>
@@ -1988,6 +2026,7 @@
               onclick={renewIp}
               title="Renew IP"
               aria-label="Renew IP"
+              disabled={networkActionLoading || networkTestLoading}
             >
               <RefreshCw class="size-4" /><span class="ml-1 hidden sm:inline">Renew IP</span>
             </Button>
@@ -2003,7 +2042,7 @@
                   size="sm"
                   variant={activeNetworkPreset === preset.id ? 'secondary' : 'outline'}
                   onclick={() => applyNetworkPreset(preset.id)}
-                  disabled={networkTestLoading}
+                  disabled={networkTestLoading || networkActionLoading}
                 >
                   {preset.label}
                 </Button>
@@ -2035,7 +2074,7 @@
                   size="sm"
                   variant="outline"
                   onclick={runPingTest}
-                  disabled={networkTestLoading}
+                  disabled={networkTestLoading || networkActionLoading}
                 >
                   Ping
                 </Button>
@@ -2049,7 +2088,7 @@
                   size="sm"
                   variant="outline"
                   onclick={runTracerouteTest}
-                  disabled={networkTestLoading}
+                  disabled={networkTestLoading || networkActionLoading}
                 >
                   Trace
                 </Button>
@@ -2063,7 +2102,7 @@
                   size="sm"
                   variant="outline"
                   onclick={runDnsLookupTest}
-                  disabled={networkTestLoading}
+                  disabled={networkTestLoading || networkActionLoading}
                 >
                   Lookup
                 </Button>

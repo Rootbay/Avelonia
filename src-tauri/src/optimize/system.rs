@@ -134,18 +134,22 @@ pub async fn remove_wmi_subscriptions_by_match(
     for p in &paths {
         script.push_str(&format!("$paths += '{}'\n", p.replace("'", "''")));
     }
+    let mut out_path = env::temp_dir();
+    out_path.push("avelonia_wmi_cleanup.out");
+    let out_str = out_path.to_string_lossy().to_string();
+    script.push_str(&format!("$outPath = '{}'\n", out_str.replace("'", "''")));
     script.push_str(r#"
-function Hit([string]$s){ $t=$s.ToLower(); foreach($x in $images){ if($t.Contains($x.ToLower())){ return $true } } foreach($y in $paths){ if($t.Contains($y.ToLower())){ return $true } } return $false }
-$removed = 0
-$cons = Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer
-foreach($c in $cons){ if(Hit([string]$c.CommandLineTemplate)){ Remove-CimInstance $c; $removed++ } }
-$ascons = Get-CimInstance -Namespace root\subscription -ClassName ActiveScriptEventConsumer
-foreach($c in $ascons){ if(Hit([string]$c.ScriptText)){ Remove-CimInstance $c; $removed++ } }
-$binds = Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding
-foreach($b in $binds){ try { $fc = (Get-CimAssociatedInstance -InputObject $b -Association __FilterToConsumerBinding); if(-not $fc){ Remove-CimInstance $b; $removed++ } } catch {} }
-$filters = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter
-foreach($f in $filters){ if(Hit([string]$f.Query)){ Remove-CimInstance $f; $removed++ } }
-Write-Output $removed
+ function Hit([string]$s){ $t=$s.ToLower(); foreach($x in $images){ if($t.Contains($x.ToLower())){ return $true } } foreach($y in $paths){ if($t.Contains($y.ToLower())){ return $true } } return $false }
+ $removed = 0
+ $cons = Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer
+ foreach($c in $cons){ if(Hit([string]$c.CommandLineTemplate)){ Remove-CimInstance $c; $removed++ } }
+ $ascons = Get-CimInstance -Namespace root\subscription -ClassName ActiveScriptEventConsumer
+ foreach($c in $ascons){ if(Hit([string]$c.ScriptText)){ Remove-CimInstance $c; $removed++ } }
+ $binds = Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding
+ foreach($b in $binds){ try { $fc = (Get-CimAssociatedInstance -InputObject $b -Association __FilterToConsumerBinding); if(-not $fc){ Remove-CimInstance $b; $removed++ } } catch {} }
+ $filters = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter
+ foreach($f in $filters){ if(Hit([string]$f.Query)){ Remove-CimInstance $f; $removed++ } }
+ Set-Content -Path $outPath -Value $removed
 "#);
     let mut tmp = env::temp_dir();
     tmp.push("avelonia_wmi_cleanup.ps1");
@@ -158,8 +162,13 @@ Write-Output $removed
         "-File",
         &tmp_str,
     ]);
+    let removed = std::fs::read_to_string(&out_path)
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0);
     let _ = std::fs::remove_file(&tmp);
-    Ok(1)
+    let _ = std::fs::remove_file(&out_path);
+    Ok(removed)
 }
 
 #[tauri::command]

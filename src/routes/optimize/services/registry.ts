@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { pushLog } from '$lib/logStore';
 
 export type StartupRegItem = { hive: string; key: string; name: string; command: string };
 
@@ -116,7 +117,7 @@ export async function runPostCleanupDiagnostics(
       else diag.removedRegistry.ok.push(label);
     }
   } catch (e) {
-    console.warn('diagnostics: list_registry_run failed', e);
+    pushLog('WARN', `diagnostics: list_registry_run failed: ${String(e)}`, 'Optimize');
   }
 
   for (const img of opts.images) {
@@ -156,7 +157,7 @@ export async function runPostCleanupDiagnostics(
     }
     diag.taskMatches.remaining = Array.from(new Set(matches));
   } catch (e) {
-    console.warn('diagnostics: list_scheduled_tasks failed', e);
+    pushLog('WARN', `diagnostics: list_scheduled_tasks failed: ${String(e)}`, 'Optimize');
   }
 
   try {
@@ -182,7 +183,7 @@ export async function runPostCleanupDiagnostics(
     diag.serviceMatches.running = Array.from(new Set(diag.serviceMatches.running));
     diag.serviceMatches.disabled = Array.from(new Set(diag.serviceMatches.disabled));
   } catch (e) {
-    console.warn('diagnostics: list_services failed', e);
+    pushLog('WARN', `diagnostics: list_services failed: ${String(e)}`, 'Optimize');
   }
 
   return diag;

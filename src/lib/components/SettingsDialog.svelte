@@ -18,6 +18,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import { pushLog, clearLogs } from '$lib/logStore';
   import { save } from '@tauri-apps/plugin-dialog';
+  import { beginScan, endScan } from '$lib/scanStatus.svelte';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -74,7 +75,6 @@
       toast.success('VirusTotal key saved');
       pushLog('SUCCESS', `VT key saved${vtPersist ? ' (persisted)' : ''}.`, 'Optimize');
     } catch (e) {
-      console.error(e);
       toast.error('Failed to save VirusTotal key');
       pushLog('ERROR', `Saving VT key failed: ${String(e)}`, 'Optimize');
     } finally {
@@ -94,7 +94,7 @@
         toast.success('Download catalog file selected');
       }
     } catch (error) {
-      console.error('Failed to select catalog file', error);
+      pushLog('ERROR', `Failed to select catalog file: ${String(error)}`, 'Downloader');
       toast.error('Unable to pick a catalog file');
     }
   }
@@ -106,9 +106,25 @@
   }
 
   async function runVtScanNow() {
-    // This logic is still in +layout.svelte, we might need to expose it or move it to a store
-    // For now, let's just trigger a custom event or something similar if needed,
-    // but ideally this should be moved to a shared service.
+    try {
+      vtBusy = true;
+      pushLog('INFO', 'VT scan starting (manual).', 'Optimize');
+      beginScan('manual');
+      toast.message('VirusTotal scan started');
+      const res = (await invoke('vt_scan_all', { limit: 50, force: true })) as [number, number];
+      endScan({ startup: res?.[0], registry: res?.[1] });
+      toast.success('VirusTotal scan completed');
+      pushLog(
+        'SUCCESS',
+        `VT scan finished (manual): startup ${res?.[0] ?? 0}, registry ${res?.[1] ?? 0}.`,
+        'Optimize'
+      );
+    } catch (e) {
+      toast.error('VirusTotal scan failed (set API key?)');
+      pushLog('ERROR', `VT scan failed (manual): ${String(e)}`, 'Optimize');
+    } finally {
+      vtBusy = false;
+    }
   }
 </script>
 

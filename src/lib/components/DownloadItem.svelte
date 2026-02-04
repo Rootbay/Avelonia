@@ -2,10 +2,12 @@
   import type { Download } from '$lib/downloadManager';
   import { getDownloadPath, setDownloadRelease } from '$lib/downloadManager';
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { invoke } from '@tauri-apps/api/core';
   import { Button } from '$lib/components/ui/button';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { TableRow, TableCell } from '$lib/components/ui/table';
   import { toast } from '$lib/components/ui/sonner';
+  import { pushLog } from '$lib/logStore';
   import { Ellipsis } from '@lucide/svelte';
   import {
     DropdownMenu,
@@ -38,6 +40,7 @@
       case 'downloading':
       case 'pending':
       case 'queued':
+      case 'verifying':
         return 'text-primary';
       default:
         return 'text-muted-foreground';
@@ -56,10 +59,15 @@
       return;
     }
     try {
+      const exists = await invoke<boolean>('path_exists', { path });
+      if (!exists) {
+        toast.error('File no longer exists');
+        return;
+      }
       await openPath(path);
       toast.success(`Opened ${download.name ?? 'file'}`);
     } catch (error) {
-      console.warn('openPath failed', error);
+      pushLog('WARN', `openPath failed: ${String(error)}`, 'Downloader');
       toast.error('Unable to open file');
     }
   }
@@ -72,10 +80,15 @@
       return;
     }
     try {
+      const exists = await invoke<boolean>('path_exists', { path });
+      if (!exists) {
+        toast.error('File no longer exists');
+        return;
+      }
       await revealItemInDir(path);
       toast.success(`Showing ${download.name ?? 'file'} in folder`);
     } catch (error) {
-      console.warn('revealItemInDir failed', error);
+      pushLog('WARN', `revealItemInDir failed: ${String(error)}`, 'Downloader');
       toast.error('Unable to open containing folder');
     }
   }

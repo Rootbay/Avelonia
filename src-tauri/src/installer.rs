@@ -39,9 +39,10 @@ pub async fn silent_install(
     }
 
     if let Some(flags) = custom_flags {
-        let args: Vec<&str> = flags.split_whitespace().collect();
+        let args = split_args(&flags);
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         let ok = if elevate {
-            crate::optimize::shell_helpers::run_elevated(&path, &args)
+            crate::optimize::shell_helpers::run_elevated(&path, &arg_refs)
         } else {
             Command::new(&path)
                 .args(&args)
@@ -352,4 +353,61 @@ pub fn is_installed(display_name_hint: String) -> Result<bool, String> {
 #[cfg(not(target_os = "windows"))]
 pub fn is_installed(_display_name_hint: String) -> Result<bool, String> {
     Ok(false)
+}
+
+fn split_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if !in_single => {
+                if in_double {
+                    if chars.peek() == Some(&'"') {
+                        current.push('"');
+                        chars.next();
+                    } else {
+                        in_double = false;
+                    }
+                } else {
+                    in_double = true;
+                }
+            }
+            '\'' if !in_double => {
+                if in_single {
+                    in_single = false;
+                } else {
+                    in_single = true;
+                }
+            }
+            '\\' if in_double => {
+                if let Some(next) = chars.peek() {
+                    if *next == '"' {
+                        current.push('"');
+                        chars.next();
+                    } else {
+                        current.push('\\');
+                    }
+                } else {
+                    current.push('\\');
+                }
+            }
+            c if c.is_whitespace() && !in_double && !in_single => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    args
 }

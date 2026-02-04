@@ -1,4 +1,4 @@
-import { type HTMLAnchorAttributes, type HTMLButtonAttributes } from 'svelte/elements';
+import type { HTMLAnchorAttributes, HTMLButtonAttributes } from 'svelte/elements';
 import { type VariantProps, tv } from 'tailwind-variants';
 import { type WithElementRef } from '$lib/utils.js';
 

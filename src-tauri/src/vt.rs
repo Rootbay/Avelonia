@@ -300,7 +300,7 @@ async fn vt_fetch(client: &Client, key: &str, sha256: &str) -> Result<CacheEntry
 async fn ensure_rate_limit(state: &VtState) {
     let wait_secs: u64 = {
         let now = epoch_now();
-        let guard = state.last_req.lock().unwrap();
+        let guard = state.last_req.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(prev) = *guard {
             let diff = now.saturating_sub(prev);
             if diff < PUBLIC_API_INTERVAL_SECS {
@@ -315,7 +315,7 @@ async fn ensure_rate_limit(state: &VtState) {
     if wait_secs > 0 {
         tokio::time::sleep(Duration::from_secs(wait_secs)).await;
     }
-    let mut guard = state.last_req.lock().unwrap();
+    let mut guard = state.last_req.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(epoch_now());
 }
 
@@ -335,7 +335,7 @@ async fn lookup_or_fetch(
     let key_opt = state
         .api_key
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .clone()
         .or_else(load_key_from_disk);
     let key = match key_opt {
@@ -366,7 +366,12 @@ fn cache_needs_refresh(state: &VtState, sha256: &str) -> bool {
 #[tauri::command]
 pub fn vt_get_status(state: State<'_, VtState>) -> Result<VtStatus, AppError> {
     state.ensure_cache_loaded();
-    let key_set = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
+    let key_set = state
+        .api_key
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+        || load_key_from_disk().is_some();
     Ok(VtStatus {
         key_set,
         cached_items: state.cache.len(),
@@ -446,7 +451,7 @@ pub fn vt_set_api_key(
     key: Option<String>,
     persist: Option<bool>,
 ) -> Result<(), AppError> {
-    let mut guard = state.api_key.lock().unwrap();
+    let mut guard = state.api_key.lock().unwrap_or_else(|e| e.into_inner());
     *guard = key.clone();
     if let Some(true) = persist {
         if let Some(k) = key.as_ref() {
@@ -933,7 +938,9 @@ pub async fn vt_scan_registry(
             let _ = app.emit("vt-report", &rep);
             continue;
         }
-        let path = maybe_img.unwrap();
+        let Some(path) = maybe_img else {
+            continue;
+        };
         let pb = PathBuf::from(&path);
         if !pb.exists() || !pb.is_file() {
             let rep = VtItemReport {
@@ -1113,7 +1120,12 @@ pub async fn vt_auto_maybe_scan(
 ) -> Result<Option<String>, AppError> {
     let prev = load_snapshot();
     let mut cur = build_current_snapshot(prev.last_scan).await;
-    let key_present = state.api_key.lock().unwrap().is_some() || load_key_from_disk().is_some();
+    let key_present = state
+        .api_key
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+        || load_key_from_disk().is_some();
     let now = epoch_now();
     let reason = if has_new(&prev, &cur) {
         Some("new-items")

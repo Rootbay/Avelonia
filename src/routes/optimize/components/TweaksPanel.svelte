@@ -11,6 +11,7 @@
   } from '$lib/components/ui/card';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { toast } from '$lib/components/ui/sonner';
+  import { pushLog } from '$lib/logStore';
   import {
     configItems,
     customizeTweaks,
@@ -165,7 +166,7 @@
       })) as { tweaks_applied: number; configs_applied: number };
       toast.success(`Queued ${res.tweaks_applied} tweak(s) and ${res.configs_applied} config(s).`);
     } catch (error) {
-      console.error('Failed to apply tweaks', error);
+      pushLog('ERROR', `Failed to apply tweaks: ${String(error)}`, 'Optimize');
       toast.error('Unable to apply tweaks right now.');
     }
   }
@@ -176,7 +177,7 @@
       fixStatus = { ...fixStatus, [id]: 'done' };
       toast.success('Fix action queued.');
     } catch (error) {
-      console.error('Fix action failed', error);
+      pushLog('ERROR', `Fix action failed: ${String(error)}`, 'Optimize');
       toast.error('Fix action failed.');
       fixStatus = { ...fixStatus, [id]: 'idle' };
     }
@@ -189,7 +190,7 @@
       toast.success(`Update profile set to ${profile}.`);
       dispatcher('message', `Update profile set to ${profile}.`);
     } catch (error) {
-      console.error('Update profile failed', error);
+      pushLog('ERROR', `Update profile failed: ${String(error)}`, 'Optimize');
       toast.error('Unable to change update profile.');
     }
   }

@@ -1,9 +1,10 @@
 import { writable } from 'svelte/store';
+import { pushLog } from '$lib/logStore';
 
 const STORAGE_KEY = 'avelonia_tags_custom';
 
 function logTagsError(context: string, error: unknown) {
-  console.warn(`[Tags] ${context}`, error);
+  pushLog('WARN', `Tags ${context} failed: ${String(error)}`, 'General');
 }
 
 export const BUILT_IN_TAGS = [

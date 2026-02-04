@@ -1,6 +1,7 @@
 <script lang="ts">
   import { buttonVariants, type ButtonProps } from './button-variants';
   import { resolve } from '$app/paths';
+  import { cn } from '$lib/utils.js';
   let {
     class: className,
     variant = 'default',

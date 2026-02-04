@@ -86,45 +86,12 @@ pub fn check_if_task_is_sus(_name: &str, task_to_run: &str, author: &str) -> (bo
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub async fn list_scheduled_tasks() -> Result<Vec<ScheduledTask>, AppError> {
-    let mut tasks: Vec<ScheduledTask> = Vec::new();
-
     let output = Command::new("cmd")
-        .args(["/C", "chcp 65001>nul & schtasks /Query /FO CSV"])
+        .args(["/C", "chcp 65001>nul & schtasks /Query /FO CSV /V"])
         .output()
         .map_err(|e| AppError::System(format!("failed to run schtasks: {}", e)))?;
 
-    let stdout_bytes = output.stdout;
-    let first_line_end = stdout_bytes.iter().position(|&b| b == b'\n').unwrap_or(stdout_bytes.len());
-    let delim = if stdout_bytes[..first_line_end].contains(&b';') { b';' } else { b',' };
-
-    let mut rdr = csv::ReaderBuilder::new()
-        .has_headers(true)
-        .delimiter(delim)
-        .from_reader(&*stdout_bytes);
-
-    for result in rdr.records() {
-        if let Ok(rec) = result {
-            let name = rec.get(0).unwrap_or("").to_string();
-            if name.trim().is_empty() || name.to_lowercase().contains("taskname") { continue; }
-
-            let next_run_time = rec.get(1).unwrap_or("").to_string();
-            let status = rec.get(2).unwrap_or("").to_string();
-            
-            let (is_sus, score) = check_if_task_is_sus(&name, "", "");
-
-            tasks.push(ScheduledTask {
-                name,
-                next_run_time,
-                status,
-                task_to_run: String::new(),
-                author: String::new(),
-                is_sus,
-                score,
-            });
-        }
-    }
-
-    Ok(tasks)
+    Ok(parse_tasks_csv(output.stdout))
 }
 
 #[tauri::command]
@@ -229,8 +196,25 @@ pub fn delete_scheduled_tasks(_names: Vec<String>) -> Result<OpResult, AppError>
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub async fn get_task_details(task_name: String) -> Result<(String, String, bool, i32), AppError> {
-    let (is_sus, score) = check_if_task_is_sus(&task_name, "", "");
-    Ok((String::new(), String::new(), is_sus, score))
+    if task_name.trim().is_empty() {
+        return Ok((String::new(), String::new(), false, 0));
+    }
+    let escaped = task_name.replace('"', "\\\"");
+    let cmd = format!("chcp 65001>nul & schtasks /Query /FO CSV /V /TN \"{}\"", escaped);
+    let output = Command::new("cmd")
+        .args([
+            "/C",
+            &cmd,
+        ])
+        .output()
+        .map_err(|e| AppError::System(format!("failed to run schtasks: {}", e)))?;
+
+    let mut tasks = parse_tasks_csv(output.stdout);
+    if let Some(t) = tasks.pop() {
+        Ok((t.task_to_run, t.author, t.is_sus, t.score))
+    } else {
+        Ok((String::new(), String::new(), false, 0))
+    }
 }
 
 #[tauri::command]
@@ -245,8 +229,121 @@ pub async fn list_suspicious_tasks() -> Result<Vec<String>, AppError> {
 }
 
 #[tauri::command]
-pub async fn delete_tasks_by_match(_images: Vec<String>, _paths: Vec<String>) -> Result<usize, AppError> {
-    Ok(0)
+pub async fn delete_tasks_by_match(images: Vec<String>, paths: Vec<String>) -> Result<usize, AppError> {
+    let list = list_scheduled_tasks().await?;
+    let imgs: Vec<String> = images.into_iter().map(|s| s.to_lowercase()).collect();
+    let pths: Vec<String> = paths.into_iter().map(|s| s.to_lowercase()).collect();
+    let mut targets: Vec<String> = Vec::new();
+    for t in list {
+        let cmd = t.task_to_run.to_lowercase();
+        if cmd.is_empty() {
+            continue;
+        }
+        let hit = imgs.iter().any(|i| cmd.contains(i)) || pths.iter().any(|p| cmd.contains(p));
+        if hit {
+            targets.push(t.name);
+        }
+    }
+    if targets.is_empty() {
+        return Ok(0);
+    }
+    let mut ok = 0usize;
+    for n in targets {
+        let mut tn = n.trim().to_string();
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/Delete", "/TN", &tn, "/F"]) {
+            ok += 1;
+        }
+    }
+    Ok(ok)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn parse_tasks_csv(_stdout_bytes: Vec<u8>) -> Vec<ScheduledTask> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn parse_tasks_csv(stdout_bytes: Vec<u8>) -> Vec<ScheduledTask> {
+    let first_line_end = stdout_bytes
+        .iter()
+        .position(|&b| b == b'\n')
+        .unwrap_or(stdout_bytes.len());
+    let delim = if stdout_bytes[..first_line_end].contains(&b';') {
+        b';'
+    } else {
+        b','
+    };
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .delimiter(delim)
+        .from_reader(&*stdout_bytes);
+
+    let headers = match rdr.headers() {
+        Ok(h) => h.clone(),
+        Err(_) => return Vec::new(),
+    };
+
+    let mut header_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (idx, h) in headers.iter().enumerate() {
+        let key = normalize_header(h);
+        header_map.insert(key, idx);
+    }
+
+    let mut tasks: Vec<ScheduledTask> = Vec::new();
+    for result in rdr.records() {
+        if let Ok(rec) = result {
+            let name = get_field(&rec, &header_map, &["taskname", "task name"]);
+            if name.trim().is_empty() {
+                continue;
+            }
+            let next_run_time = get_field(&rec, &header_map, &["nextruntime", "next run time"]);
+            let status = get_field(&rec, &header_map, &["status"]);
+            let task_to_run = get_field(&rec, &header_map, &["tasktorun", "task to run", "action"]);
+            let author = get_field(&rec, &header_map, &["author"]);
+
+            let (is_sus, score) = check_if_task_is_sus(&name, &task_to_run, &author);
+            tasks.push(ScheduledTask {
+                name,
+                next_run_time,
+                status,
+                task_to_run,
+                author,
+                is_sus,
+                score,
+            });
+        }
+    }
+
+    tasks
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_header(input: &str) -> String {
+    input
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn get_field(
+    rec: &csv::StringRecord,
+    headers: &std::collections::HashMap<String, usize>,
+    keys: &[&str],
+) -> String {
+    for k in keys {
+        let key = normalize_header(k);
+        if let Some(idx) = headers.get(&key) {
+            if let Some(val) = rec.get(*idx) {
+                return val.to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]

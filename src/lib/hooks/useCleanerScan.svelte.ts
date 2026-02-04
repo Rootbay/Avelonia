@@ -44,7 +44,7 @@ export function useCleanerScan() {
             incCleanerFound(n);
             if (!cleanerToastShown) {
               cleanerToastShown = true;
-              toast.message('Scanning temporary files…', {
+              toast.message('Scanning temporary files...', {
                 id: cleanerToastId,
                 duration: Infinity,
                 action: {
@@ -63,7 +63,7 @@ export function useCleanerScan() {
               const label =
                 cleanerScan.message && cleanerScan.message.length > 0
                   ? cleanerScan.message
-                  : 'Scanning temporary files…';
+                  : 'Scanning temporary files...';
               toast.message(`${label} (${cleanerScan.found.toLocaleString()} found)`, {
                 id: cleanerToastId,
                 duration: Infinity,
@@ -112,3 +112,4 @@ export function useCleanerScan() {
     unlistenFns.forEach((fn) => fn());
   });
 }
+

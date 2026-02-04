@@ -39,7 +39,8 @@ export interface Download {
     | 'completed'
     | 'queued'
     | 'failed'
-    | 'installed';
+    | 'installed'
+    | 'verifying';
   progress: number;
   speed?: string;
   targetPath?: string;
@@ -67,6 +68,7 @@ const installQueue: number[] = [];
 let installBusy = false;
 const postCompleteTimers = new Map<number, number>();
 let installPresenceTimer: number | null = null;
+let downloadDirPromise: Promise<string> | null = null;
 
 type VerifyInstallResult = {
   verified: boolean;
@@ -77,13 +79,13 @@ type VerifyInstallResult = {
 };
 
 function logIgnoredError(context: string, error: unknown) {
-  console.debug(`[Downloader:${context}] Ignored error:`, error);
+  pushLog('WARN', `Ignored error (${context}): ${String(error)}`, 'Downloader');
 }
 async function appLog(level: LogLevel, message: string) {
   try {
     pushLog(level, message, 'Downloader');
-  } catch (_error: unknown) {
-    console.error(`[Downloader:appLog] Failed to push log:`, _error);
+  } catch {
+    /* ignore logging errors */
   }
 }
 
@@ -219,7 +221,7 @@ async function checkAndMarkInstalled(id: number) {
       }
     }
   } catch (error: unknown) {
-    console.debug(`[Downloader:checkAndMarkInstalled] ${error}`);
+    await appLog('WARN', `Verification check failed: ${String(error)}`);
   }
 }
 
@@ -232,7 +234,7 @@ function schedulePostCompleteCheck(id: number, delayMs = 5000) {
     }, delayMs) as unknown as number;
     postCompleteTimers.set(id, timer);
   } catch (error: unknown) {
-    console.error(`[Downloader:schedulePostCompleteCheck] ${error}`);
+    void appLog('ERROR', `Post-complete check failed: ${String(error)}`);
   }
 }
 
@@ -366,6 +368,7 @@ async function performDownload(download: Download): Promise<void> {
     if (currentSnap && currentSnap.hash && currentSnap.status !== 'available') {
       updateDownloadById(download.id, (draft) => {
         draft.eta = 'Verifying...';
+        draft.status = 'verifying';
       });
       const isValid = await invoke<boolean>('verify_hash', {
         path: filePath,
@@ -374,6 +377,18 @@ async function performDownload(download: Download): Promise<void> {
       if (!isValid) {
         throw new Error('Integrity check failed: File hash mismatch');
       }
+      updateDownloadById(download.id, (draft) => {
+        draft.status = 'completed';
+        draft.progress = 100;
+        draft.speed = '';
+        draft.eta = 'Done';
+      });
+      await appLog(
+        'SUCCESS',
+        'Download completed: ' + currentSnap.name + (currentSnap.targetPath ? ' -> ' + currentSnap.targetPath : '')
+      );
+      void maybeAutoInstall(download.id);
+      schedulePostCompleteCheck(download.id, 5000);
     }
   } catch (error: unknown) {
     if (activeDownloads.has(download.id)) {
@@ -410,11 +425,15 @@ export function initDownloadListener() {
 
   void (async () => {
     try {
-      const dir = await downloadDir();
+      const dir = await getBaseDownloadDir();
       const currentDownloads = get(downloads);
       const activePaths = currentDownloads
         .filter(
-          (d) => d.status === 'downloading' || d.status === 'pending' || d.status === 'queued'
+          (d) =>
+            d.status === 'downloading' ||
+            d.status === 'pending' ||
+            d.status === 'queued' ||
+            d.status === 'verifying'
         )
         .map((d) => (d.targetPath ? d.targetPath + '.part' : null))
         .filter((p): p is string => !!p);
@@ -427,7 +446,7 @@ export function initDownloadListener() {
         await appLog('INFO', `Cleaned up ${count} orphaned partial download files.`);
       }
     } catch (error) {
-      console.warn('Orphaned cleanup failed', error);
+      void appLog('WARN', `Orphaned cleanup failed: ${String(error)}`);
     }
   })();
 
@@ -453,7 +472,8 @@ export function initDownloadListener() {
     }
 
     const completed = total > 0 && downloaded >= total;
-    const newStatus = completed ? 'completed' : 'downloading';
+    const awaitingVerify = completed && !!snapshot.hash;
+    const newStatus = completed ? (awaitingVerify ? 'verifying' : 'completed') : 'downloading';
 
     let updatedSpeed = false;
     let speedStr = '';
@@ -502,6 +522,10 @@ export function initDownloadListener() {
           draft.progress = 100;
           draft.speed = '';
           draft.eta = 'Done';
+        } else if (newStatus === 'verifying') {
+          draft.progress = 100;
+          draft.speed = '';
+          draft.eta = 'Verifying...';
         } else if (updatedSpeed) {
           draft.speed = speedStr || draft.speed;
           draft.eta = etaStr || draft.eta;
@@ -516,17 +540,19 @@ export function initDownloadListener() {
       lastSample.delete(id);
       avgSpeedBps.delete(id);
       lastUiEmit.delete(id);
-      void (async () => {
-        const snap = getDownloadSnapshot(id);
-        if (snap) {
-          await appLog(
-            'SUCCESS',
-            'Download completed: ' + snap.name + (snap.targetPath ? ' -> ' + snap.targetPath : '')
-          );
-          void maybeAutoInstall(id);
-          schedulePostCompleteCheck(id, 5000);
-        }
-      })();
+      if (!awaitingVerify) {
+        void (async () => {
+          const snap = getDownloadSnapshot(id);
+          if (snap) {
+            await appLog(
+              'SUCCESS',
+              'Download completed: ' + snap.name + (snap.targetPath ? ' -> ' + snap.targetPath : '')
+            );
+            void maybeAutoInstall(id);
+            schedulePostCompleteCheck(id, 5000);
+          }
+        })();
+      }
       return;
     }
 
@@ -553,8 +579,8 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
       const s = get(settings);
       if (!s.downloader.verifyInstall) return;
       const list = get(downloads);
-      for (const d of list) {
-        if (d.status === 'installed') {
+        for (const d of list) {
+          if (d.status === 'installed') {
           try {
             const ok = (await invoke('is_installed', { displayNameHint: d.name })) as boolean;
             if (!ok) {
@@ -569,7 +595,7 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
           } catch (error: unknown) {
             logIgnoredError('installPresenceWatch is_installed', error);
           }
-        } else if (d.status === 'completed' && isLikelyInstaller(d)) {
+          } else if (d.status === 'completed' && isLikelyInstaller(d)) {
           try {
             const p = d.targetPath;
             let exists = false;
@@ -604,9 +630,18 @@ export function stopInstallPresenceWatch() {
   }
 }
 
+async function getBaseDownloadDir(): Promise<string> {
+  if (!downloadDirPromise) {
+    downloadDirPromise = (async () => {
+      return await downloadDir();
+    })();
+  }
+  return downloadDirPromise;
+}
+
 export async function getDownloadPath(dl: Download): Promise<string | null> {
   try {
-    const downloadsPath = await downloadDir();
+    const downloadsPath = await getBaseDownloadDir();
     if (!downloadsPath) {
       return null;
     }
@@ -666,7 +701,8 @@ export function startDownload(id: number) {
   if (
     snapshot.status === 'downloading' ||
     snapshot.status === 'pending' ||
-    snapshot.status === 'queued'
+    snapshot.status === 'queued' ||
+    snapshot.status === 'verifying'
   ) {
     return;
   }
@@ -707,9 +743,9 @@ export async function cancelDownload(id: number) {
   if (wasActive) {
     try {
       await invoke('cancel_download', { id });
-    } catch (error: unknown) {
-      console.warn('cancel_download failed', error);
-    }
+  } catch (error: unknown) {
+    void appLog('WARN', `cancel_download failed: ${String(error)}`);
+  }
   }
 
   updateDownloadById(id, (draft) => {
@@ -717,6 +753,7 @@ export async function cancelDownload(id: number) {
     draft.progress = 0;
     draft.speed = '';
     draft.eta = 'N/A';
+    draft.targetPath = undefined;
   });
 
   lastSample.delete(id);
@@ -736,12 +773,16 @@ export function cancelAndRemoveDownloads(ids: number[]) {
   const list = get(downloads);
   list
     .filter((d) => idSet.has(d.id))
-    .filter((d) => ['downloading', 'pending', 'queued'].includes(d.status))
+    .filter((d) => ['downloading', 'pending', 'queued', 'verifying'].includes(d.status))
     .forEach((d) => cancelDownload(d.id));
   removeDownloadsByIds(ids);
 }
 
 export function setDownloadRelease(id: number, releaseLabel: string) {
+  const snap = getDownloadSnapshot(id);
+  if (snap && ['downloading', 'pending', 'queued', 'verifying'].includes(snap.status)) {
+    void cancelDownload(id);
+  }
   updateDownloadById(id, (draft) => {
     const releases = draft.releases;
     if (!releases || releases.length === 0) return;
@@ -749,18 +790,15 @@ export function setDownloadRelease(id: number, releaseLabel: string) {
     if (!next) return;
     draft.selectedReleaseLabel = releaseLabel;
     draft.downloadLink = next.downloadLink;
-    if (next.size) {
-      draft.size = next.size;
-    }
-    if (next.fileType) {
-      draft.fileType = next.fileType;
-    }
-    if (next.hash) {
-      draft.hash = next.hash;
-    }
-    if (next.installFlags) {
-      draft.installFlags = next.installFlags;
-    }
+    draft.size = next.size ?? 'N/A';
+    draft.fileType = next.fileType ?? '';
+    draft.hash = next.hash ?? undefined;
+    draft.installFlags = next.installFlags ?? undefined;
+    draft.status = 'available';
+    draft.progress = 0;
+    draft.speed = '';
+    draft.eta = 'N/A';
+    draft.targetPath = undefined;
   });
 }
 

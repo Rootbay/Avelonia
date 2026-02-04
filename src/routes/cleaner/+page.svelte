@@ -42,6 +42,7 @@
   } from '$lib/components/ui/dropdown-menu';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
   import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
+  import { pushLog, type LogLevel } from '$lib/logStore';
   import { Trash2, Scan, Eraser, Ellipsis } from '@lucide/svelte';
   import { SvelteSet } from 'svelte/reactivity';
 
@@ -80,13 +81,17 @@
     )
   );
   const EXC_KEY = 'avelonia_cleaner_exclusions_v1';
+  function logCleanerError(context: string, error: unknown, level: LogLevel = 'WARN') {
+    pushLog(level, `${context}: ${String(error)}`, 'Cleaner');
+  }
 
   function loadExclusions() {
     try {
       const raw = localStorage.getItem(EXC_KEY);
       exclusions = raw ? JSON.parse(raw) : [];
-    } catch {
+    } catch (error) {
       exclusions = [];
+      logCleanerError('Load exclusions failed', error);
     }
   }
 
@@ -96,8 +101,8 @@
         EXC_KEY,
         JSON.stringify(Array.from(new Set(exclusions.map((s) => s.trim()).filter(Boolean))))
       );
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Save exclusions failed', error);
     }
   }
 
@@ -116,8 +121,8 @@
         brokenShortcuts = Array.isArray(cache.brokenShortcuts) ? cache.brokenShortcuts : [];
         dupGroups = Array.isArray(cache.dupGroups) ? cache.dupGroups : [];
       }
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Load cleaner cache failed', error);
     }
   });
 
@@ -136,8 +141,8 @@
   function saveCacheSoon() {
     try {
       if (_cacheSaveTimer) clearTimeout(_cacheSaveTimer as unknown as number);
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Clear cache timer failed', error);
     }
     _cacheSaveTimer = setTimeout(() => {
       try {
@@ -150,8 +155,8 @@
           dupGroups,
           timestamp: Date.now(),
         });
-      } catch {
-        /* noop */
+      } catch (error) {
+        logCleanerError('Save cleaner cache failed', error);
       }
     }, 500) as unknown as number;
   }
@@ -177,8 +182,8 @@
       for (const pattern of normalizedExclusions) {
         if (pattern && normalizedPath.includes(pattern)) return true;
       }
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Match exclusion failed', error);
     }
     return false;
   }
@@ -268,7 +273,7 @@
           return;
         }
       } catch {
-        /* noop */
+        /* ignore transient scroll read errors */
       }
 
       const take = tempQueue.splice(0, Math.min(2500, tempQueue.length));
@@ -285,9 +290,8 @@
       }
       if (tempQueue.length > 0) scheduleTempFlush();
     };
-    tempFlushRaf = ('requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(run, { timeout: 120 })
-      : setTimeout(run, 0)) as unknown as number;
+    tempFlushRaf =
+      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
   }
 
   type FilePair = [string, number];
@@ -307,16 +311,15 @@
           return;
         }
       } catch {
-        /* noop */
+        /* ignore transient scroll read errors */
       }
       const take = largeQueue.splice(0, Math.min(2500, largeQueue.length));
       const next = take.map(([p, s]) => ({ path: p, size: s }));
       if (next.length) largeFiles = [...largeFiles, ...next];
       if (largeQueue.length > 0) scheduleLargeFlush();
     };
-    largeFlushRaf = ('requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(run, { timeout: 120 })
-      : setTimeout(run, 0)) as unknown as number;
+    largeFlushRaf =
+      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
   }
 
   let dupGroupsQueue: Array<{ hash: string; size: number; files: string[] }> = [];
@@ -335,7 +338,7 @@
           return;
         }
       } catch {
-        /* noop */
+        /* ignore transient scroll read errors */
       }
       const take = dupGroupsQueue.splice(0, Math.min(500, dupGroupsQueue.length));
       if (take.length) {
@@ -347,9 +350,8 @@
       }
       if (dupGroupsQueue.length > 0) scheduleDupFlush();
     };
-    dupFlushRaf = ('requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(run, { timeout: 120 })
-      : setTimeout(run, 0)) as unknown as number;
+    dupFlushRaf =
+      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
   }
 
   let emptyQueue: string[] = [];
@@ -368,16 +370,15 @@
           return;
         }
       } catch {
-        /* noop */
+        /* ignore transient scroll read errors */
       }
       const take = emptyQueue.splice(0, Math.min(2500, emptyQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) emptyFolders = [...emptyFolders, ...next];
       if (emptyQueue.length > 0) scheduleEmptyFlush();
     };
-    emptyFlushRaf = ('requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(run, { timeout: 120 })
-      : setTimeout(run, 0)) as unknown as number;
+    emptyFlushRaf =
+      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
   }
 
   let shortcutQueue: string[] = [];
@@ -396,16 +397,15 @@
           return;
         }
       } catch {
-        /* noop */
+        /* ignore transient scroll read errors */
       }
       const take = shortcutQueue.splice(0, Math.min(2500, shortcutQueue.length));
       const next = take.map((p) => ({ path: p }));
       if (next.length) brokenShortcuts = [...brokenShortcuts, ...next];
       if (shortcutQueue.length > 0) scheduleShortcutFlush();
     };
-    shortcutFlushRaf = ('requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(run, { timeout: 120 })
-      : setTimeout(run, 0)) as unknown as number;
+    shortcutFlushRaf =
+      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
   }
 
   let unifiedContainer = $state<HTMLDivElement | null>(null);
@@ -485,7 +485,7 @@
           unifiedAutoFallback = shouldFallback;
         }
       } catch {
-        /* noop */
+        /* ignore layout measurement errors */
       }
     }, 0);
   });
@@ -500,7 +500,7 @@
         UNIFIED_ROW_PX = h;
       }
     } catch {
-      /* noop */
+      /* ignore layout measurement errors */
     }
   }
 
@@ -542,7 +542,7 @@
             unifiedCap = Math.min(unifiedCap + UNIFIED_BUILD_STEP, unifiedCap + 20000);
           }
         } catch {
-          /* noop */
+          /* ignore scroll measurement errors */
         }
       }
       _unifiedScrollTick = false;
@@ -556,8 +556,8 @@
       const res = (await invoke('stat_paths', { paths })) as [string, number][];
       const map = new Map(res);
       tempFiles = tempFiles.map((f) => ({ path: f.path, size: map.get(f.path) ?? f.size }));
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Stat temp sizes failed', error);
     }
   }
 
@@ -580,7 +580,7 @@
       const minBytes = Math.max(1, largeMinMB) * 1024 * 1024;
       void invoke('start_cleaner_scan', { min_size_bytes: minBytes, max_temp: MAX_TEMP_ITEMS });
     } catch (e) {
-      console.error(e);
+      logCleanerError('Scan failed to start', e, 'ERROR');
       toast.error('Scan failed to start');
       scanning = false;
     }
@@ -633,7 +633,7 @@
       clearSelectionUnified();
       toast.success(`Moved ${moved} item(s)`);
     } catch (e) {
-      console.error(e);
+      logCleanerError('Move failed', e, 'ERROR');
       toast.error('Move failed');
     } finally {
       isLoading = false;
@@ -649,7 +649,7 @@
       toast.success('Secure erase done');
       clearSelectionUnified();
     } catch (e) {
-      console.error(e);
+      logCleanerError('Secure erase failed', e, 'ERROR');
       toast.error('Secure erase failed');
     } finally {
       isErasing = false;
@@ -679,7 +679,7 @@
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Scan progress listener failed', error));
 
     listen<string[]>('cleaner-temp-batch', (event) => {
       try {
@@ -695,11 +695,11 @@
           scheduleTempFlush();
         }
       } catch {
-        /* noop */
+        /* ignore malformed temp batch payload */
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Temp batch listener failed', error));
 
     listen<{ total?: number }>('cleaner-temp-done', (event) => {
       try {
@@ -738,7 +738,7 @@
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Temp done listener failed', error));
 
     listen<[string, number][]>('cleaner-large-batch', (event) => {
       try {
@@ -748,11 +748,11 @@
           scheduleLargeFlush();
         }
       } catch {
-        /* noop */
+        /* ignore malformed large batch payload */
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Large batch listener failed', error));
 
     listen<Array<{ hash: string; size: number; files: string[] }>>(
       'cleaner-dup-groups-batch',
@@ -764,12 +764,12 @@
             scheduleDupFlush();
           }
         } catch {
-          /* noop */
+          /* ignore malformed duplicate batch payload */
         }
       }
     )
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Duplicate batch listener failed', error));
 
     listen<string[]>('cleaner-empty-batch', (event) => {
       try {
@@ -779,11 +779,11 @@
           scheduleEmptyFlush();
         }
       } catch {
-        /* noop */
+        /* ignore malformed empty batch payload */
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Empty batch listener failed', error));
 
     listen<string[]>('cleaner-shortcut-batch', (event) => {
       try {
@@ -793,43 +793,43 @@
           scheduleShortcutFlush();
         }
       } catch {
-        /* noop */
+        /* ignore malformed shortcut batch payload */
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Shortcut batch listener failed', error));
 
     listen('cleaner-done', () => {
       try {
         // ...
       } catch {
-        /* noop */
+        /* ignore post-scan handler errors */
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Cleaner done listener failed', error));
     listen('cleaner-stopped', () => {
       scanning = false;
       isLoading = false;
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Cleaner stopped listener failed', error));
     listen('cleaner-error', (ev) => {
       try {
         toast.error(String(ev.payload || 'Scan error'));
-      } catch {
-        /* noop */
+      } catch (error) {
+        logCleanerError('Cleaner error handler failed', error);
       }
     })
       .then((fn) => unsubs.push(fn))
-      .catch(() => {});
+      .catch((error) => logCleanerError('Cleaner error listener failed', error));
 
     return () => {
       for (const u of unsubs) {
         try {
           u();
         } catch {
-          /* noop */
+          /* ignore listener cleanup errors */
         }
       }
     };
@@ -850,8 +850,8 @@
     try {
       await invoke('cancel_temp_scan');
       await invoke('cancel_cleaner_scan');
-    } catch {
-      /* noop */
+    } catch (error) {
+      logCleanerError('Cancel scan failed', error);
     }
     scanning = false;
     tempQueue = [];
@@ -877,7 +877,7 @@
       selectedPaths = new SvelteSet();
     } catch (error) {
       message = `Error deleting files: ${error}`;
-      console.error(error);
+      logCleanerError('Delete failed', error, 'ERROR');
       toast.error(message);
     } finally {
       isLoading = false;
@@ -1072,8 +1072,8 @@
                                   const { revealItemInDir } =
                                     await import('@tauri-apps/plugin-opener');
                                   await revealItemInDir(it.path);
-                                } catch {
-                                  /* noop */
+                                } catch (error) {
+                                  logCleanerError('Reveal item failed', error);
                                 }
                               }}>Reveal</DropdownMenuItem
                             >

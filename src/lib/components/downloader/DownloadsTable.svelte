@@ -25,11 +25,24 @@
     downloads: Download[];
     initialLoading: boolean;
     selectedIds: SvelteSet<number>;
-    sortBy: string;
+    sortBy: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
     sortDirection: 'asc' | 'desc';
     onStart: (id: number) => void;
     onCancel: (id: number) => Promise<void>;
   }>();
+
+  const sortColumns: Array<{
+    key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
+    label: string;
+    width: string;
+  }> = [
+    { key: 'name', label: 'Name', width: 'w-[35%]' },
+    { key: 'size', label: 'Size', width: 'w-28' },
+    { key: 'fileType', label: 'Type', width: 'w-24' },
+    { key: 'category', label: 'Category', width: 'w-32' },
+    { key: 'eta', label: 'ETA', width: 'w-28' },
+    { key: 'status', label: 'Status', width: 'w-52 pl-8' },
+  ];
 
   let tableEl = $state<HTMLTableElement | null>(null);
   let scrollEl = $state<HTMLDivElement | null>(null);
@@ -49,7 +62,7 @@
     downloads.slice(downloadsStart, Math.min(downloadsVisible, downloads.length))
   );
 
-  function setSort(key: string) {
+  function setSort(key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status') {
     if (sortBy === key) {
       sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
     } else {
@@ -58,7 +71,10 @@
     }
   }
 
-  function handleHeaderKey(e: KeyboardEvent, key: string) {
+  function handleHeaderKey(
+    e: KeyboardEvent,
+    key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status'
+  ) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       setSort(key);
@@ -172,7 +188,7 @@
             />
           </span>
         </TableHead>
-        {#each [{ key: 'name', label: 'Name', width: 'w-[35%]' }, { key: 'size', label: 'Size', width: 'w-28' }, { key: 'fileType', label: 'Type', width: 'w-24' }, { key: 'category', label: 'Category', width: 'w-32' }, { key: 'eta', label: 'ETA', width: 'w-28' }, { key: 'status', label: 'Status', width: 'w-52 pl-8' }] as col (col.key)}
+        {#each sortColumns as col (col.key)}
           <TableHead class={col.width}>
             <button
               class="flex items-center gap-1 text-left transition hover:text-foreground focus-visible:outline-none"

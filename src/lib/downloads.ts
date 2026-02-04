@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { loadBuiltInDownloads } from './builtInDownloads';
 import { resolveBuiltInDownloadSizes } from './downloadSizeResolver';
+import { pushLog } from '$lib/logStore';
 
 const DOWNLOADS_STORAGE_KEY = 'avelonia_downloads';
 const DEFAULT_CATALOG_FILENAME = 'avelonia-downloads.json';
@@ -23,13 +24,18 @@ export type NewDownloadEntry = {
   downloadLink: string;
 };
 
+function logDownloadsError(context: string, error: unknown, level: 'WARN' | 'ERROR' = 'ERROR') {
+  pushLog(level, `${context}: ${String(error)}`, 'Downloader');
+}
+
 function normalizeStoredDownload(download: Download): Download {
   let status = download.status;
   if (
     status === 'downloading' ||
     status === 'pending' ||
     status === 'queued' ||
-    status === 'failed'
+    status === 'failed' ||
+    status === 'verifying'
   ) {
     status = 'available';
   }
@@ -51,7 +57,7 @@ function loadDownloadsFromStorage(): Download[] | null {
     }
     return parsed.map((d: Download) => normalizeStoredDownload(d));
   } catch (error) {
-    console.error('Error parsing downloads from localStorage', error);
+    logDownloadsError('Error parsing downloads from localStorage', error);
     return null;
   }
 }
@@ -74,7 +80,7 @@ async function initializeDownloads(hasStored: Download[] | null) {
       await syncBuiltInDownloads(builtIn);
     }
   } catch (error) {
-    console.error('Failed to load default downloads', error);
+    logDownloadsError('Failed to load default downloads', error);
   }
 }
 
@@ -85,9 +91,30 @@ async function syncBuiltInDownloads(builtIn: Download[]) {
       if (item.id >= 100) return item;
 
       const match = builtIn.find((b) => b.name === item.name);
-      if (match && match.downloadLink !== item.downloadLink) {
-        hasChange = true;
-        return { ...item, downloadLink: match.downloadLink, size: match.size };
+      if (match) {
+        const hasDiff =
+          match.downloadLink !== item.downloadLink ||
+          (match.size ?? item.size) !== item.size ||
+          (match.fileType ?? item.fileType) !== item.fileType ||
+          (match.hash ?? undefined) !== item.hash ||
+          (match.installFlags ?? undefined) !== item.installFlags ||
+          (match.tags ?? item.tags) !== item.tags ||
+          (match.description ?? item.description) !== item.description ||
+          (match.category ?? item.category) !== item.category;
+        if (hasDiff) {
+          hasChange = true;
+          return {
+            ...item,
+            downloadLink: match.downloadLink,
+            size: match.size ?? item.size,
+            fileType: match.fileType ?? item.fileType,
+            hash: match.hash ?? undefined,
+            installFlags: match.installFlags ?? undefined,
+            tags: match.tags ?? item.tags,
+            description: match.description ?? item.description,
+            category: match.category ?? item.category,
+          };
+        }
       }
       return item;
     });
@@ -118,7 +145,7 @@ async function refreshBuiltInDownloadSizes() {
       return hasChange ? next : current;
     });
   } catch (error) {
-    console.warn('Failed to refresh built-in download sizes', error);
+    logDownloadsError('Failed to refresh built-in download sizes', error, 'WARN');
   }
 }
 
@@ -135,7 +162,7 @@ function scheduleDownloadPersistence(list: Download[]) {
     try {
       localStorage.setItem(DOWNLOADS_STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
-      console.error('Failed to persist downloads state', error);
+      logDownloadsError('Failed to persist downloads state', error);
     }
   }, DOWNLOADS_PERSIST_DELAY_MS);
 }
@@ -202,7 +229,7 @@ async function persistCatalogFile(path: string, list: Download[]) {
       contents: JSON.stringify(entries, null, 2),
     });
   } catch (error) {
-    console.error('Failed to persist download catalog', error);
+    logDownloadsError('Failed to persist download catalog', error);
   }
 }
 
@@ -238,7 +265,7 @@ async function seedCatalogFromFile(path: string) {
       return additions.length ? [...list, ...additions] : list;
     });
   } catch (error) {
-    console.error('Failed to load download catalog', error);
+    logDownloadsError('Failed to load download catalog', error);
   }
 }
 
@@ -330,7 +357,7 @@ async function handleCatalogPathChange(nextPath: string) {
     try {
       await invoke('move_download_catalog', { from: previousPath, to: nextPath });
     } catch (error) {
-      console.warn('Failed to move catalog file', error);
+      logDownloadsError('Failed to move catalog file', error, 'WARN');
     }
   }
   await seedCatalogFromFile(nextPath);

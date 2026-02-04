@@ -1,4 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
+import { pushLog } from '$lib/logStore';
 
 export type VerdictLabel = 'Safe' | 'Sus' | 'Not';
 
@@ -18,7 +19,7 @@ export type VtReport = {
 };
 
 function logVtError(context: string, error: unknown) {
-  console.warn(`[VT] ${context}`, error);
+  pushLog('WARN', `VT ${context} failed: ${String(error)}`, 'Optimize');
 }
 
 function normalizeKey(s: string): string {

@@ -89,6 +89,7 @@
     installed: 'Installed',
     queued: 'Queued',
     failed: 'Failed',
+    verifying: 'Verifying',
   };
 
   function formatBytes(bytes: number, decimals = 2) {
@@ -164,7 +165,6 @@
         });
         systemInfoErrorLogged = false;
       } catch (error) {
-        console.error('Failed to fetch system info:', error);
         if (!systemInfoErrorLogged) {
           const reason = error instanceof Error ? error.message : String(error);
           pushLog('ERROR', `Failed to fetch system info: ${reason}`);
@@ -221,7 +221,10 @@
     $downloads
       .filter(
         (dl: Download) =>
-          dl.status === 'downloading' || dl.status === 'pending' || dl.status === 'queued'
+          dl.status === 'downloading' ||
+          dl.status === 'pending' ||
+          dl.status === 'queued' ||
+          dl.status === 'verifying'
       )
       .map((dl) => ({
         data: dl,

@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { pushLog } from '$lib/logStore';
 
 export type DownloaderSettings = {
   autoInstall: boolean;
@@ -35,7 +36,7 @@ let persistEnabled = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function logSettingsError(context: string, error: unknown) {
-  console.warn(`[Settings] ${context}`, error);
+  pushLog('WARN', `Settings ${context} failed: ${String(error)}`, 'System');
 }
 
 function isTauriRuntime(): boolean {

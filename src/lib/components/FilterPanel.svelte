@@ -83,6 +83,8 @@
                     ? 'Queued'
                     : filters.status === 'downloading'
                       ? 'Downloading'
+                      : filters.status === 'verifying'
+                        ? 'Verifying'
                       : filters.status === 'paused'
                         ? 'Paused'
                         : filters.status === 'completed'
@@ -100,6 +102,7 @@
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="queued">Queued</SelectItem>
             <SelectItem value="downloading">Downloading</SelectItem>
+            <SelectItem value="verifying">Verifying</SelectItem>
             <SelectItem value="paused">Paused</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="installed">Installed</SelectItem>

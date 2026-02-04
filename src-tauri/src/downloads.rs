@@ -145,6 +145,10 @@ pub async fn download_file_inner(
     let temp_path = format!("{}.part", &path);
     let mut downloaded: u64 = 0;
 
+    if let Some(parent) = Path::new(&temp_path).parent() {
+        fs::create_dir_all(parent).map_err(|e| AppError::Io(e))?;
+    }
+
     if let Ok(metadata) = std::fs::metadata(&temp_path) {
         downloaded = metadata.len();
     }

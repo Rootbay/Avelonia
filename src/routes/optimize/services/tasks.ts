@@ -11,6 +11,13 @@ export type ScheduledTask = {
 };
 
 export type TaskAction = 'disable' | 'enable' | 'delete' | 'run' | 'end' | '';
+export type TaskActionFailure = { stderr?: string; stdout?: string };
+export type TaskActionResult = {
+  success?: number;
+  elevated?: number;
+  stopped?: number;
+  failures?: TaskActionFailure[];
+};
 
 export async function listScheduledTasks(): Promise<ScheduledTask[]> {
   const res = (await invoke('list_scheduled_tasks')) as ScheduledTask[];
@@ -31,7 +38,10 @@ export async function getTaskDetails(taskName: string): Promise<[string, string,
   ];
 }
 
-export async function executeTaskAction(action: TaskAction, names: string[]): Promise<unknown> {
+export async function executeTaskAction(
+  action: TaskAction,
+  names: string[]
+): Promise<TaskActionResult | number | null> {
   if (!action || names.length === 0) return null;
   if (action === 'disable') return await invoke('disable_scheduled_tasks', { names });
   if (action === 'enable') return await invoke('enable_scheduled_tasks', { names });

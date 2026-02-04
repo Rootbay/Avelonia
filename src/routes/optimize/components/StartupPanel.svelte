@@ -66,12 +66,11 @@
     try {
       const items = (await invoke('list_startup_shortcuts')) as StartupItem[];
       startupItems = Array.isArray(items) ? items : [];
-      console.debug('[VT] startup items loaded:', startupItems.length);
       selectedStartup = new SvelteSet();
       startupLoaded = true;
       startupVisible = Math.min(startupItems.length, 50);
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Failed to load startup items: ${String(e)}`, 'Optimize');
     } finally {
       loadingStartup = false;
     }
@@ -111,7 +110,7 @@
         startupVisible = Math.min(Math.max(50, startupVisible), startupItems.length);
       }
     } catch {
-      /* noop */
+      pushLog('WARN', 'Failed to poll startup items', 'Optimize');
     } finally {
       _startupPollBusy = false;
     }
@@ -120,7 +119,8 @@
   function normalizeWinPath(p: string) {
     try {
       return p.replace(/\//g, '\\');
-    } catch {
+    } catch (error) {
+      pushLog('WARN', `Failed to normalize path: ${String(error)}`, 'Optimize');
       return p;
     }
   }
@@ -196,15 +196,21 @@
         try {
           await openPath(folder);
           await new Promise((r) => setTimeout(r, 200));
-        } catch (err) {
-          console.error('Failed to open folder:', folder, err);
+        } catch (error) {
+          pushLog(
+            'WARN',
+            `Failed to open folder: ${folder} (${String(error)})`,
+            'Optimize'
+          );
           try {
             await revealItemInDir(folder);
-          } catch {}
+          } catch (revealError) {
+            pushLog('WARN', `Failed to reveal folder: ${String(revealError)}`, 'Optimize');
+          }
         }
       }
     } catch (e) {
-      console.error(e);
+      pushLog('ERROR', `Failed to list startup folders: ${String(e)}`, 'Optimize');
       toast.error('Failed to list startup folders');
     }
   }
