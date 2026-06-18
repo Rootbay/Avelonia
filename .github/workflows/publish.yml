@@ -21,13 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: 'macos-latest'
-            args: ''
-          - platform: 'ubuntu-22.04'
-            args: ''
-          - platform: 'windows-latest'
-            args: ''
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -68,4 +62,3 @@ jobs:
           releaseBody: 'Release version ${{ github.ref_type == "tag" && github.ref_name || github.event.inputs.version || "v1.0.0" }}'
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
