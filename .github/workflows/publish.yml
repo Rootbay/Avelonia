@@ -63,9 +63,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
-          releaseName: 'Avelonia ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}'
-          releaseBody: 'Release version ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}'
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.version || 'v1.0.0' }}
+          releaseName: 'Avelonia ${{ github.ref_type == "tag" && github.ref_name || github.event.inputs.version || "v1.0.0" }}'
+          releaseBody: 'Release version ${{ github.ref_type == "tag" && github.ref_name || github.event.inputs.version || "v1.0.0" }}'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
