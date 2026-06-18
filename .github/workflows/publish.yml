@@ -62,3 +62,4 @@ jobs:
           releaseBody: 'Release version v__VERSION__'
           releaseDraft: true
           prerelease: false
+          args: --no-sign
