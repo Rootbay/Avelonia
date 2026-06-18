@@ -105,6 +105,51 @@ fn get_tweak_definitions() -> Vec<TweakDefinition> {
                 value: 0,
             },
         },
+        TweakDefinition {
+            id: "enable_game_mode",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_CURRENT_USER,
+                path: "Software\\Microsoft\\GameBar",
+                name: "AllowAutoGameMode",
+                value: 1,
+            },
+        },
+        TweakDefinition {
+            id: "enable_hags",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers",
+                name: "HwSchMode",
+                value: 2,
+            },
+        },
+        TweakDefinition {
+            id: "disable_network_throttling",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
+                name: "NetworkThrottlingIndex",
+                value: 0xFFFFFFFF,
+            },
+        },
+        TweakDefinition {
+            id: "optimize_system_responsiveness",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
+                name: "SystemResponsiveness",
+                value: 0,
+            },
+        },
+        TweakDefinition {
+            id: "disable_power_throttling",
+            action: TweakAction::RegistryValue {
+                hive: HKEY_LOCAL_MACHINE,
+                path: "SYSTEM\\CurrentControlSet\\Control\\Power\\PowerThrottling",
+                name: "PowerThrottlingOff",
+                value: 1,
+            },
+        },
     ]
 }
 
@@ -294,6 +339,27 @@ if (Test-Path $path) {
         "multiplane_overlay" => vec![
             r#"if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm')) { New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' | Out-Null }"#.to_string(),
             r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm' -Name 'OverlayTestMode' -Value 5 -Type DWord -Force"#.to_string(),
+        ],
+        "disable_nagle" => vec![
+            r#"Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Set-ItemProperty -Path $_.PSPath -Name "TcpAckFrequency" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name "TCPNoDelay" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue }"#.to_string()
+        ],
+        "optimize_game_priority" => vec![
+            r#"if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games')) { New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' | Out-Null }"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'GPU Priority' -Value 8 -Type DWord -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Priority' -Value 6 -Type DWord -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Scheduling Category' -Value 'High' -Type String -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'SFIO Priority' -Value 'High' -Type String -Force"#.to_string(),
+        ],
+        "ethernet_low_latency" => vec![
+            r#"Disable-NetAdapterLso -Name * -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Disable-NetAdapterPowerManagement -Name * -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*InterruptModeration" -RegistryValue "0" -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*EEE" -RegistryValue "0" -ErrorAction SilentlyContinue"#.to_string(),
+        ],
+        "disable_hpet" => vec![
+            r#"bcdedit /set useplatformclock false"#.to_string(),
+            r#"if (-not (Test-Path 'HKCU:\Software\Avelonia')) { New-Item -Path 'HKCU:\Software\Avelonia' | Out-Null }"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKCU:\Software\Avelonia' -Name 'DisableHPET' -Value 1 -Type DWord -Force"#.to_string(),
         ],
         _ => Vec::new(),
     }
@@ -735,6 +801,63 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
             let path = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree\\AveloniaRegistryBackup";
             key.open_subkey(path).is_ok()
         }
+        "disable_nagle" => {
+            let key = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(interfaces) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces") {
+                for subkey_name in interfaces.enum_keys().map(|r| r.unwrap_or_default()) {
+                    if let Ok(subkey) = interfaces.open_subkey(&subkey_name) {
+                        if let Ok(val) = subkey.get_value::<u32, _>("TcpAckFrequency") {
+                            if val == 1 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        }
+        "optimize_game_priority" => {
+            let key = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games") {
+                let gpu_priority = subkey.get_value::<u32, _>("GPU Priority").unwrap_or(0);
+                let priority = subkey.get_value::<u32, _>("Priority").unwrap_or(0);
+                gpu_priority == 8 && priority == 6
+            } else {
+                false
+            }
+        }
+        "ethernet_low_latency" => {
+            let key = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(class_key) = key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}") {
+                for subkey_name in class_key.enum_keys().map(|r| r.unwrap_or_default()) {
+                    if let Ok(subkey) = class_key.open_subkey(&subkey_name) {
+                        if let Ok(val) = subkey.get_value::<String, _>("*InterruptModeration") {
+                            if val == "0" {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        }
+        "disable_hpet" => {
+            if super::shell_helpers::is_elevated() {
+                if let Ok(output) = std::process::Command::new("bcdedit").output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    if stdout.contains("useplatformclock") && (stdout.contains("No") || stdout.contains("false") || stdout.contains("no")) {
+                        return true;
+                    }
+                }
+            }
+            let key = RegKey::predef(HKEY_CURRENT_USER);
+            if let Ok(subkey) = key.open_subkey("Software\\Avelonia") {
+                if let Ok(val) = subkey.get_value::<u32, _>("DisableHPET") {
+                    return val == 1;
+                }
+            }
+            false
+        }
         _ => false,
     }
 }
@@ -760,7 +883,9 @@ pub fn get_tweaks_status() -> Result<std::collections::HashMap<String, bool>, St
             "detailed_bso_d", "s3_sleep", "cross_device_resume", "new_outlook",
             "disable_search", "disable_task_view", "center_taskbar_items", "disable_widgets", "disable_chat", "disable_consumer_features",
             "disable_ipv6", "prefer_ipv4", "disable_homegroup", "services_manual", "debloat_edge",
-            "debloat_adobe", "daily_registry_backup"
+            "debloat_adobe", "daily_registry_backup", "enable_game_mode", "enable_hags", "disable_nagle",
+            "disable_network_throttling", "optimize_system_responsiveness", "optimize_game_priority", "ethernet_low_latency",
+            "disable_power_throttling", "disable_hpet"
         ];
         for id in all_tweaks {
             status.insert(id.to_string(), check_tweak_applied_by_id(id));
@@ -925,6 +1050,41 @@ $filtered = $temp | Where-Object {
   -not $match
 }
 $filtered | Set-Content $hosts -Force"#.to_string()],
+        "enable_game_mode" => vec![
+            r#"Set-ItemProperty -Path 'HKCU:\Software\Microsoft\GameBar' -Name 'AllowAutoGameMode' -Value 0 -Type DWord -Force"#.to_string(),
+        ],
+        "enable_hags" => vec![
+            r#"Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name 'HwSchMode' -Value 1 -Type DWord -Force"#.to_string(),
+        ],
+        "disable_network_throttling" => vec![
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'NetworkThrottlingIndex' -Value 10 -Type DWord -Force"#.to_string(),
+        ],
+        "optimize_system_responsiveness" => vec![
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile' -Name 'SystemResponsiveness' -Value 20 -Type DWord -Force"#.to_string(),
+        ],
+        "disable_nagle" => vec![
+            r#"Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Remove-ItemProperty -Path $_.PSPath -Name "TcpAckFrequency" -ErrorAction SilentlyContinue; Remove-ItemProperty -Path $_.PSPath -Name "TCPNoDelay" -ErrorAction SilentlyContinue }"#.to_string()
+        ],
+        "optimize_game_priority" => vec![
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'GPU Priority' -Value 8 -Type DWord -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Priority' -Value 2 -Type DWord -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'Scheduling Category' -Value 'Medium' -Type String -Force"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games' -Name 'SFIO Priority' -Value 'Normal' -Type String -Force"#.to_string(),
+        ],
+        "ethernet_low_latency" => vec![
+            r#"Enable-NetAdapterLso -Name * -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Enable-NetAdapterPowerManagement -Name * -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*InterruptModeration" -RegistryValue "1" -ErrorAction SilentlyContinue"#.to_string(),
+            r#"Set-NetAdapterAdvancedProperty -Name * -RegistryKeyword "*EEE" -RegistryValue "1" -ErrorAction SilentlyContinue"#.to_string(),
+        ],
+        "disable_power_throttling" => vec![
+            r#"Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' -Name 'PowerThrottlingOff' -Value 0 -Type DWord -Force"#.to_string(),
+        ],
+        "disable_hpet" => vec![
+            r#"bcdedit /deletevalue useplatformclock"#.to_string(),
+            r#"if (-not (Test-Path 'HKCU:\Software\Avelonia')) { New-Item -Path 'HKCU:\Software\Avelonia' | Out-Null }"#.to_string(),
+            r#"Set-ItemProperty -Path 'HKCU:\Software\Avelonia' -Name 'DisableHPET' -Value 0 -Type DWord -Force"#.to_string(),
+        ],
         _ => Vec::new(),
     }
 }

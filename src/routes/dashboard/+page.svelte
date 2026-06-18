@@ -276,15 +276,19 @@
 
   function isTweakLog(log: LogEntry): boolean {
     if ((log.category || '') !== 'Optimize') return false;
-    const m = log.message || '';
+    const m = (log.message || '').toLowerCase();
     return (
       m.includes('transitioned setting') ||
       m.includes('transition setting') ||
       m.includes('tweaks batch') ||
       m.includes('settings batch') ||
       m.includes('update profile') ||
-      m.includes('Windows Explorer') ||
-      m.includes('fix action')
+      m.includes('windows explorer') ||
+      m.includes('fix action') ||
+      m.includes('watermark removal') ||
+      m.includes('activation status query') ||
+      m.includes('tweak') ||
+      m.includes('setting')
     );
   }
 

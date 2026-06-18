@@ -32,7 +32,7 @@
     fixActions,
   } from '../tweakLibrary';
 
-  type ProfileId = 'standard' | 'minimal' | 'privacy' | 'custom';
+  type ProfileId = 'standard' | 'minimal' | 'performance' | 'custom';
 
   const profilePresets: Record<Exclude<ProfileId, 'custom'>, string[]> = {
     minimal: [
@@ -65,27 +65,26 @@
       'disable_widgets',
       'disable_search',
     ],
-    privacy: [
+    performance: [
       'create_restore_point',
       'disable_consumer_features',
       'disable_telemetry',
       'disable_activity_history',
       'disable_recall',
-      'disable_explorer_discovery',
       'disable_gamedvr',
       'enable_end_task',
-      'disable_location_tracking',
-      'disable_wifi_sense',
-      'disable_powershell7_telemetry',
-      'debloat_edge',
       'disable_background_apps',
-      'remove_settings_home',
-      'prefer_ipv4',
-      'disable_teredo',
-      'disable_chat',
-      'disable_task_view',
-      'disable_widgets',
-      'disable_search',
+      'disable_fullscreen_optimizations',
+      'mouse_acceleration',
+      'enable_game_mode',
+      'enable_hags',
+      'disable_nagle',
+      'disable_network_throttling',
+      'optimize_system_responsiveness',
+      'optimize_game_priority',
+      'ethernet_low_latency',
+      'disable_power_throttling',
+      'disable_hpet',
       'dark_theme',
     ],
   };
@@ -106,9 +105,9 @@
       description: 'Only the most essential privacy/security adjustments.',
     },
     {
-      id: 'privacy',
-      label: 'Privacy',
-      description: 'Locks down telemetry, networking, and background services.',
+      id: 'performance',
+      label: 'Performance',
+      description: 'Maximizes FPS, reduces network latency, disables mouse acceleration, and enables Game Mode/HAGS.',
     },
   ];
 
@@ -322,8 +321,6 @@
     }
 
     if (elevated) {
-      let successCount = 0;
-
       for (const change of allChanges) {
         tweakAppliedStates[change.id] = 'applying';
         try {
@@ -334,7 +331,6 @@
             `Successfully transitioned setting ${change.id} to ${change.enabled ? 'on' : 'off'}.`,
             'Optimize'
           );
-          successCount++;
         } catch (error) {
           tweakAppliedStates[change.id] = 'failed';
           pushLog(
@@ -367,7 +363,6 @@
       }
 
       await refreshTweaksStatus();
-      toast.success(`Successfully adjusted ${successCount} setting(s).`);
     } else {
       for (const change of allChanges) {
         tweakAppliedStates[change.id] = 'applying';
@@ -409,6 +404,58 @@
         pushLog('ERROR', `Failed to apply settings batch: ${String(error)}`, 'Optimize');
         toast.error('Unable to apply tweaks right now.');
       }
+    }
+
+    // Verification Step:
+    const getLabel = (id: string) => {
+      const item = allTweakItems.find(t => t.id === id) || configItems.find(c => c.id === id);
+      return item ? item.label : id;
+    };
+
+    const successful: string[] = [];
+    const failed: string[] = [];
+
+    for (const change of allChanges) {
+      if (ACTION_ONLY_TWEAKS.includes(change.id)) {
+        // Skip verification check for action-only tweaks as they don't map to a queryable state
+        continue;
+      }
+
+      const label = getLabel(change.id);
+      const isAppliedNow = tweakAppliedStates[change.id] === 'on';
+
+      if (isAppliedNow === change.enabled) {
+        successful.push(label);
+        pushLog(
+          'SUCCESS',
+          `Verified: Tweak "${label}" successfully applied. System state is ${isAppliedNow ? 'ON' : 'OFF'}.`,
+          'Optimize'
+        );
+      } else {
+        failed.push(label);
+        tweakAppliedStates[change.id] = 'failed';
+        pushLog(
+          'ERROR',
+          `Verification failed: Tweak "${label}" (${change.id}) was not applied. System state is ${isAppliedNow ? 'ON' : 'OFF'} but desired state was ${change.enabled ? 'ON' : 'OFF'}.`,
+          'Optimize'
+        );
+      }
+    }
+
+    if (failed.length > 0) {
+      toast.error(`Applied with warnings. Failed to set: ${failed.join(', ')}`);
+      pushLog(
+        'WARNING',
+        `Batch execution completed with ${failed.length} failure(s). Successfully applied: ${successful.join(', ') || 'None'}. Failed: ${failed.join(', ')}.`,
+        'Optimize'
+      );
+    } else if (successful.length > 0) {
+      toast.success('All selected settings successfully applied!');
+      pushLog(
+        'SUCCESS',
+        `Successfully verified all selected settings: ${successful.join(', ')}`,
+        'Optimize'
+      );
     }
 
     isApplying = false;
@@ -483,8 +530,7 @@
         {/each}
       </div>
       <p class="text-sm text-muted-foreground">
-        Start with a recommended profile, then toggle the individual tweaks below to refine the
-        behavior.
+        Select a profile preset, then customize individual tweaks below.
       </p>
       <div class="flex gap-2">
         <Button size="sm" variant="secondary" onclick={applySelectedTweaks}>
