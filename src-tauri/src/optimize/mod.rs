@@ -116,10 +116,17 @@ pub async fn is_watermark_removed() -> Result<bool, String> {
         use winreg::RegKey;
         use winreg::enums::HKEY_LOCAL_MACHINE;
         let key = RegKey::predef(HKEY_LOCAL_MACHINE);
+
+        let mut svsvc_disabled = true;
+        if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\svsvc") {
+            let start: u32 = subkey.get_value("Start").unwrap_or(3);
+            svsvc_disabled = start == 4;
+        }
+
         if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SoftwareProtectionPlatform\\Activation") {
             let manual: u32 = subkey.get_value("Manual").unwrap_or(0);
             let notif: u32 = subkey.get_value("NotificationDisabled").unwrap_or(0);
-            return Ok(manual == 1 && notif == 1);
+            return Ok(svsvc_disabled && manual == 1 && notif == 1);
         }
         Ok(false)
     }

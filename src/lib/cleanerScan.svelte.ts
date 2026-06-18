@@ -1,45 +1,91 @@
 export type CleanerPhase = 'idle' | 'running' | 'done';
 
+export type FileEntry = { path: string; size?: number };
+export type DuplicateGroup = { hash: string; size: number; files: string[] };
+
 export type CleanerScanState = {
   phase: CleanerPhase;
-  found: number;
+  readonly found: number;
   startedAt?: number;
   finishedAt?: number;
   message?: string;
+  
+  tempFiles: FileEntry[];
+  largeFiles: FileEntry[];
+  duplicateFiles: FileEntry[];
+  emptyFolders: FileEntry[];
+  brokenShortcuts: FileEntry[];
+  dupGroups: DuplicateGroup[];
+  selectedPaths: Set<string>;
 };
 
-const initial: CleanerScanState = { phase: 'idle', found: 0 };
+const initial: CleanerScanState = {
+  phase: 'idle',
+  get found() {
+    return (
+      (this.tempFiles?.length || 0) +
+      (this.largeFiles?.length || 0) +
+      (this.duplicateFiles?.length || 0) +
+      (this.emptyFolders?.length || 0) +
+      (this.brokenShortcuts?.length || 0)
+    );
+  },
+  tempFiles: [],
+  largeFiles: [],
+  duplicateFiles: [],
+  emptyFolders: [],
+  brokenShortcuts: [],
+  dupGroups: [],
+  selectedPaths: new Set<string>(),
+};
 
 export const cleanerScan = $state<CleanerScanState>(initial);
 
 export function beginCleanerScan() {
   cleanerScan.phase = 'running';
-  cleanerScan.found = 0;
   cleanerScan.startedAt = Date.now();
   cleanerScan.message = '';
-}
-
-export function incCleanerFound(n: number) {
-  cleanerScan.found += Math.max(0, n);
+  
+  cleanerScan.tempFiles = [];
+  cleanerScan.largeFiles = [];
+  cleanerScan.duplicateFiles = [];
+  cleanerScan.emptyFolders = [];
+  cleanerScan.brokenShortcuts = [];
+  cleanerScan.dupGroups = [];
+  cleanerScan.selectedPaths = new Set<string>();
 }
 
 export function setCleanerMessage(msg: string) {
   cleanerScan.message = msg;
 }
 
-export function endCleanerScan(total?: number) {
+export function endCleanerScan() {
   cleanerScan.phase = 'done';
-  if (typeof total === 'number') {
-    cleanerScan.found = total;
-  }
   cleanerScan.finishedAt = Date.now();
   cleanerScan.message = '';
 }
 
 export function resetCleanerScan() {
   cleanerScan.phase = 'idle';
-  cleanerScan.found = 0;
   cleanerScan.startedAt = undefined;
   cleanerScan.finishedAt = undefined;
   cleanerScan.message = undefined;
+  
+  cleanerScan.tempFiles = [];
+  cleanerScan.largeFiles = [];
+  cleanerScan.duplicateFiles = [];
+  cleanerScan.emptyFolders = [];
+  cleanerScan.brokenShortcuts = [];
+  cleanerScan.dupGroups = [];
+  cleanerScan.selectedPaths = new Set<string>();
+}
+
+export function clearAllScannedItems() {
+  cleanerScan.tempFiles = [];
+  cleanerScan.largeFiles = [];
+  cleanerScan.duplicateFiles = [];
+  cleanerScan.emptyFolders = [];
+  cleanerScan.brokenShortcuts = [];
+  cleanerScan.dupGroups = [];
+  cleanerScan.selectedPaths = new Set<string>();
 }

@@ -11,8 +11,7 @@
   import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
-  import { Card, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
-  import { Separator } from '$lib/components/ui/separator';
+  import { Card } from '$lib/components/ui/card';
   import {
     Dialog,
     DialogContent,
@@ -76,6 +75,66 @@
     const t = setTimeout(() => (initialLoading = false), 350);
     return () => clearTimeout(t);
   });
+
+  function parseSpeedToBytes(speedStr: string | undefined): number {
+    if (!speedStr) return 0;
+    const s = speedStr.trim().toUpperCase();
+    if (s === 'N/A' || s === '0 B/S' || !s) return 0;
+    const match = s.match(/^(\d+(?:\.\d+)?)\s*([KMG]?B\/S)$/);
+    if (!match) {
+      const numOnly = parseFloat(s);
+      return isNaN(numOnly) ? 0 : numOnly;
+    }
+    const val = parseFloat(match[1]);
+    const unit = match[2];
+    if (unit === 'KB/S') return val * 1024;
+    if (unit === 'MB/S') return val * 1024 * 1024;
+    if (unit === 'GB/S') return val * 1024 * 1024 * 1024;
+    return val;
+  }
+
+  function formatSpeed(bytesPerSec: number): string {
+    if (bytesPerSec === 0) return '0 B/s';
+    const k = 1024;
+    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+    const val = bytesPerSec / Math.pow(k, i);
+    return `${val.toFixed(1)} ${sizes[i]}`;
+  }
+
+  const totalSpeedBytes = $derived.by(() => {
+    let sum = 0;
+    for (const d of $downloads) {
+      if (['downloading', 'pending', 'queued', 'verifying'].includes(d.status)) {
+        sum += parseSpeedToBytes(d.speed);
+      }
+    }
+    return sum;
+  });
+
+  let speedHistory = $state<number[]>([]);
+
+  onMount(() => {
+    speedHistory = Array(30).fill(0);
+    const interval = setInterval(() => {
+      speedHistory = [...speedHistory.slice(1), totalSpeedBytes];
+    }, 1000);
+    return () => clearInterval(interval);
+  });
+
+  const maxSpeed = $derived(Math.max(...speedHistory, 1024 * 1024));
+  const pathData = $derived.by(() => {
+    if (speedHistory.length === 0) return '';
+    return speedHistory
+      .map((h, i) => {
+        const x = (i / (speedHistory.length - 1)) * 300;
+        const y = 55 - (h / maxSpeed) * 45;
+        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+      })
+      .join(' ');
+  });
+
+  const areaPathData = $derived(pathData ? `${pathData} L 300 60 L 0 60 Z` : '');
 
   function toBytes(val: string | number | undefined | null): number {
     if (val === undefined || val === null) return 0;
@@ -220,7 +279,11 @@
       cancelable = 0,
       completed = 0;
     for (const d of selected) {
-      if ((d.status === 'available' || d.status === 'completed' || d.status === 'installed') && d.downloadLink) startable++;
+      if (
+        (d.status === 'available' || d.status === 'completed' || d.status === 'installed') &&
+        d.downloadLink
+      )
+        startable++;
       if (['downloading', 'pending', 'queued'].includes(d.status)) cancelable++;
       if (d.status === 'completed' || d.status === 'installed') completed++;
     }
@@ -266,7 +329,11 @@
       }
       case 'startSelected':
         selected
-          .filter((d) => (d.status === 'available' || d.status === 'completed' || d.status === 'installed') && d.downloadLink)
+          .filter(
+            (d) =>
+              (d.status === 'available' || d.status === 'completed' || d.status === 'installed') &&
+              d.downloadLink
+          )
           .forEach((d) => startDownload(d.id));
         break;
       case 'cancelSelected':
@@ -297,19 +364,19 @@
           });
         break;
       case 'retryFailedFiltered':
-        filteredDownloads
-          .filter((d) => d.status === 'failed')
-          .forEach((d) => startDownload(d.id));
+        filteredDownloads.filter((d) => d.status === 'failed').forEach((d) => startDownload(d.id));
         break;
       case 'retryAllFailed':
-        all
-          .filter((d) => d.status === 'failed')
-          .forEach((d) => startDownload(d.id));
+        all.filter((d) => d.status === 'failed').forEach((d) => startDownload(d.id));
         break;
       case 'copySelectedLinks': {
-        const links = selected.map((d) => d.downloadLink).filter(Boolean).join('\n');
+        const links = selected
+          .map((d) => d.downloadLink)
+          .filter(Boolean)
+          .join('\n');
         if (links) {
-          navigator.clipboard.writeText(links)
+          navigator.clipboard
+            .writeText(links)
             .then(() => toast.success('Copied download links to clipboard'))
             .catch(() => toast.error('Failed to copy to clipboard'));
         }
@@ -317,9 +384,12 @@
       }
       case 'exportFilteredCSV': {
         const headers = 'Name,Size,Type,Category,ETA,Status,Link\n';
-        const rows = filteredDownloads.map(d => 
-          `"${d.name}","${d.size}","${d.fileType}","${d.category}","${d.eta}","${d.status}","${d.downloadLink}"`
-        ).join('\n');
+        const rows = filteredDownloads
+          .map(
+            (d) =>
+              `"${d.name}","${d.size}","${d.fileType}","${d.category}","${d.eta}","${d.status}","${d.downloadLink}"`
+          )
+          .join('\n');
         const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -337,31 +407,88 @@
 </script>
 
 <div class="space-y-6">
-  <Card class="bg-card/80 shadow-sm">
-    <CardHeader>
-      <CardTitle class="text-2xl font-semibold">Downloader</CardTitle>
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <CardDescription>Search, filter, and manage app downloads.</CardDescription>
+  <div class="grid gap-4 md:grid-cols-3">
+    <!-- Header info card -->
+    <Card
+      class="glass-card md:col-span-2 bg-card/80 shadow-sm p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.005]"
+    >
+      <div>
+        <h2 class="text-lg font-bold font-heading mb-1 text-foreground">Downloader</h2>
+        <p class="text-xs text-muted-foreground leading-relaxed mb-3">
+          Search, filter, and manage app downloads. Run silent installers securely.
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] font-semibold">
         <div
-          class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-muted-foreground"
+          class="flex items-center gap-1 bg-muted/40 border border-border/30 rounded px-2 py-0.5 text-muted-foreground"
         >
-          <div class="flex items-center gap-1.5">
-            <span class="size-1.5 rounded-full bg-border"></span>
-            <span>Showing {filteredStats.count} / {globalStats.total}</span>
-          </div>
-          <Separator orientation="vertical" class="hidden h-3 md:flex" />
-          <div class="flex items-center gap-1.5">
-            <span class="size-1.5 rounded-full bg-primary"></span>
-            <span class="text-primary">{globalStats.active} Active</span>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <span class="size-1.5 rounded-full bg-emerald-500"></span>
-            <span class="text-emerald-500">{globalStats.completed} Done</span>
-          </div>
+          <span class="size-1.5 rounded-full bg-border"></span>
+          <span>Showing {filteredStats.count} / {globalStats.total}</span>
+        </div>
+        <div
+          class="flex items-center gap-1 bg-primary/10 border border-primary/20 rounded px-2 py-0.5 text-primary"
+        >
+          <span class="size-1.5 rounded-full bg-primary animate-pulse"></span>
+          <span>{globalStats.active} Active</span>
+        </div>
+        <div
+          class="flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5 text-emerald-500"
+        >
+          <span class="size-1.5 rounded-full bg-emerald-500"></span>
+          <span>{globalStats.completed} Done</span>
         </div>
       </div>
-    </CardHeader>
-  </Card>
+    </Card>
+
+    <!-- Speed History Sparkline -->
+    <Card
+      class="glass-card md:col-span-1 bg-card/80 shadow-sm p-4 flex flex-col justify-between overflow-hidden relative transition-all duration-300 hover:scale-[1.005] glow-blue"
+    >
+      <div class="z-10">
+        <h3 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-0.5">
+          Download Speed
+        </h3>
+        <div class="flex items-baseline gap-1">
+          <span class="text-2xl font-extrabold tracking-tight font-heading">
+            {formatSpeed(totalSpeedBytes)}
+          </span>
+          <span class="text-[10px] text-muted-foreground font-medium">total speed</span>
+        </div>
+      </div>
+
+      <!-- Sparkline chart -->
+      <div class="h-10 w-full mt-2 absolute bottom-0 left-0 right-0 z-0">
+        {#if totalSpeedBytes > 0 || speedHistory.some((h) => h > 0)}
+          <svg class="w-full h-full" viewBox="0 0 300 60" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="speedGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--color-chart-1)" stop-opacity="0.2" />
+                <stop offset="100%" stop-color="var(--color-chart-1)" stop-opacity="0.0" />
+              </linearGradient>
+            </defs>
+            <!-- Area under path -->
+            <path d={areaPathData} fill="url(#speedGrad)" class="transition-all duration-300" />
+            <!-- Speed line path -->
+            <path
+              d={pathData}
+              fill="none"
+              stroke="var(--color-chart-1)"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="transition-all duration-300"
+            />
+          </svg>
+        {:else}
+          <div
+            class="flex items-center justify-center h-full text-[10px] text-muted-foreground/30 font-medium pb-1 select-none"
+          >
+            No active downloads
+          </div>
+        {/if}
+      </div>
+    </Card>
+  </div>
 
   <div class="flex flex-wrap items-center gap-3">
     <Input class="flex-1 min-w-65" placeholder="Search downloads..." bind:value={searchTerm} />

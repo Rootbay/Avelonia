@@ -91,6 +91,7 @@ fn run_remove_activation_watermark_impl() -> Result<String, String> {
         r#"if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation')) { New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' | Out-Null }"#.to_string(),
         r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' -Name 'Manual' -Value 1 -Type DWord -Force"#.to_string(),
         r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' -Name 'NotificationDisabled' -Value 1 -Type DWord -Force"#.to_string(),
+        r#"if (Get-Service -Name svsvc -ErrorAction SilentlyContinue) { Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\svsvc' -Name 'Start' -Value 4 -Type DWord -Force; Stop-Service -Name svsvc -Force -ErrorAction SilentlyContinue }"#.to_string(),
         r#"Stop-Process -Name explorer -Force"#.to_string(),
     ];
     run_powershell_commands(&commands, "remove_watermark")?;

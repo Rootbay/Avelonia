@@ -407,7 +407,9 @@ async function performDownload(download: Download): Promise<void> {
       });
       await appLog(
         'SUCCESS',
-        'Download completed: ' + currentSnap.name + (currentSnap.targetPath ? ' -> ' + currentSnap.targetPath : '')
+        'Download completed: ' +
+          currentSnap.name +
+          (currentSnap.targetPath ? ' -> ' + currentSnap.targetPath : '')
       );
       void maybeAutoInstall(download.id);
       schedulePostCompleteCheck(download.id, 5000);
@@ -601,8 +603,8 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
       const s = get(settings);
       if (!s.downloader.verifyInstall) return;
       const list = get(downloads);
-        for (const d of list) {
-          if (d.status === 'installed') {
+      for (const d of list) {
+        if (d.status === 'installed') {
           try {
             const ok = (await invoke('is_installed', { displayNameHint: d.name })) as boolean;
             if (!ok) {
@@ -617,7 +619,7 @@ export function startInstallPresenceWatch(intervalMs = 20000) {
           } catch (error: unknown) {
             logIgnoredError('installPresenceWatch is_installed', error);
           }
-          } else if (d.status === 'completed' && isLikelyInstaller(d)) {
+        } else if (d.status === 'completed' && isLikelyInstaller(d)) {
           try {
             const p = d.targetPath;
             let exists = false;
@@ -765,9 +767,9 @@ export async function cancelDownload(id: number) {
   if (wasActive) {
     try {
       await invoke('cancel_download', { id });
-  } catch (error: unknown) {
-    void appLog('WARN', `cancel_download failed: ${String(error)}`);
-  }
+    } catch (error: unknown) {
+      void appLog('WARN', `cancel_download failed: ${String(error)}`);
+    }
   }
 
   updateDownloadById(id, (draft) => {
@@ -827,5 +829,3 @@ export function setDownloadRelease(id: number, releaseLabel: string) {
 downloads.subscribe((list) => {
   syncUsedPaths(list);
 });
-
-

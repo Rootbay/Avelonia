@@ -10,11 +10,82 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 static TEMP_CANCEL: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 use sysinfo::Disks;
+
+struct ExclusionFilter {
+    custom_patterns: Vec<String>,
+}
+
+impl ExclusionFilter {
+    fn new(custom_exclusions: Option<Vec<String>>) -> Self {
+        let custom_patterns = custom_exclusions
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.trim().to_lowercase().replace('\\', "/"))
+            .filter(|s| !s.is_empty())
+            .collect();
+        Self { custom_patterns }
+    }
+
+    fn should_exclude_path(&self, path: &Path) -> bool {
+        let path_str = path.to_string_lossy().to_lowercase().replace('\\', "/");
+        for pattern in &self.custom_patterns {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn should_prune_dir(&self, entry: &walkdir::DirEntry) -> bool {
+        if !entry.file_type().is_dir() {
+            return false;
+        }
+
+        if let Some(name) = entry.file_name().to_str() {
+            let name_lower = name.to_lowercase();
+            let is_default_ignored = name_lower == ".git"
+                || name_lower == "node_modules"
+                || name_lower == "target"
+                || name_lower == ".venv"
+                || name_lower == "venv"
+                || name_lower == "env"
+                || name_lower == "__pycache__"
+                || name_lower == ".idea"
+                || name_lower == ".vscode"
+                || name_lower == "bin"
+                || name_lower == "obj"
+                || name_lower == "dist"
+                || name_lower == "build"
+                || name_lower == "out"
+                || name_lower == "vendor"
+                || name_lower == ".next"
+                || name_lower == ".svelte-kit"
+                || name_lower == ".nuxt"
+                || name_lower == ".cargo"
+                || name_lower == ".gradle"
+                || name_lower == "bower_components";
+            
+            if is_default_ignored {
+                return true;
+            }
+        }
+
+        self.should_exclude_path(entry.path())
+    }
+
+    fn should_exclude_file(&self, entry: &walkdir::DirEntry) -> bool {
+        if !entry.file_type().is_file() {
+            return false;
+        }
+        self.should_exclude_path(entry.path())
+    }
+}
 
 use lnk::ShellLink;
 use lnk::encoding::WINDOWS_1252;
@@ -63,7 +134,10 @@ fn clear_directory_contents(root: &Path) -> Result<CleanupStats, AppError> {
 }
 
 #[tauri::command]
-pub async fn get_temp_files(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn get_temp_files(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<String>, AppError> {
     let mut temp_files = Vec::new();
     let mut scanned_count = 0;
 
@@ -79,12 +153,20 @@ pub async fn get_temp_files(app_handle: AppHandle) -> Result<Vec<String>, AppErr
     .filter(|p| p.exists() && p.is_dir())
     .collect();
 
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
+
     for temp_dir_path in common_temp_paths {
+        let filter_clone = Arc::clone(&filter);
+        let filter_clone2 = Arc::clone(&filter);
         for entry in WalkDir::new(&temp_dir_path)
             .into_iter()
+            .filter_entry(move |e| !filter_clone.should_prune_dir(e))
             .filter_map(|e| e.ok())
         {
             if entry.file_type().is_file() {
+                if filter_clone2.should_exclude_file(&entry) {
+                    continue;
+                }
                 temp_files.push(entry.path().display().to_string());
                 scanned_count += 1;
                 if scanned_count % 100 == 0 {
@@ -106,6 +188,7 @@ pub async fn get_temp_files_stream(
     app_handle: AppHandle,
     batch_size: Option<usize>,
     max: Option<usize>,
+    exclusions: Option<Vec<String>>,
 ) -> Result<usize, AppError> {
     let bs = batch_size.unwrap_or(250).max(50).min(1000);
     let limit = max.unwrap_or(500_000);
@@ -154,22 +237,31 @@ pub async fn get_temp_files_stream(
         .filter(|p| p.exists() && p.is_dir())
         .collect();
     
-    let (tx, rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::channel::<(String, u64)>();
     let scanned_total = std::sync::atomic::AtomicUsize::new(0);
+
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
 
     active_roots.into_par_iter().for_each(|root| {
         let txc = tx.clone();
         let ah = app_handle.clone();
+        let filter_clone = Arc::clone(&filter);
+        let filter_clone2 = Arc::clone(&filter);
         
         for entry in WalkDir::new(&root)
             .into_iter()
+            .filter_entry(move |e| !filter_clone.should_prune_dir(e))
             .filter_map(|e| e.ok())
         {
             if TEMP_CANCEL.load(Ordering::Relaxed) {
                 break;
             }
             if entry.file_type().is_file() {
-                let _ = txc.send(entry.path().display().to_string());
+                if filter_clone2.should_exclude_file(&entry) {
+                    continue;
+                }
+                let size = entry.metadata().ok().map(|m| m.len()).unwrap_or(0);
+                let _ = txc.send((entry.path().display().to_string(), size));
             }
             
             let c = scanned_total.fetch_add(1, Ordering::Relaxed);
@@ -188,8 +280,8 @@ pub async fn get_temp_files_stream(
     drop(tx);
 
     let mut total = 0usize;
-    let mut batch: Vec<String> = Vec::with_capacity(bs);
-    while let Ok(p) = rx.recv() {
+    let mut batch: Vec<(String, u64)> = Vec::with_capacity(bs);
+    while let Ok((p, s)) = rx.recv() {
         if TEMP_CANCEL.load(Ordering::Relaxed) {
             break;
         }
@@ -197,7 +289,7 @@ pub async fn get_temp_files_stream(
         if total >= limit {
             TEMP_CANCEL.store(true, Ordering::Relaxed);
         }
-        batch.push(p);
+        batch.push((p, s));
         if batch.len() >= bs {
             app_handle.emit("cleaner-temp-batch", &batch)?;
             batch.clear();
@@ -254,13 +346,15 @@ pub async fn start_cleaner_scan(
     app_handle: AppHandle,
     min_size_bytes: Option<u64>,
     max_temp: Option<usize>,
+    exclusions: Option<Vec<String>>,
 ) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
+    let exclusions_clone = exclusions.clone();
     tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Starting scan...");
         let _ = app.emit("cleaner-progress", "Scanning temporary files...");
-        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000))).await;
+        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000)), exclusions_clone.clone()).await;
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
             let _ = app.emit("cleaner-stopped", json!({"scope":"temp"}));
@@ -269,7 +363,7 @@ pub async fn start_cleaner_scan(
 
         let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
         let _ = app.emit("cleaner-progress", "Scanning large files...");
-        match find_large_files_min(min, app.clone()).await {
+        match find_large_files_min(min, app.clone(), exclusions_clone.clone()).await {
             Ok(list) => {
                 let _ = emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
                 let _ = app.emit("cleaner-done", json!({"scope":"large"}));
@@ -285,7 +379,7 @@ pub async fn start_cleaner_scan(
         }
 
         let _ = app.emit("cleaner-progress", "Scanning duplicates...");
-        match find_duplicate_groups(app.clone()).await {
+        match find_duplicate_groups(app.clone(), exclusions_clone.clone()).await {
             Ok(groups) => {
                 for slice in groups.chunks(60) {
                     let _ = app.emit("cleaner-dup-groups-batch", slice);
@@ -306,7 +400,7 @@ pub async fn start_cleaner_scan(
         }
 
         let _ = app.emit("cleaner-progress", "Scanning empty folders...");
-        match find_empty_folders(app.clone()).await {
+        match find_empty_folders(app.clone(), exclusions_clone.clone()).await {
             Ok(list) => {
                 let _ = emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
                 let _ = app.emit("cleaner-done", json!({"scope":"empty"}));
@@ -322,7 +416,7 @@ pub async fn start_cleaner_scan(
         }
 
         let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
-        match find_broken_shortcuts(app.clone()).await {
+        match find_broken_shortcuts(app.clone(), exclusions_clone).await {
             Ok(list) => {
                 let _ = emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
                 let _ = app.emit("cleaner-done", json!({"scope":"shortcuts"}));
@@ -344,13 +438,17 @@ pub fn cancel_cleaner_scan() -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>) -> Result<(), AppError> {
+pub async fn start_large_scan(
+    app_handle: AppHandle,
+    min_size_bytes: Option<u64>,
+    exclusions: Option<Vec<String>>,
+) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
     tokio::spawn(async move {
         let min = min_size_bytes.unwrap_or(100 * 1024 * 1024);
         let _ = app.emit("cleaner-progress", "Scanning large files...");
-        match find_large_files_min(min, app.clone()).await {
+        match find_large_files_min(min, app.clone(), exclusions).await {
             Ok(list) => {
                 let _ = emit_chunked_pairs(&app, "cleaner-large-batch", &list, 300);
                 let _ = app.emit("cleaner-done", json!({"scope":"large"}));
@@ -364,12 +462,15 @@ pub async fn start_large_scan(app_handle: AppHandle, min_size_bytes: Option<u64>
 }
 
 #[tauri::command]
-pub async fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), AppError> {
+pub async fn start_duplicate_groups_scan(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
     tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning duplicates...");
-        match find_duplicate_groups(app.clone()).await {
+        match find_duplicate_groups(app.clone(), exclusions).await {
             Ok(groups) => {
                 for slice in groups.chunks(60) {
                     let _ = app.emit("cleaner-dup-groups-batch", slice);
@@ -388,12 +489,15 @@ pub async fn start_duplicate_groups_scan(app_handle: AppHandle) -> Result<(), Ap
 }
 
 #[tauri::command]
-pub async fn start_empty_scan(app_handle: AppHandle) -> Result<(), AppError> {
+pub async fn start_empty_scan(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
     tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning empty folders...");
-        match find_empty_folders(app.clone()).await {
+        match find_empty_folders(app.clone(), exclusions).await {
             Ok(list) => {
                 let _ = emit_chunked_strings(&app, "cleaner-empty-batch", &list, 500);
                 let _ = app.emit("cleaner-done", json!({"scope":"empty"}));
@@ -407,12 +511,15 @@ pub async fn start_empty_scan(app_handle: AppHandle) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub async fn start_shortcut_scan(app_handle: AppHandle) -> Result<(), AppError> {
+pub async fn start_shortcut_scan(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<(), AppError> {
     let app = app_handle.clone();
     TEMP_CANCEL.store(false, Ordering::Relaxed);
     tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Scanning broken shortcuts...");
-        match find_broken_shortcuts(app.clone()).await {
+        match find_broken_shortcuts(app.clone(), exclusions).await {
             Ok(list) => {
                 let _ = emit_chunked_strings(&app, "cleaner-shortcut-batch", &list, 500);
                 let _ = app.emit("cleaner-done", json!({"scope":"shortcuts"}));
@@ -579,20 +686,23 @@ pub async fn get_drive_info() -> Result<(u64, u64), AppError> {
         total_disk_space += disk.total_space();
         available_disk_space += disk.available_space();
     }
-
     Ok((total_disk_space, available_disk_space))
 }
 
 #[tauri::command]
-pub async fn find_large_files(app_handle: AppHandle) -> Result<Vec<(String, u64)>, AppError> {
+pub async fn find_large_files(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<(String, u64)>, AppError> {
     let min_size_bytes: u64 = 100 * 1024 * 1024;
-    find_large_files_min(min_size_bytes, app_handle).await
+    find_large_files_min(min_size_bytes, app_handle, exclusions).await
 }
 
 #[tauri::command]
 pub async fn find_large_files_min(
     min_size_bytes: u64,
     app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
 ) -> Result<Vec<(String, u64)>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
     let user_profile = wp.user_profile;
@@ -607,36 +717,45 @@ pub async fn find_large_files_min(
     ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
 
     let results: Vec<(String, u64)> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .filter_map(|entry| {
-            if TEMP_CANCEL.load(Ordering::Relaxed) {
-                return None;
-            }
+        .filter_map({
+            let filter_clone = Arc::clone(&filter);
+            move |entry| {
+                if TEMP_CANCEL.load(Ordering::Relaxed) {
+                    return None;
+                }
 
-            let c = scanned_count.fetch_add(1, Ordering::Relaxed);
-            if c % 1000 == 0 {
-                let _ = app_handle.emit(
-                    "scan_progress",
-                    format!("Scanned {} files for large files...", c),
-                );
-            }
+                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if c % 1000 == 0 {
+                    let _ = app_handle.emit(
+                        "scan_progress",
+                        format!("Scanned {} files for large files...", c),
+                    );
+                }
 
-            if entry.file_type().is_file() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.len() >= min_size_bytes {
-                        return Some((entry.path().display().to_string(), meta.len()));
+                if entry.file_type().is_file() {
+                    if filter_clone.should_exclude_file(&entry) {
+                        return None;
+                    }
+                    if let Ok(meta) = entry.metadata() {
+                        if meta.len() >= min_size_bytes {
+                            return Some((entry.path().display().to_string(), meta.len()));
+                        }
                     }
                 }
+                None
             }
-            None
         })
         .collect();
 
@@ -647,6 +766,7 @@ pub async fn find_large_files_min(
 pub async fn find_large_files_top(
     app_handle: AppHandle,
     top: usize,
+    exclusions: Option<Vec<String>>,
 ) -> Result<Vec<(String, u64)>, AppError> {
     let k = top.max(1).min(10_000);
     let min_size = 100 * 1024 * 1024;
@@ -663,29 +783,38 @@ pub async fn find_large_files_top(
     ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
     
     let sized: Vec<(u64, String)> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .filter_map(|entry| {
-            let c = scanned_count.fetch_add(1, Ordering::Relaxed);
-            if c % 1000 == 0 {
-                let _ = app_handle.emit("scan_progress", format!("Scanned {} entries...", c));
-            }
-            
-            if entry.file_type().is_file() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.len() >= min_size {
-                        return Some((meta.len(), entry.path().display().to_string()));
+        .filter_map({
+            let filter_clone = Arc::clone(&filter);
+            move |entry| {
+                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if c % 1000 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} entries...", c));
+                }
+                
+                if entry.file_type().is_file() {
+                    if filter_clone.should_exclude_file(&entry) {
+                        return None;
+                    }
+                    if let Ok(meta) = entry.metadata() {
+                        if meta.len() >= min_size {
+                            return Some((meta.len(), entry.path().display().to_string()));
+                        }
                     }
                 }
+                None
             }
-            None
         })
         .collect();
 
@@ -708,7 +837,10 @@ pub async fn find_large_files_top(
 }
 
 #[tauri::command]
-pub async fn find_duplicate_files(app_handle: AppHandle) -> Result<Vec<(String, u64)>, AppError> {
+pub async fn find_duplicate_files(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<(String, u64)>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
@@ -720,24 +852,33 @@ pub async fn find_duplicate_files(app_handle: AppHandle) -> Result<Vec<(String, 
     ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
     
     let files: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .filter_map(|entry| {
-            if entry.file_type().is_file() {
-                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
-                if c % 500 == 0 {
-                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", c));
+        .filter_map({
+            let filter_clone = Arc::clone(&filter);
+            move |entry| {
+                if entry.file_type().is_file() {
+                    if filter_clone.should_exclude_file(&entry) {
+                        return None;
+                    }
+                    let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                    if c % 500 == 0 {
+                        let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", c));
+                    }
+                    return Some(entry.path().to_path_buf());
                 }
-                return Some(entry.path().to_path_buf());
+                None
             }
-            None
         })
         .collect();
 
@@ -799,7 +940,10 @@ fn calculate_partial_hash(path: &Path) -> Result<String, io::Error> {
 }
 
 #[tauri::command]
-pub async fn find_duplicate_groups(app_handle: AppHandle) -> Result<Vec<DuplicateGroup>, AppError> {
+pub async fn find_duplicate_groups(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<DuplicateGroup>, AppError> {
     let first_pass_limit: usize = 200_000;
     let hash_limit: usize = 15_000;
 
@@ -815,38 +959,49 @@ pub async fn find_duplicate_groups(app_handle: AppHandle) -> Result<Vec<Duplicat
     ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
-    let size_buckets: DashMap<u64, Vec<String>> = DashMap::new();
+    let size_buckets: Arc<DashMap<u64, Vec<String>>> = Arc::new(DashMap::new());
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
 
+    let size_buckets_clone = Arc::clone(&size_buckets);
     paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .for_each(|entry| {
-            if TEMP_CANCEL.load(Ordering::Relaxed) {
-                return;
-            }
+        .for_each({
+            let filter_clone = Arc::clone(&filter);
+            let size_buckets_inner = Arc::clone(&size_buckets_clone);
+            move |entry| {
+                if TEMP_CANCEL.load(Ordering::Relaxed) {
+                    return;
+                }
 
-            let current = scanned_count.fetch_add(1, Ordering::Relaxed);
-            if current >= first_pass_limit {
-                return;
-            }
+                let current = scanned_count.fetch_add(1, Ordering::Relaxed);
+                if current >= first_pass_limit {
+                    return;
+                }
 
-            if current % 1000 == 0 {
-                let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", current));
-            }
+                if current % 1000 == 0 {
+                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", current));
+                }
 
-            if entry.file_type().is_file() {
-                if let Ok(meta) = entry.metadata() {
-                    let len = meta.len();
-                    if len > 0 {
-                        size_buckets
-                            .entry(len)
-                            .or_default()
-                            .push(entry.path().display().to_string());
+                if entry.file_type().is_file() {
+                    if filter_clone.should_exclude_file(&entry) {
+                        return;
+                    }
+                    if let Ok(meta) = entry.metadata() {
+                        let len = meta.len();
+                        if len > 0 {
+                            size_buckets_inner
+                                .entry(len)
+                                .or_default()
+                                .push(entry.path().display().to_string());
+                        }
                     }
                 }
             }
@@ -855,6 +1010,8 @@ pub async fn find_duplicate_groups(app_handle: AppHandle) -> Result<Vec<Duplicat
     if TEMP_CANCEL.load(Ordering::Relaxed) {
         return Ok(Vec::new());
     }
+
+    let size_buckets = Arc::try_unwrap(size_buckets).ok().unwrap();
 
     // Second pass: Partial hash (first 16KB)
     let mut partial_hash_buckets: HashMap<String, Vec<String>> = HashMap::new();
@@ -966,7 +1123,10 @@ fn calculate_file_hash(path: &Path) -> Result<String, io::Error> {
 }
 
 #[tauri::command]
-pub async fn find_empty_folders(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn find_empty_folders(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<String>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
@@ -979,24 +1139,33 @@ pub async fn find_empty_folders(app_handle: AppHandle) -> Result<Vec<String>, Ap
     ];
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
     
     let dirs: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .filter_map(|entry| {
-            if entry.file_type().is_dir() {
-                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
-                if c % 500 == 0 {
-                    let _ = app_handle.emit("scan_progress", format!("Scanned {} directories...", c));
+        .filter_map({
+            let filter_clone = Arc::clone(&filter);
+            move |entry| {
+                if entry.file_type().is_dir() {
+                    if filter_clone.should_exclude_path(entry.path()) {
+                        return None;
+                    }
+                    let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                    if c % 500 == 0 {
+                        let _ = app_handle.emit("scan_progress", format!("Scanned {} directories...", c));
+                    }
+                    return Some(entry.path().to_path_buf());
                 }
-                return Some(entry.path().to_path_buf());
+                None
             }
-            None
         })
         .collect();
 
@@ -1016,7 +1185,10 @@ pub async fn find_empty_folders(app_handle: AppHandle) -> Result<Vec<String>, Ap
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub async fn find_broken_shortcuts(app_handle: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn find_broken_shortcuts(
+    app_handle: AppHandle,
+    exclusions: Option<Vec<String>>,
+) -> Result<Vec<String>, AppError> {
     let wp = crate::paths::WindowsPaths::get();
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
@@ -1040,30 +1212,41 @@ pub async fn find_broken_shortcuts(app_handle: AppHandle) -> Result<Vec<String>,
     }
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
+    let filter = Arc::new(ExclusionFilter::new(exclusions));
     
+    let app_handle_clone = app_handle.clone();
     let lnk_files: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
+            let filter_clone = Arc::clone(&filter);
             WalkDir::new(root)
                 .into_iter()
+                .filter_entry(move |e| !filter_clone.should_prune_dir(e))
                 .filter_map(|e| e.ok())
                 .par_bridge()
         })
-        .filter_map(|entry| {
-            if entry.file_type().is_file() {
-                let c = scanned_count.fetch_add(1, Ordering::Relaxed);
-                if c % 400 == 0 {
-                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", c));
-                }
-                
-                let path = entry.path();
-                if let Some(ext) = path.extension() {
-                    if ext.eq_ignore_ascii_case("lnk") {
-                        return Some(path.to_path_buf());
+        .filter_map({
+            let filter_clone = Arc::clone(&filter);
+            let app_handle_inner = app_handle_clone.clone();
+            move |entry| {
+                if entry.file_type().is_file() {
+                    if filter_clone.should_exclude_file(&entry) {
+                        return None;
+                    }
+                    let c = scanned_count.fetch_add(1, Ordering::Relaxed);
+                    if c % 400 == 0 {
+                        let _ = app_handle_inner.emit("scan_progress", format!("Scanned {} files...", c));
+                    }
+                    
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if ext.eq_ignore_ascii_case("lnk") {
+                            return Some(path.to_path_buf());
+                        }
                     }
                 }
+                None
             }
-            None
         })
         .collect();
 

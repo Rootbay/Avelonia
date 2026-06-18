@@ -85,15 +85,15 @@
                       ? 'Downloading'
                       : filters.status === 'verifying'
                         ? 'Verifying'
-                      : filters.status === 'paused'
-                        ? 'Paused'
-                        : filters.status === 'completed'
-                          ? 'Completed'
-                          : filters.status === 'installed'
-                            ? 'Installed'
-                            : filters.status === 'failed'
-                              ? 'Failed'
-                              : 'All statuses'}
+                        : filters.status === 'paused'
+                          ? 'Paused'
+                          : filters.status === 'completed'
+                            ? 'Completed'
+                            : filters.status === 'installed'
+                              ? 'Installed'
+                              : filters.status === 'failed'
+                                ? 'Failed'
+                                : 'All statuses'}
             </p>
           </SelectTrigger>
           <SelectContent>

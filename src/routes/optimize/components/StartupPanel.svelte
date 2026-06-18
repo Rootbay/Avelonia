@@ -197,11 +197,7 @@
           await openPath(folder);
           await new Promise((r) => setTimeout(r, 200));
         } catch (error) {
-          pushLog(
-            'WARN',
-            `Failed to open folder: ${folder} (${String(error)})`,
-            'Optimize'
-          );
+          pushLog('WARN', `Failed to open folder: ${folder} (${String(error)})`, 'Optimize');
           try {
             await revealItemInDir(folder);
           } catch (revealError) {

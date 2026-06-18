@@ -44,22 +44,54 @@
   import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
   import { pushLog, type LogLevel } from '$lib/logStore';
   import { Trash2, Scan, Eraser, Ellipsis } from '@lucide/svelte';
-  import { SvelteSet } from 'svelte/reactivity';
 
   interface FileEntry {
     path: string;
     size?: number;
   }
 
-  let tempFiles = $state<FileEntry[]>([]);
-  let largeFiles = $state<FileEntry[]>([]);
-  let duplicateFiles = $state<FileEntry[]>([]);
-  let emptyFolders = $state<FileEntry[]>([]);
-  let brokenShortcuts = $state<FileEntry[]>([]);
+  import { cleanerScan, beginCleanerScan } from '$lib/cleanerScan.svelte';
+
+  let isDeferredLoaded = $state(false);
+  onMount(() => {
+    const t = setTimeout(() => {
+      isDeferredLoaded = true;
+    }, 120);
+    return () => clearTimeout(t);
+  });
+
+  const tempFiles = $derived(isDeferredLoaded ? cleanerScan.tempFiles : []);
+  const largeFiles = $derived(isDeferredLoaded ? cleanerScan.largeFiles : []);
+  const duplicateFiles = $derived(isDeferredLoaded ? cleanerScan.duplicateFiles : []);
+  const emptyFolders = $derived(isDeferredLoaded ? cleanerScan.emptyFolders : []);
+  const brokenShortcuts = $derived(isDeferredLoaded ? cleanerScan.brokenShortcuts : []);
+  const dupGroups = $derived(isDeferredLoaded ? cleanerScan.dupGroups : []);
+  const selectedPaths = $derived(isDeferredLoaded ? cleanerScan.selectedPaths : new Set<string>());
+
+  let totalDiskSpace = $state(0);
+  let availableDiskSpace = $state(0);
+
+  const tempSize = $derived(tempFiles.reduce((acc, f) => acc + (f.size || 0), 0));
+  const largeSize = $derived(largeFiles.reduce((acc, f) => acc + (f.size || 0), 0));
+  const duplicateSize = $derived(duplicateFiles.reduce((acc, f) => acc + (f.size || 0), 0));
+  const totalClutterSize = $derived(tempSize + largeSize + duplicateSize);
+
+  const clutterRatio = $derived(totalDiskSpace > 0 ? (totalClutterSize / totalDiskSpace) * 100 : 0);
+  const freeRatio = $derived(totalDiskSpace > 0 ? (availableDiskSpace / totalDiskSpace) * 100 : 0);
+  const otherUsedRatio = $derived(
+    totalDiskSpace > 0 ? Math.max(0, 100 - clutterRatio - freeRatio) : 0
+  );
+
+  const tempClutterPct = $derived(totalClutterSize > 0 ? (tempSize / totalClutterSize) * 100 : 0);
+  const largeClutterPct = $derived(totalClutterSize > 0 ? (largeSize / totalClutterSize) * 100 : 0);
+  const dupClutterPct = $derived(
+    totalClutterSize > 0 ? (duplicateSize / totalClutterSize) * 100 : 0
+  );
+
   let message = $state('');
-  let progressMessage = $state('');
+  const progressMessage = $derived(cleanerScan.message || '');
   let isLoading = $state(false);
-  let scanning = $state(false);
+  const scanning = $derived(cleanerScan.phase === 'running');
   let eraserPasses = $state(1);
   let isErasing = $state(false);
   let showConfirmationModal = $state(false);
@@ -69,8 +101,6 @@
   let qDeb = $state('');
   let filterKind = $state<'all' | Kind>('all');
   let largeMinMB = $state(100);
-  let dupGroups = $state<Array<{ hash: string; size: number; files: string[] }>>([]);
-  let selectedPaths = $state(new Set<string>());
   let showSettings = $state(false);
   let exclusions = $state<string[]>([]);
   let normalizedExclusions = $derived(
@@ -106,23 +136,14 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
     loadExclusions();
-  });
-
-  onMount(() => {
     try {
-      const cache = loadCleanerCache();
-      if (cache) {
-        tempFiles = Array.isArray(cache.tempFiles) ? cache.tempFiles : [];
-        largeFiles = Array.isArray(cache.largeFiles) ? cache.largeFiles : [];
-        duplicateFiles = Array.isArray(cache.duplicateFiles) ? cache.duplicateFiles : [];
-        emptyFolders = Array.isArray(cache.emptyFolders) ? cache.emptyFolders : [];
-        brokenShortcuts = Array.isArray(cache.brokenShortcuts) ? cache.brokenShortcuts : [];
-        dupGroups = Array.isArray(cache.dupGroups) ? cache.dupGroups : [];
-      }
+      const [total, avail] = await invoke<[number, number]>('get_drive_info');
+      totalDiskSpace = total;
+      availableDiskSpace = avail;
     } catch (error) {
-      logCleanerError('Load cleaner cache failed', error);
+      logCleanerError('Failed to fetch drive info', error);
     }
   });
 
@@ -147,12 +168,12 @@
     _cacheSaveTimer = setTimeout(() => {
       try {
         saveCleanerCache({
-          tempFiles,
-          largeFiles,
-          duplicateFiles,
-          emptyFolders,
-          brokenShortcuts,
-          dupGroups,
+          tempFiles: cleanerScan.tempFiles,
+          largeFiles: cleanerScan.largeFiles,
+          duplicateFiles: cleanerScan.duplicateFiles,
+          emptyFolders: cleanerScan.emptyFolders,
+          brokenShortcuts: cleanerScan.brokenShortcuts,
+          dupGroups: cleanerScan.dupGroups,
           timestamp: Date.now(),
         });
       } catch (error) {
@@ -162,12 +183,13 @@
   }
 
   $effect(() => {
-    void tempFiles;
-    void largeFiles;
-    void duplicateFiles;
-    void emptyFolders;
-    void brokenShortcuts;
-    void dupGroups;
+    if (!isDeferredLoaded) return;
+    void cleanerScan.tempFiles;
+    void cleanerScan.largeFiles;
+    void cleanerScan.duplicateFiles;
+    void cleanerScan.emptyFolders;
+    void cleanerScan.brokenShortcuts;
+    void cleanerScan.dupGroups;
     saveCacheSoon();
   });
 
@@ -190,16 +212,12 @@
 
   type CleanerItem = { path: string; size?: number; kind: Kind; groupId?: string };
 
-  function resolveCleanerItems(value: CleanerItem[] | (() => CleanerItem[])) {
-    return typeof value === 'function' ? (value as () => CleanerItem[])() : value;
-  }
-
   let unifiedCap = $state(500000);
   const UNIFIED_BUILD_STEP = 5000;
   const allItems = $derived.by<CleanerItem[]>(() => {
     const cap = unifiedCap;
     const items: CleanerItem[] = [];
-    const seen = new SvelteSet<string>();
+    const seen = new Set<string>();
     const term = qDeb.trim().toLowerCase();
     function tryPush(it: CleanerItem) {
       const p = it.path;
@@ -241,172 +259,18 @@
     return items;
   });
 
-  const getAllItemsList = () => allItems;
   const selectedCount = $derived(selectedPaths.size);
   const selectedSize = $derived.by(() => {
     let sum = 0;
     const s = selectedPaths;
-    for (const it of getAllItemsList()) {
+    for (const it of allItems) {
       if (s.has(it.path)) sum += it.size ?? 0;
     }
     return sum;
   });
 
   const MAX_TEMP_ITEMS = 20000;
-  let tempTruncated = $state(false);
-  let tempReportedTotal = $state(0);
-  let tempQueue: string[] = [];
-  let tempFlushRaf: number | null = null;
-  const TEMP_FLUSH_IDLE_MS = 350;
-
-  function scheduleTempFlush() {
-    if (tempFlushRaf !== null) return;
-    const run = () => {
-      tempFlushRaf = null;
-      if (tempQueue.length === 0) return;
-      try {
-        const now = Date.now();
-        const unifiedActive = now - _unifiedLastScrollTs < TEMP_FLUSH_IDLE_MS;
-        const unifiedUp = _unifiedLastDir === 'up' && unifiedActive;
-        if (unifiedActive || unifiedUp) {
-          tempFlushRaf = setTimeout(run, TEMP_FLUSH_IDLE_MS) as unknown as number;
-          return;
-        }
-      } catch {
-        /* ignore transient scroll read errors */
-      }
-
-      const take = tempQueue.splice(0, Math.min(2500, tempQueue.length));
-      const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
-      if (next.length) {
-        const remaining = Math.max(0, MAX_TEMP_ITEMS - tempFiles.length);
-        if (remaining <= 0) {
-          tempTruncated = true;
-        } else {
-          const append = next.slice(0, remaining);
-          tempFiles = [...tempFiles, ...append];
-          if (append.length < next.length) tempTruncated = true;
-        }
-      }
-      if (tempQueue.length > 0) scheduleTempFlush();
-    };
-    tempFlushRaf =
-      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
-  }
-
-  type FilePair = [string, number];
-  let largeQueue: FilePair[] = [];
-  let largeFlushRaf: number | null = null;
-  function scheduleLargeFlush() {
-    if (largeFlushRaf !== null) return;
-    const run = () => {
-      largeFlushRaf = null;
-      if (largeQueue.length === 0) return;
-      try {
-        const now = Date.now();
-        const userActive = now - _unifiedLastScrollTs < 600;
-        const scrollingUp = _unifiedLastDir === 'up' && userActive;
-        if (scrollingUp) {
-          largeFlushRaf = setTimeout(run, 300) as unknown as number;
-          return;
-        }
-      } catch {
-        /* ignore transient scroll read errors */
-      }
-      const take = largeQueue.splice(0, Math.min(2500, largeQueue.length));
-      const next = take.map(([p, s]) => ({ path: p, size: s }));
-      if (next.length) largeFiles = [...largeFiles, ...next];
-      if (largeQueue.length > 0) scheduleLargeFlush();
-    };
-    largeFlushRaf =
-      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
-  }
-
-  let dupGroupsQueue: Array<{ hash: string; size: number; files: string[] }> = [];
-  let dupFlushRaf: number | null = null;
-  function scheduleDupFlush() {
-    if (dupFlushRaf !== null) return;
-    const run = () => {
-      dupFlushRaf = null;
-      if (dupGroupsQueue.length === 0) return;
-      try {
-        const now = Date.now();
-        const userActive = now - _unifiedLastScrollTs < 600;
-        const scrollingUp = _unifiedLastDir === 'up' && userActive;
-        if (scrollingUp) {
-          dupFlushRaf = setTimeout(run, 300) as unknown as number;
-          return;
-        }
-      } catch {
-        /* ignore transient scroll read errors */
-      }
-      const take = dupGroupsQueue.splice(0, Math.min(500, dupGroupsQueue.length));
-      if (take.length) {
-        dupGroups = [...dupGroups, ...take];
-        const flat = take.flatMap((g) =>
-          (g.files || []).map((p) => ({ path: p as string, size: g.size }))
-        );
-        if (flat.length) duplicateFiles = [...duplicateFiles, ...flat];
-      }
-      if (dupGroupsQueue.length > 0) scheduleDupFlush();
-    };
-    dupFlushRaf =
-      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
-  }
-
-  let emptyQueue: string[] = [];
-  let emptyFlushRaf: number | null = null;
-  function scheduleEmptyFlush() {
-    if (emptyFlushRaf !== null) return;
-    const run = () => {
-      emptyFlushRaf = null;
-      if (emptyQueue.length === 0) return;
-      try {
-        const now = Date.now();
-        const userActive = now - _unifiedLastScrollTs < 600;
-        const scrollingUp = _unifiedLastDir === 'up' && userActive;
-        if (scrollingUp) {
-          emptyFlushRaf = setTimeout(run, 300) as unknown as number;
-          return;
-        }
-      } catch {
-        /* ignore transient scroll read errors */
-      }
-      const take = emptyQueue.splice(0, Math.min(2500, emptyQueue.length));
-      const next = take.map((p) => ({ path: p }));
-      if (next.length) emptyFolders = [...emptyFolders, ...next];
-      if (emptyQueue.length > 0) scheduleEmptyFlush();
-    };
-    emptyFlushRaf =
-      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
-  }
-
-  let shortcutQueue: string[] = [];
-  let shortcutFlushRaf: number | null = null;
-  function scheduleShortcutFlush() {
-    if (shortcutFlushRaf !== null) return;
-    const run = () => {
-      shortcutFlushRaf = null;
-      if (shortcutQueue.length === 0) return;
-      try {
-        const now = Date.now();
-        const userActive = now - _unifiedLastScrollTs < 600;
-        const scrollingUp = _unifiedLastDir === 'up' && userActive;
-        if (scrollingUp) {
-          shortcutFlushRaf = setTimeout(run, 300) as unknown as number;
-          return;
-        }
-      } catch {
-        /* ignore transient scroll read errors */
-      }
-      const take = shortcutQueue.splice(0, Math.min(2500, shortcutQueue.length));
-      const next = take.map((p) => ({ path: p }));
-      if (next.length) brokenShortcuts = [...brokenShortcuts, ...next];
-      if (shortcutQueue.length > 0) scheduleShortcutFlush();
-    };
-    shortcutFlushRaf =
-      window.requestIdleCallback?.(run, { timeout: 120 }) ?? window.setTimeout(run, 0);
-  }
+  const tempTruncated = $derived(cleanerScan.tempFiles.length >= MAX_TEMP_ITEMS);
 
   let unifiedContainer = $state<HTMLDivElement | null>(null);
   let _unifiedLastScrollTs = 0;
@@ -416,26 +280,22 @@
   const UNIFIED_PREBUFFER = 3;
   const UNIFIED_MAX_DOM = 600;
   let unifiedAutoFallback = $state(false);
-  let unifiedVirtualize = $derived(
-    !unifiedAutoFallback && (scanning || getAllItemsList().length > 1500)
-  );
+  let unifiedVirtualize = $derived(!unifiedAutoFallback && (scanning || allItems.length > 1500));
 
   let unifiedStart = $state(0);
-  const unifiedRowsInView = $derived(() => {
-    const h = unifiedContainer?.clientHeight ?? 480;
-    return Math.ceil(h / UNIFIED_ROW_PX) + 20;
-  });
+  const unifiedRowsInView = $derived(
+    Math.ceil((unifiedContainer?.clientHeight ?? 480) / UNIFIED_ROW_PX) + 20
+  );
 
-  const unifiedDisplayed = $derived(() => {
-    if (!unifiedVirtualize) return getAllItemsList();
-    const items = getAllItemsList();
-    const visibleRows = Math.min(unifiedRowsInView(), UNIFIED_MAX_DOM);
+  const unifiedDisplayed = $derived.by(() => {
+    if (!unifiedVirtualize) return allItems;
+    const items = allItems;
+    const visibleRows = Math.min(unifiedRowsInView, UNIFIED_MAX_DOM);
     const end = Math.min(items.length, unifiedStart + visibleRows);
     return items.slice(unifiedStart, end);
   });
 
-  let unifiedDisplayList = $derived(resolveCleanerItems(unifiedDisplayed));
-  const getUnifiedDisplayList = () => unifiedDisplayList;
+  let unifiedDisplayList = $derived(unifiedDisplayed);
 
   let unifiedPadPx = $state(0);
   const unifiedTopPad = $derived(unifiedVirtualize ? unifiedPadPx : 0);
@@ -443,7 +303,7 @@
     unifiedVirtualize
       ? Math.max(
           0,
-          getAllItemsList().length * UNIFIED_ROW_PX -
+          allItems.length * UNIFIED_ROW_PX -
             (unifiedTopPad + unifiedDisplayed.length * UNIFIED_ROW_PX)
         )
       : 0
@@ -454,10 +314,7 @@
       unifiedStart = 0;
       return;
     }
-    const maxStart = Math.max(
-      0,
-      getAllItemsList().length - Math.min(unifiedRowsInView(), UNIFIED_MAX_DOM)
-    );
+    const maxStart = Math.max(0, allItems.length - Math.min(unifiedRowsInView, UNIFIED_MAX_DOM));
     if (unifiedStart > maxStart) unifiedStart = maxStart;
     if (unifiedStart < 0) unifiedStart = 0;
   });
@@ -471,7 +328,7 @@
   });
 
   $effect(() => {
-    const _len = getAllItemsList().length;
+    const _len = allItems.length;
     void _len;
     setTimeout(() => {
       try {
@@ -555,65 +412,61 @@
       if (paths.length === 0) return;
       const res = (await invoke('stat_paths', { paths })) as [string, number][];
       const map = new Map(res);
-      tempFiles = tempFiles.map((f) => ({ path: f.path, size: map.get(f.path) ?? f.size }));
+      cleanerScan.tempFiles = cleanerScan.tempFiles.map((f) => ({
+        path: f.path,
+        size: map.get(f.path) ?? f.size,
+      }));
     } catch (error) {
       logCleanerError('Stat temp sizes failed', error);
     }
   }
 
   async function scanAll() {
-    if (scanning || isLoading) return;
-    tempFiles = [];
-    largeFiles = [];
-    duplicateFiles = [];
-    emptyFolders = [];
-    brokenShortcuts = [];
-    dupGroups = [];
-    selectedPaths = new SvelteSet();
-    tempQueue = [];
-    tempTruncated = false;
-    tempReportedTotal = 0;
-    scanning = true;
-    progressMessage = '';
+    if (cleanerScan.phase === 'running' || isLoading) return;
+    beginCleanerScan();
     message = '';
     try {
       const minBytes = Math.max(1, largeMinMB) * 1024 * 1024;
-      void invoke('start_cleaner_scan', { min_size_bytes: minBytes, max_temp: MAX_TEMP_ITEMS });
+      void invoke('start_cleaner_scan', {
+        min_size_bytes: minBytes,
+        max_temp: MAX_TEMP_ITEMS,
+        exclusions: normalizedExclusions,
+      });
     } catch (e) {
       logCleanerError('Scan failed to start', e, 'ERROR');
       toast.error('Scan failed to start');
-      scanning = false;
+      cleanerScan.phase = 'idle';
     }
   }
 
   function toggleSelectUnified(p: string) {
-    const next = new SvelteSet(selectedPaths);
+    const next = new Set(cleanerScan.selectedPaths);
     if (next.has(p)) next.delete(p);
     else next.add(p);
-    selectedPaths = next;
+    cleanerScan.selectedPaths = next;
   }
 
   function clearSelectionUnified() {
-    selectedPaths = new SvelteSet();
+    cleanerScan.selectedPaths = new Set();
   }
 
   function setSelectionForKind(kind: 'all' | Kind) {
-    const next = new SvelteSet(selectedPaths);
-    for (const it of getAllItemsList()) {
+    const next = new Set(cleanerScan.selectedPaths);
+    for (const it of allItems) {
       if (kind === 'all' || it.kind === kind) next.add(it.path);
     }
-    selectedPaths = next;
+    cleanerScan.selectedPaths = next;
   }
 
   async function deleteSelectedUnified() {
-    const files = Array.from(selectedPaths);
+    const files = Array.from(cleanerScan.selectedPaths);
     if (files.length === 0) return;
     filesToDelete = files;
     showConfirmationModal = true;
   }
 
   async function moveSelectedUnified() {
-    const files = Array.from(selectedPaths);
+    const files = Array.from(cleanerScan.selectedPaths);
     if (files.length === 0) return;
     try {
       const dest = await open({ directory: true });
@@ -621,15 +474,32 @@
       isLoading = true;
       message = 'Moving selected...';
       const moved = (await invoke('move_files', { files, destination: dest })) as number;
-      tempFiles = tempFiles.filter((f) => !selectedPaths.has(f.path));
-      largeFiles = largeFiles.filter((f) => !selectedPaths.has(f.path));
-      duplicateFiles = duplicateFiles.filter((f) => !selectedPaths.has(f.path));
-      emptyFolders = emptyFolders.filter((f) => !selectedPaths.has(f.path));
-      brokenShortcuts = brokenShortcuts.filter((f) => !selectedPaths.has(f.path));
-      for (const g of dupGroups) {
-        g.files = g.files.filter((p) => !selectedPaths.has(p));
-      }
-      dupGroups = dupGroups.filter((g) => g.files.length > 1);
+      cleanerScan.tempFiles = cleanerScan.tempFiles.filter(
+        (f) => !cleanerScan.selectedPaths.has(f.path)
+      );
+      cleanerScan.largeFiles = cleanerScan.largeFiles.filter(
+        (f) => !cleanerScan.selectedPaths.has(f.path)
+      );
+      cleanerScan.duplicateFiles = cleanerScan.duplicateFiles.filter(
+        (f) => !cleanerScan.selectedPaths.has(f.path)
+      );
+      cleanerScan.emptyFolders = cleanerScan.emptyFolders.filter(
+        (f) => !cleanerScan.selectedPaths.has(f.path)
+      );
+      cleanerScan.brokenShortcuts = cleanerScan.brokenShortcuts.filter(
+        (f) => !cleanerScan.selectedPaths.has(f.path)
+      );
+
+      const nextGroups = cleanerScan.dupGroups
+        .map((g) => {
+          return {
+            ...g,
+            files: g.files.filter((p) => !cleanerScan.selectedPaths.has(p)),
+          };
+        })
+        .filter((g) => g.files.length > 1);
+      cleanerScan.dupGroups = nextGroups;
+
       clearSelectionUnified();
       toast.success(`Moved ${moved} item(s)`);
     } catch (e) {
@@ -641,7 +511,7 @@
   }
 
   async function secureEraseSelectedUnified() {
-    const files = Array.from(selectedPaths);
+    const files = Array.from(cleanerScan.selectedPaths);
     if (files.length === 0) return;
     try {
       isErasing = true;
@@ -657,183 +527,16 @@
   }
 
   function autoSelectDuplicatesKeepOne() {
-    if (dupGroups.length === 0) return;
-    const next = new SvelteSet(selectedPaths);
-    for (const g of dupGroups) {
+    if (cleanerScan.dupGroups.length === 0) return;
+    const next = new Set(cleanerScan.selectedPaths);
+    for (const g of cleanerScan.dupGroups) {
       if (!g.files || g.files.length < 2) continue;
       const sorted = [...g.files].sort();
       for (let i = 1; i < sorted.length; i++) next.add(sorted[i]);
     }
-    selectedPaths = next;
+    cleanerScan.selectedPaths = next;
     filterKind = 'duplicate';
   }
-
-  onMount(() => {
-    const unsubs: Array<() => void> = [];
-
-    listen<string>('scan_progress', (event) => {
-      const typedWindow = window as Window & { __lastProg?: number };
-      if ((window.performance?.now?.() ?? Date.now()) - (typedWindow.__lastProg || 0) > 300) {
-        progressMessage = event.payload;
-        typedWindow.__lastProg = window.performance?.now?.() ?? Date.now();
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Scan progress listener failed', error));
-
-    listen<string[]>('cleaner-temp-batch', (event) => {
-      try {
-        const arr = event.payload;
-        if (Array.isArray(arr) && arr.length) {
-          for (const p of arr) {
-            if (tempFiles.length + tempQueue.length >= MAX_TEMP_ITEMS) {
-              tempTruncated = true;
-              break;
-            }
-            tempQueue.push(String(p));
-          }
-          scheduleTempFlush();
-        }
-      } catch {
-        /* ignore malformed temp batch payload */
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Temp batch listener failed', error));
-
-    listen<{ total?: number }>('cleaner-temp-done', (event) => {
-      try {
-        const payload = event.payload;
-        tempReportedTotal = Number(payload?.total || 0);
-      } catch {
-        tempReportedTotal = 0;
-      }
-      if (tempQueue.length > 0) {
-        while (tempQueue.length > 0) {
-          const take = tempQueue.splice(0, Math.min(2000, tempQueue.length));
-          const next = take.filter((p) => !matchesExclusion(p)).map((p) => ({ path: p }));
-          if (next.length) {
-            const remaining = Math.max(0, MAX_TEMP_ITEMS - tempFiles.length);
-            if (remaining <= 0) {
-              tempTruncated = true;
-              break;
-            }
-            const append = next.slice(0, remaining);
-            tempFiles = [...tempFiles, ...append];
-            if (append.length < next.length) {
-              tempTruncated = true;
-              break;
-            }
-          }
-        }
-      }
-      if (tempFiles.length > 0 && tempFiles.length <= 2000) {
-        void statTempSizes();
-      }
-      scanning = false;
-      if (tempTruncated) {
-        toast.warning(`Showing first ${tempFiles.length} items (truncated). Refine filters.`);
-      } else {
-        toast.success(`Found ${tempReportedTotal || tempFiles.length} temporary files.`);
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Temp done listener failed', error));
-
-    listen<[string, number][]>('cleaner-large-batch', (event) => {
-      try {
-        const arr = event.payload;
-        if (Array.isArray(arr) && arr.length) {
-          for (const it of arr) largeQueue.push([String(it[0]), Number(it[1])]);
-          scheduleLargeFlush();
-        }
-      } catch {
-        /* ignore malformed large batch payload */
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Large batch listener failed', error));
-
-    listen<Array<{ hash: string; size: number; files: string[] }>>(
-      'cleaner-dup-groups-batch',
-      (event) => {
-        try {
-          const groups = event.payload;
-          if (Array.isArray(groups) && groups.length) {
-            for (const g of groups) dupGroupsQueue.push(g);
-            scheduleDupFlush();
-          }
-        } catch {
-          /* ignore malformed duplicate batch payload */
-        }
-      }
-    )
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Duplicate batch listener failed', error));
-
-    listen<string[]>('cleaner-empty-batch', (event) => {
-      try {
-        const arr = event.payload;
-        if (Array.isArray(arr) && arr.length) {
-          for (const p of arr) emptyQueue.push(String(p));
-          scheduleEmptyFlush();
-        }
-      } catch {
-        /* ignore malformed empty batch payload */
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Empty batch listener failed', error));
-
-    listen<string[]>('cleaner-shortcut-batch', (event) => {
-      try {
-        const arr = event.payload;
-        if (Array.isArray(arr) && arr.length) {
-          for (const p of arr) shortcutQueue.push(String(p));
-          scheduleShortcutFlush();
-        }
-      } catch {
-        /* ignore malformed shortcut batch payload */
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Shortcut batch listener failed', error));
-
-    listen('cleaner-done', () => {
-      try {
-        // ...
-      } catch {
-        /* ignore post-scan handler errors */
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Cleaner done listener failed', error));
-    listen('cleaner-stopped', () => {
-      scanning = false;
-      isLoading = false;
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Cleaner stopped listener failed', error));
-    listen('cleaner-error', (ev) => {
-      try {
-        toast.error(String(ev.payload || 'Scan error'));
-      } catch (error) {
-        logCleanerError('Cleaner error handler failed', error);
-      }
-    })
-      .then((fn) => unsubs.push(fn))
-      .catch((error) => logCleanerError('Cleaner error listener failed', error));
-
-    return () => {
-      for (const u of unsubs) {
-        try {
-          u();
-        } catch {
-          /* ignore listener cleanup errors */
-        }
-      }
-    };
-  });
 
   function formatBytes(bytes: number, decimals = 2) {
     if (!Number.isFinite(bytes) || bytes < 0) return '-';
@@ -853,8 +556,6 @@
     } catch (error) {
       logCleanerError('Cancel scan failed', error);
     }
-    scanning = false;
-    tempQueue = [];
     toast.warning('Scan cancelled');
   }
 
@@ -867,14 +568,32 @@
       const deletedCount: number = await invoke('move_to_trash', { files: filesToDelete });
       message = `Moved ${deletedCount} item(s) to Trash.`;
 
-      tempFiles = tempFiles.filter((f) => !filesToDelete.includes(f.path));
-      largeFiles = largeFiles.filter((f) => !filesToDelete.includes(f.path));
-      duplicateFiles = duplicateFiles.filter((f) => !filesToDelete.includes(f.path));
-      emptyFolders = emptyFolders.filter((f) => !filesToDelete.includes(f.path));
-      brokenShortcuts = brokenShortcuts.filter((f) => !filesToDelete.includes(f.path));
+      cleanerScan.tempFiles = cleanerScan.tempFiles.filter((f) => !filesToDelete.includes(f.path));
+      cleanerScan.largeFiles = cleanerScan.largeFiles.filter(
+        (f) => !filesToDelete.includes(f.path)
+      );
+      cleanerScan.duplicateFiles = cleanerScan.duplicateFiles.filter(
+        (f) => !filesToDelete.includes(f.path)
+      );
+      cleanerScan.emptyFolders = cleanerScan.emptyFolders.filter(
+        (f) => !filesToDelete.includes(f.path)
+      );
+      cleanerScan.brokenShortcuts = cleanerScan.brokenShortcuts.filter(
+        (f) => !filesToDelete.includes(f.path)
+      );
+
+      const nextGroups = cleanerScan.dupGroups
+        .map((g) => {
+          return {
+            ...g,
+            files: g.files.filter((p) => !filesToDelete.includes(p)),
+          };
+        })
+        .filter((g) => g.files.length > 1);
+      cleanerScan.dupGroups = nextGroups;
 
       filesToDelete = [];
-      selectedPaths = new SvelteSet();
+      clearSelectionUnified();
     } catch (error) {
       message = `Error deleting files: ${error}`;
       logCleanerError('Delete failed', error, 'ERROR');
@@ -896,13 +615,273 @@
       <CardTitle class="text-2xl">Cleaner</CardTitle>
       <div class="flex items-baseline justify-between">
         <CardDescription>Scan, review and clean safely.</CardDescription>
-        <span class="text-xs text-muted-foreground"
-          >Counts ? Temp: {tempFiles.length}, Large: {largeFiles.length}, Dups: {dupGroups.length},
-          Empty: {emptyFolders.length}, Shortcuts: {brokenShortcuts.length}</span
-        >
+        {#if !isDeferredLoaded}
+          <div class="flex items-center gap-2">
+            <Skeleton class="h-3 w-16" />
+            <Skeleton class="h-3 w-20" />
+            <Skeleton class="h-3 w-14" />
+          </div>
+        {:else}
+          <span class="text-xs text-muted-foreground"
+            >Counts ? Temp: {tempFiles.length}, Large: {largeFiles.length}, Dups: {dupGroups.length},
+            Empty: {emptyFolders.length}, Shortcuts: {brokenShortcuts.length}</span
+          >
+        {/if}
       </div>
     </CardHeader>
   </Card>
+
+  <!-- SOTA Storage Analyzer Visualizer -->
+  {#if !isDeferredLoaded}
+    <div class="grid gap-4 md:grid-cols-2">
+      <!-- Drive storage skeleton -->
+      <Card
+        class="glass-card p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01] glow-purple"
+      >
+        <div>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
+          >
+            Drive Storage Analyzer
+          </h3>
+          <div class="flex items-baseline gap-1.5 mb-3">
+            <Skeleton class="h-7 w-28" />
+            <Skeleton class="h-3 w-20" />
+          </div>
+
+          <Skeleton class="h-3.5 w-full rounded-full mb-4" />
+
+          <!-- Legend skeleton -->
+          <div class="grid grid-cols-3 gap-1.5 text-[11px]">
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-purple-500/50 animate-pulse"></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-10" />
+                <Skeleton class="h-2 w-12" />
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-zinc-400/50 dark:bg-zinc-600/50 animate-pulse"
+              ></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-16" />
+                <Skeleton class="h-2 w-12" />
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-emerald-500/50 animate-pulse"></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-14" />
+                <Skeleton class="h-2 w-12" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <!-- Clutter breakdown skeleton -->
+      <Card
+        class="glass-card p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01] glow-emerald"
+      >
+        <div>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
+          >
+            Clutter Space Breakdown
+          </h3>
+          <div class="flex items-baseline gap-1.5 mb-3">
+            <Skeleton class="h-7 w-28" />
+            <Skeleton class="h-3 w-20" />
+          </div>
+
+          <Skeleton class="h-3.5 w-full rounded-full mb-4" />
+
+          <!-- Legend skeleton -->
+          <div class="grid grid-cols-3 gap-1.5 text-[11px]">
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-violet-500/50 animate-pulse"></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-12" />
+                <Skeleton class="h-2 w-14" />
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-blue-500/50 animate-pulse"></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-12" />
+                <Skeleton class="h-2 w-14" />
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-amber-500/50 animate-pulse"></span>
+              <div class="flex flex-col gap-1">
+                <Skeleton class="h-3 w-12" />
+                <Skeleton class="h-2 w-14" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  {:else if totalClutterSize > 0 || (totalDiskSpace > 0 && availableDiskSpace > 0)}
+    <div class="grid gap-4 md:grid-cols-2">
+      <!-- Drive health / total distribution -->
+      <Card
+        class="glass-card p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01] glow-purple"
+      >
+        <div>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
+          >
+            Drive Storage Analyzer
+          </h3>
+          <div class="flex items-baseline gap-1.5 mb-3">
+            <span class="text-2xl font-extrabold tracking-tight font-heading"
+              >{formatBytes(totalDiskSpace - availableDiskSpace)}</span
+            >
+            <span class="text-[10px] text-muted-foreground"
+              >Used of {formatBytes(totalDiskSpace)}</span
+            >
+          </div>
+
+          <div
+            class="h-3.5 w-full rounded-full bg-muted overflow-hidden flex border border-border/30 mb-4"
+          >
+            {#if clutterRatio > 0}
+              <div
+                style="width: {clutterRatio}%"
+                class="bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-500"
+                title="Scanned Clutter"
+              ></div>
+            {/if}
+            {#if otherUsedRatio > 0}
+              <div
+                style="width: {otherUsedRatio}%"
+                class="bg-zinc-400 dark:bg-zinc-600 transition-all duration-500"
+                title="System / Other files"
+              ></div>
+            {/if}
+            {#if freeRatio > 0}
+              <div
+                style="width: {freeRatio}%"
+                class="bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
+                title="Free Space"
+              ></div>
+            {/if}
+          </div>
+
+          <!-- Legend -->
+          <div class="grid grid-cols-3 gap-1.5 text-[11px]">
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-purple-500"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">Clutter</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(totalClutterSize)}</span
+                >
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-zinc-400 dark:bg-zinc-600"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">System/Other</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(
+                    Math.max(0, totalDiskSpace - availableDiskSpace - totalClutterSize)
+                  )}</span
+                >
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-emerald-500"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">Free Space</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(availableDiskSpace)}</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <!-- Clutter category breakdown -->
+      <Card
+        class="glass-card p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01] glow-emerald"
+      >
+        <div>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
+          >
+            Clutter Space Breakdown
+          </h3>
+          <div class="flex items-baseline gap-1.5 mb-3">
+            <span class="text-2xl font-extrabold tracking-tight font-heading"
+              >{formatBytes(totalClutterSize)}</span
+            >
+            <span class="text-[10px] text-muted-foreground">Scanned removable files</span>
+          </div>
+
+          <div
+            class="h-3.5 w-full rounded-full bg-muted overflow-hidden flex border border-border/30 mb-4"
+          >
+            {#if tempClutterPct > 0}
+              <div
+                style="width: {tempClutterPct}%"
+                class="bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-500"
+                title="Temp Files"
+              ></div>
+            {/if}
+            {#if largeClutterPct > 0}
+              <div
+                style="width: {largeClutterPct}%"
+                class="bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-500"
+                title="Large Files"
+              ></div>
+            {/if}
+            {#if dupClutterPct > 0}
+              <div
+                style="width: {dupClutterPct}%"
+                class="bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
+                title="Duplicate Files"
+              ></div>
+            {/if}
+          </div>
+
+          <!-- Legend -->
+          <div class="grid grid-cols-3 gap-1.5 text-[11px]">
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-violet-500"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">Temp Files</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(tempSize)} ({tempFiles.length})</span
+                >
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-blue-500"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">Large Files</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(largeSize)} ({largeFiles.length})</span
+                >
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="size-2 rounded-full bg-amber-500"></span>
+              <div class="flex flex-col">
+                <span class="font-semibold text-foreground/80 leading-none">Duplicates</span>
+                <span class="text-[9px] text-muted-foreground mt-0.5"
+                  >{formatBytes(duplicateSize)} ({duplicateFiles.length})</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  {/if}
 
   <div class="space-y-6 text-foreground">
     <Card>
@@ -983,7 +962,7 @@
               variant="ghost"
               size="sm"
               onclick={() => {
-                selectedPaths = new SvelteSet();
+                clearSelectionUnified();
               }}>Clear selection</Button
             >
           </div>
@@ -999,8 +978,8 @@
                   <th class="px-3 py-2 text-left w-9">
                     <Checkbox
                       checked={selectedPaths.size > 0 &&
-                        selectedPaths.size === getAllItemsList().length &&
-                        getAllItemsList().length > 0}
+                        selectedPaths.size === allItems.length &&
+                        allItems.length > 0}
                       onCheckedChange={() =>
                         setSelectionForKind(filterKind === 'all' ? 'all' : filterKind)}
                     />
@@ -1012,7 +991,15 @@
                 </tr>
               </thead>
               <tbody>
-                {#if getAllItemsList().length === 0}
+                {#if !isDeferredLoaded}
+                  {#each Array.from({ length: 12 }) as _, i (i)}
+                    <tr class="border-t">
+                      <td class="px-3 py-2.5" colspan="5"
+                        ><Skeleton class="h-4 w-full opacity-60" aria-hidden="true" /></td
+                      >
+                    </tr>
+                  {/each}
+                {:else if allItems.length === 0}
                   {#if scanning || isLoading}
                     {#each Array.from({ length: 16 }) as _, i (i)}
                       <tr class="border-t">
@@ -1035,7 +1022,7 @@
                       ></td></tr
                     >
                   {/if}
-                  {#each getUnifiedDisplayList().length > 0 ? getUnifiedDisplayList() : getAllItemsList().slice(0, Math.min(getAllItemsList().length, UNIFIED_MAX_DOM)) as it (it.path)}
+                  {#each unifiedDisplayList as it (it.path)}
                     <tr class="border-t h-10 align-middle">
                       <td class="px-3 py-2"
                         ><Checkbox

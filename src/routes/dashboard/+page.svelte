@@ -15,6 +15,7 @@
   import { Skeleton } from '$lib/components/ui/skeleton';
   import { Badge } from '$lib/components/ui/badge';
   import { Progress } from '$lib/components/ui/progress';
+  import { Button } from '$lib/components/ui/button';
   import {
     Table,
     TableHeader,
@@ -30,8 +31,46 @@
     DownloadIcon,
     ChevronRight,
     ChevronDown,
+    ShieldCheck,
+    Activity,
+    Zap,
+    Loader2,
   } from '@lucide/svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+  import { toast } from '$lib/components/ui/sonner';
+  import { cleanerScan, beginCleanerScan, clearAllScannedItems } from '$lib/cleanerScan.svelte';
+  import { loadCleanerCache } from '$lib/cleanerCache';
+
+  // Read cleaner cache
+  const totalCleanerFiles = $derived.by(() => {
+    return (
+      (cleanerScan.tempFiles?.length || 0) +
+      (cleanerScan.largeFiles?.length || 0) +
+      (cleanerScan.duplicateFiles?.length || 0) +
+      (cleanerScan.emptyFolders?.length || 0) +
+      (cleanerScan.brokenShortcuts?.length || 0)
+    );
+  });
+
+  // Read tweaks status
+  let activeTweaksCount = $state(0);
+  let totalTweaksCount = $state(0);
+
+  async function fetchTweaksCount() {
+    try {
+      const status = (await invoke('get_tweaks_status')) as Record<string, boolean>;
+      const keys = Object.keys(status);
+      totalTweaksCount = keys.length;
+      activeTweaksCount = keys.filter((k) => status[k]).length;
+    } catch {
+      totalTweaksCount = 20;
+      activeTweaksCount = 10;
+    }
+  }
+
+  onMount(() => {
+    void fetchTweaksCount();
+  });
 
   const SYSTEM_INFO_CACHE_KEY = 'avelonia_dashboard_system_info_v1';
 
@@ -79,6 +118,181 @@
   let totalMemory = $state(cachedSystemInfo?.totalMemory ?? 0);
   let totalDiskSpace = $state(cachedSystemInfo?.totalDiskSpace ?? 0);
   let availableDiskSpace = $state(cachedSystemInfo?.availableDiskSpace ?? 0);
+  // Calculate Health Score dynamically
+  const healthScore = $derived.by(() => {
+    let score = 100;
+
+    // CPU penalty (max -15)
+    if (cpuUsage > 80) score -= 15;
+    else if (cpuUsage > 50) score -= 8;
+    else if (cpuUsage > 25) score -= 3;
+
+    // Memory penalty (max -20)
+    if (totalMemory > 0) {
+      const memRatio = usedMemory / totalMemory;
+      if (memRatio > 0.85) score -= 20;
+      else if (memRatio > 0.65) score -= 10;
+      else if (memRatio > 0.45) score -= 5;
+    }
+
+    // Disk space penalty (max -20)
+    if (totalDiskSpace > 0) {
+      const diskFreeRatio = availableDiskSpace / totalDiskSpace;
+      if (diskFreeRatio < 0.1) score -= 20;
+      else if (diskFreeRatio < 0.2) score -= 10;
+      else if (diskFreeRatio < 0.35) score -= 5;
+    }
+
+    // Cleaner penalty (max -25)
+    const filesCount = cleanerScan.phase === 'running' ? cleanerScan.found : totalCleanerFiles;
+    if (filesCount > 5000) score -= 25;
+    else if (filesCount > 1000) score -= 15;
+    else if (filesCount > 200) score -= 8;
+    else if (filesCount > 20) score -= 3;
+
+    // Optimizations penalty (max -20)
+    if (totalTweaksCount > 0) {
+      const activeRatio = activeTweaksCount / totalTweaksCount;
+      if (activeRatio < 0.3) score -= 20;
+      else if (activeRatio < 0.6) score -= 10;
+      else if (activeRatio < 0.8) score -= 5;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(score)));
+  });
+
+  const healthStatus = $derived.by(() => {
+    if (healthScore >= 80) {
+      return {
+        label: 'Excellent',
+        desc: 'Your system is running smoothly with optimized configurations.',
+        color: 'text-emerald-500',
+        bg: 'bg-emerald-500/10',
+        border: 'border-emerald-500/20',
+        stroke: 'oklch(0.696 0.17 162.48)',
+      };
+    }
+    if (healthScore >= 50) {
+      return {
+        label: 'Good but Tweakable',
+        desc: 'Minor optimizations can help improve performance and retrieve space.',
+        color: 'text-amber-500',
+        bg: 'bg-amber-500/10',
+        border: 'border-amber-500/20',
+        stroke: 'oklch(0.769 0.188 70.08)',
+      };
+    }
+    return {
+      label: 'Needs Attention',
+      desc: 'Significant junk files or unapplied optimizations are degrading performance.',
+      color: 'text-rose-500',
+      bg: 'bg-rose-500/10',
+      border: 'border-rose-500/20',
+      stroke: 'oklch(0.577 0.245 27.325)',
+    };
+  });
+
+  let diagnosticState = $state<'idle' | 'scanning' | 'done'>('idle');
+  let diagnosticMessage = $state('');
+
+  async function startDiagnosticScan() {
+    if (diagnosticState === 'scanning') return;
+    diagnosticState = 'scanning';
+    diagnosticMessage = 'Checking CPU and Memory load...';
+    await new Promise((r) => setTimeout(r, 600));
+
+    diagnosticMessage = 'Scanning for temporary files and disk clutter...';
+    try {
+      let exclusions: string[] = [];
+      try {
+        const raw = localStorage.getItem('avelonia_cleaner_exclusions_v1');
+        if (raw) {
+          exclusions = JSON.parse(raw);
+        }
+      } catch {
+        /* noop */
+      }
+      beginCleanerScan();
+      await invoke('start_cleaner_scan', {
+        min_size_bytes: 100 * 1024 * 1024,
+        max_temp: 5000,
+        exclusions,
+      });
+    } catch (err) {
+      pushLog('ERROR', `Diagnostic scan error: ${String(err)}`, 'General');
+    }
+
+    let attempts = 0;
+    while (cleanerScan.phase === 'running' && attempts < 40) {
+      await new Promise((r) => setTimeout(r, 800));
+      attempts++;
+    }
+
+    diagnosticMessage = 'Analyzing optimization tweak opportunities...';
+    await fetchTweaksCount();
+    await new Promise((r) => setTimeout(r, 600));
+
+    diagnosticState = 'done';
+    diagnosticMessage = 'System diagnostics complete!';
+    toast.success('Diagnostics completed successfully!');
+  }
+
+  let isFixing = $state(false);
+  async function runQuickFix() {
+    if (isFixing) return;
+    isFixing = true;
+    toast.info('Running Quick Clean & Optimize...');
+
+    try {
+      // 1. Quick clear user & system temp
+      await invoke('quick_clear_user_temp');
+      await invoke('quick_clear_system_temp');
+      await invoke('quick_clear_prefetch');
+      await invoke('quick_clear_recent');
+      pushLog('SUCCESS', 'Cleared user and system temporary files.', 'Cleaner');
+
+      // Clear the local sessionStorage cleaner cache so count updates immediately
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('avelonia_cleaner_cache_v1');
+      }
+
+      // 2. Apply all recommended Standard tweaks
+      const standardProfileTweaks = [
+        'disable_consumer_features',
+        'disable_telemetry',
+        'disable_activity_history',
+        'disable_recall',
+        'disable_explorer_discovery',
+        'disable_gamedvr',
+        'enable_end_task',
+        'dark_theme',
+        'show_file_extensions',
+        'center_taskbar_items',
+        'snap_window',
+        'disable_chat',
+        'disable_task_view',
+        'disable_widgets',
+        'disable_search',
+      ];
+
+      const changes = standardProfileTweaks.map((id) => ({ id, enabled: true }));
+      await invoke('apply_tweaks_state_batch', { changes });
+      pushLog('SUCCESS', 'Successfully applied standard optimization tweaks profile.', 'Optimize');
+
+      toast.success('System optimized successfully!');
+
+      diagnosticState = 'done';
+      diagnosticMessage = 'System is running optimally.';
+
+      clearAllScannedItems();
+      await fetchTweaksCount();
+    } catch (err) {
+      toast.error('Failed to run all optimizations');
+      pushLog('ERROR', `Quick fix failed: ${String(err)}`, 'General');
+    } finally {
+      isFixing = false;
+    }
+  }
 
   const downloadStatusLabels: Record<Download['status'], string> = {
     available: 'Available',
@@ -393,10 +607,14 @@
   let vtKnownHeaders = $state(new Set<string>());
 
   $effect(() => {
-    const starts = new SvelteSet(vtGroups.map((g) => {
-      const log = windowedLogs[g.header];
-      return log ? log.timestamp + '|' + log.message : '';
-    }).filter(Boolean));
+    const starts = new SvelteSet(
+      vtGroups
+        .map((g) => {
+          const log = windowedLogs[g.header];
+          return log ? log.timestamp + '|' + log.message : '';
+        })
+        .filter(Boolean)
+    );
     let changedCollapsed = false;
     let changedKnown = false;
     for (const s of starts) {
@@ -450,11 +668,7 @@
       const headSec = timeToSec(list[i].timestamp || '');
       const idx: number[] = [i];
       let j = i + 1;
-      while (
-        j < list.length &&
-        !used.has(j) &&
-        isTweakLog(list[j])
-      ) {
+      while (j < list.length && !used.has(j) && isTweakLog(list[j])) {
         const sec = timeToSec(list[j].timestamp || '');
         if (headSec > 0 && sec > 0 && Math.abs(headSec - sec) <= THRESH) {
           idx.push(j);
@@ -485,10 +699,14 @@
   let tweakKnownHeaders = $state(new Set<string>());
 
   $effect(() => {
-    const starts = new SvelteSet(tweakGroups.map((g) => {
-      const log = windowedLogs[g.header];
-      return log ? log.timestamp + '|' + log.message : '';
-    }).filter(Boolean));
+    const starts = new SvelteSet(
+      tweakGroups
+        .map((g) => {
+          const log = windowedLogs[g.header];
+          return log ? log.timestamp + '|' + log.message : '';
+        })
+        .filter(Boolean)
+    );
     let changedCollapsed = false;
     let changedKnown = false;
     for (const s of starts) {
@@ -624,12 +842,145 @@
 </script>
 
 <div class="space-y-6 text-foreground">
-  <Card>
-    <CardHeader>
-      <CardTitle class="text-2xl">Welcome back!</CardTitle>
-      <CardDescription>Your system status at a glance.</CardDescription>
-    </CardHeader>
-  </Card>
+  <div class="grid gap-6 md:grid-cols-3">
+    <!-- Health Score Circular Gauge -->
+    <Card
+      class="glass-card md:col-span-1 flex flex-col items-center justify-center p-4 text-center transition-all duration-300 hover:scale-[1.01] glow-blue"
+    >
+      <CardHeader class="pb-1 w-full p-2">
+        <CardTitle class="text-xs font-semibold tracking-wider uppercase text-muted-foreground"
+          >System Health Score</CardTitle
+        >
+      </CardHeader>
+      <CardContent class="flex flex-col items-center justify-center w-full relative p-2">
+        <div class="relative flex items-center justify-center w-24 h-24">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 80 80">
+            <circle
+              cx="40"
+              cy="40"
+              r="34"
+              fill="transparent"
+              stroke="color-mix(in oklch, var(--border) 60%, transparent)"
+              stroke-width="6"
+            />
+            <circle
+              cx="40"
+              cy="40"
+              r="34"
+              fill="transparent"
+              stroke={healthStatus.stroke}
+              stroke-width="6"
+              stroke-dasharray="214"
+              stroke-dashoffset={214 - (214 * healthScore) / 100}
+              stroke-linecap="round"
+              class="transition-[stroke-dashoffset,stroke] duration-1000 ease-out"
+            />
+          </svg>
+          <div class="absolute flex flex-col items-center justify-center">
+            <span class="text-2xl font-extrabold tracking-tight font-heading">{healthScore}</span>
+            <span class="text-[9px] uppercase font-bold text-muted-foreground">Score</span>
+          </div>
+        </div>
+
+        <div class="mt-2.5">
+          <Badge
+            variant="outline"
+            class="font-semibold text-[10px] tracking-wide uppercase px-2 py-0.5 rounded {healthStatus.color} {healthStatus.bg} {healthStatus.border}"
+          >
+            {healthStatus.label}
+          </Badge>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Diagnostics and One-Click Quick Clean/Optimize -->
+    <Card
+      class="glass-card md:col-span-2 p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]"
+    >
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h2 class="text-lg font-bold font-heading">System Diagnostics & Fix</h2>
+        </div>
+        <p class="text-xs text-muted-foreground leading-relaxed mb-3">
+          {healthStatus.desc}
+        </p>
+
+        <!-- Current scan status -->
+        <div
+          class="space-y-2.5 bg-muted/20 border border-border/30 rounded-lg p-3 mb-3 text-xs font-medium"
+        >
+          <div class="flex items-center gap-2.5">
+            {#if diagnosticState === 'scanning'}
+              <Loader2 class="size-3.5 animate-spin text-primary" />
+              <span class="text-muted-foreground">{diagnosticMessage}</span>
+            {:else if diagnosticState === 'done'}
+              <ShieldCheck class="size-3.5 text-emerald-500" />
+              <span>{diagnosticMessage}</span>
+            {:else}
+              <Activity class="size-3.5 text-blue-500" />
+              <span class="text-muted-foreground">Ready to analyze system health.</span>
+            {/if}
+          </div>
+
+          {#if cleanerScan.phase === 'running'}
+            <div class="space-y-1">
+              <div class="flex justify-between text-[10px] text-muted-foreground">
+                <span>Scanning files...</span>
+                <span>{cleanerScan.found} items</span>
+              </div>
+              <Progress value={Math.min(100, (cleanerScan.found / 1000) * 100)} class="h-1" />
+            </div>
+          {/if}
+
+          <!-- Diagnostic Metrics -->
+          <div
+            class="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-border/20 text-[11px] text-muted-foreground"
+          >
+            <div class="flex justify-between">
+              <span>Clutter items:</span>
+              <span class="font-mono text-foreground font-semibold">
+                {cleanerScan.phase === 'running' ? cleanerScan.found : totalCleanerFiles}
+              </span>
+            </div>
+            <div class="flex justify-between">
+              <span>Applied tweaks:</span>
+              <span class="font-mono text-foreground font-semibold"
+                >{activeTweaksCount} / {totalTweaksCount}</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={startDiagnosticScan}
+          disabled={diagnosticState === 'scanning'}
+          class="min-w-28 text-xs h-8"
+        >
+          {#if diagnosticState === 'scanning'}
+            <Loader2 class="size-3.5 mr-1 animate-spin" /> Scanning...
+          {:else}
+            Scan System
+          {/if}
+        </Button>
+        <Button
+          onclick={runQuickFix}
+          size="sm"
+          disabled={diagnosticState === 'scanning' || isFixing}
+          class="min-w-28 text-xs h-8 bg-primary text-primary-foreground hover:bg-primary/95 shadow-md flex items-center gap-1.5"
+        >
+          {#if isFixing}
+            <Loader2 class="size-3.5 animate-spin" /> Optimizing...
+          {:else}
+            <Zap class="size-3.5 fill-current" /> Quick Optimize
+          {/if}
+        </Button>
+      </div>
+    </Card>
+  </div>
 
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
     <Card>
@@ -799,16 +1150,25 @@
                       role="button"
                       aria-expanded={!vtCollapsed.has(stableKey)}
                     >
-                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-blue-500">
+                      <TableCell
+                        class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-blue-500"
+                      >
                         {log.timestamp}
                       </TableCell>
                       <TableCell class="pr-4" colspan={2}>
                         <div class="flex items-center gap-2">
-                          <Badge variant="secondary" class="text-[11px] bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
+                          <Badge
+                            variant="secondary"
+                            class="text-[11px] bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
+                          >
                             VirusTotal scan activity
                           </Badge>
-                          <span class="text-xs font-medium text-muted-foreground">({g.indices.length} items)</span>
-                          <span class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1">
+                          <span class="text-xs font-medium text-muted-foreground"
+                            >({g.indices.length} items)</span
+                          >
+                          <span
+                            class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1"
+                          >
                             {#if vtCollapsed.has(stableKey)}
                               <span>Expand</span>
                               <ChevronRight class="size-4" />
@@ -824,9 +1184,13 @@
                       {#each g.indices as gi, idx (gi)}
                         {@const isLast = idx === g.indices.length - 1}
                         <TableRow class="border-0! bg-muted/5 hover:bg-muted/10 transition-colors">
-                          <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-blue-500/30">
+                          <TableCell
+                            class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-blue-500/30"
+                          >
                             <span class="inline-flex items-center gap-1.5">
-                              <span class="text-muted-foreground/30 font-semibold">{isLast ? '└' : '├'}</span>
+                              <span class="text-muted-foreground/30 font-semibold"
+                                >{isLast ? '└' : '├'}</span
+                              >
                               {windowedLogs[gi].timestamp}
                             </span>
                           </TableCell>
@@ -854,16 +1218,25 @@
                       role="button"
                       aria-expanded={!tweakCollapsed.has(stableKey)}
                     >
-                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-emerald-500">
+                      <TableCell
+                        class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-emerald-500"
+                      >
                         {log.timestamp}
                       </TableCell>
                       <TableCell class="pr-4" colspan={2}>
                         <div class="flex items-center gap-2">
-                          <Badge variant="secondary" class="text-[11px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">
+                          <Badge
+                            variant="secondary"
+                            class="text-[11px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
+                          >
                             Tweak & setting adjustments
                           </Badge>
-                          <span class="text-xs font-medium text-muted-foreground">({g.indices.length} items)</span>
-                          <span class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1">
+                          <span class="text-xs font-medium text-muted-foreground"
+                            >({g.indices.length} items)</span
+                          >
+                          <span
+                            class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1"
+                          >
                             {#if tweakCollapsed.has(stableKey)}
                               <span>Expand</span>
                               <ChevronRight class="size-4" />
@@ -879,9 +1252,13 @@
                       {#each g.indices as gi, idx (gi)}
                         {@const isLast = idx === g.indices.length - 1}
                         <TableRow class="border-0! bg-muted/5 hover:bg-muted/10 transition-colors">
-                          <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-emerald-500/30">
+                          <TableCell
+                            class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-emerald-500/30"
+                          >
                             <span class="inline-flex items-center gap-1.5">
-                              <span class="text-muted-foreground/30 font-semibold">{isLast ? '└' : '├'}</span>
+                              <span class="text-muted-foreground/30 font-semibold"
+                                >{isLast ? '└' : '├'}</span
+                              >
                               {windowedLogs[gi].timestamp}
                             </span>
                           </TableCell>

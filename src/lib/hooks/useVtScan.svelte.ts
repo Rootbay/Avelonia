@@ -144,15 +144,15 @@ export function useVtScan() {
         'vt-report',
         (ev) => {
           const rep = ev.payload;
-        try {
-          setVerdictFromReport(rep);
-          pushScanReport(rep);
-          const v = String(rep?.verdict || '').toUpperCase();
-          const pos = typeof rep?.positives === 'number' ? ` (${rep?.positives} vendors)` : '';
-          pushLog('INFO', `VT report: ${rep?.subject ?? 'item'} -> ${v}${pos}`, 'Optimize');
-        } catch {
-          /* noop */
-        }
+          try {
+            setVerdictFromReport(rep);
+            pushScanReport(rep);
+            const v = String(rep?.verdict || '').toUpperCase();
+            const pos = typeof rep?.positives === 'number' ? ` (${rep?.positives} vendors)` : '';
+            pushLog('INFO', `VT report: ${rep?.subject ?? 'item'} -> ${v}${pos}`, 'Optimize');
+          } catch {
+            /* noop */
+          }
         }
       );
       if (destroyed) {

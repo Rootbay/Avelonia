@@ -107,7 +107,8 @@
     {
       id: 'performance',
       label: 'Performance',
-      description: 'Maximizes FPS, reduces network latency, disables mouse acceleration, and enables Game Mode/HAGS.',
+      description:
+        'Maximizes FPS, reduces network latency, disables mouse acceleration, and enables Game Mode/HAGS.',
     },
   ];
 
@@ -217,7 +218,11 @@
     invoke('is_windows_activated')
       .then((val) => {
         isActivated = val as boolean;
-        pushLog('SUCCESS', `Windows activation status query returned: ${isActivated ? 'Activated' : 'Unactivated'}`, 'Optimize');
+        pushLog(
+          'SUCCESS',
+          `Windows activation status query returned: ${isActivated ? 'Activated' : 'Unactivated'}`,
+          'Optimize'
+        );
       })
       .catch((err) => {
         pushLog('ERROR', `Failed to query Windows activation status: ${String(err)}`, 'Optimize');
@@ -226,7 +231,11 @@
     invoke('is_watermark_removed')
       .then((val) => {
         isWatermarkRemoved = val as boolean;
-        pushLog('SUCCESS', `Windows watermark removal status check returned: ${isWatermarkRemoved ? 'Applied' : 'Not applied'}`, 'Optimize');
+        pushLog(
+          'SUCCESS',
+          `Windows watermark removal status check returned: ${isWatermarkRemoved ? 'Applied' : 'Not applied'}`,
+          'Optimize'
+        );
       })
       .catch((err) => {
         pushLog('ERROR', `Failed to query watermark status: ${String(err)}`, 'Optimize');
@@ -235,7 +244,11 @@
     invoke('get_update_profile')
       .then((val) => {
         selectedUpdateProfile = val as UpdateProfileId;
-        pushLog('SUCCESS', `Active Windows Update profile queried: ${selectedUpdateProfile}`, 'Optimize');
+        pushLog(
+          'SUCCESS',
+          `Active Windows Update profile queried: ${selectedUpdateProfile}`,
+          'Optimize'
+        );
       })
       .catch((err) => {
         pushLog('ERROR', `Failed to query active update profile: ${String(err)}`, 'Optimize');
@@ -271,7 +284,7 @@
       'disable_chat',
       'center_taskbar_items',
       'show_file_extensions',
-      'show_hidden_files'
+      'show_hidden_files',
     ];
 
     const tweakChanges: Array<{ id: string; enabled: boolean }> = [];
@@ -307,7 +320,7 @@
       return;
     }
 
-    const needsExplorerRestart = allChanges.some(change =>
+    const needsExplorerRestart = allChanges.some((change) =>
       EXPLORER_RELATED_TWEAKS.includes(change.id)
     );
 
@@ -344,7 +357,11 @@
       if (selectedUpdateProfile) {
         try {
           await invoke('apply_update_profile', { profile: selectedUpdateProfile });
-          pushLog('SUCCESS', `Successfully set update profile to ${selectedUpdateProfile}.`, 'Optimize');
+          pushLog(
+            'SUCCESS',
+            `Successfully set update profile to ${selectedUpdateProfile}.`,
+            'Optimize'
+          );
           toast.success(`Update profile set to ${selectedUpdateProfile}.`);
         } catch (error) {
           pushLog('ERROR', `Update profile failed: ${String(error)}`, 'Optimize');
@@ -355,7 +372,11 @@
       if (needsExplorerRestart) {
         try {
           await invoke('restart_explorer');
-          pushLog('SUCCESS', 'Successfully restarted Windows Explorer to reload registry changes.', 'Optimize');
+          pushLog(
+            'SUCCESS',
+            'Successfully restarted Windows Explorer to reload registry changes.',
+            'Optimize'
+          );
           await new Promise((resolve) => setTimeout(resolve, 1500));
         } catch (error) {
           pushLog('ERROR', `Failed to restart Windows Explorer: ${String(error)}`, 'Optimize');
@@ -372,14 +393,18 @@
         await invoke('apply_tweaks_state_batch', { changes: allChanges });
         pushLog(
           'SUCCESS',
-          `Successfully applied tweaks batch: ${allChanges.map(c => `${c.id}=${c.enabled}`).join(', ')}`,
+          `Successfully applied tweaks batch: ${allChanges.map((c) => `${c.id}=${c.enabled}`).join(', ')}`,
           'Optimize'
         );
 
         if (selectedUpdateProfile) {
           try {
             await invoke('apply_update_profile', { profile: selectedUpdateProfile });
-            pushLog('SUCCESS', `Successfully set update profile to ${selectedUpdateProfile}.`, 'Optimize');
+            pushLog(
+              'SUCCESS',
+              `Successfully set update profile to ${selectedUpdateProfile}.`,
+              'Optimize'
+            );
           } catch (error) {
             pushLog('ERROR', `Update profile failed: ${String(error)}`, 'Optimize');
           }
@@ -388,7 +413,11 @@
         if (needsExplorerRestart) {
           try {
             await invoke('restart_explorer');
-            pushLog('SUCCESS', 'Successfully restarted Windows Explorer to reload registry changes.', 'Optimize');
+            pushLog(
+              'SUCCESS',
+              'Successfully restarted Windows Explorer to reload registry changes.',
+              'Optimize'
+            );
           } catch (error) {
             pushLog('ERROR', `Failed to restart Windows Explorer: ${String(error)}`, 'Optimize');
           }
@@ -408,7 +437,7 @@
 
     // Verification Step:
     const getLabel = (id: string) => {
-      const item = allTweakItems.find(t => t.id === id) || configItems.find(c => c.id === id);
+      const item = allTweakItems.find((t) => t.id === id) || configItems.find((c) => c.id === id);
       return item ? item.label : id;
     };
 
@@ -445,7 +474,7 @@
     if (failed.length > 0) {
       toast.error(`Applied with warnings. Failed to set: ${failed.join(', ')}`);
       pushLog(
-        'WARNING',
+        'WARN',
         `Batch execution completed with ${failed.length} failure(s). Successfully applied: ${successful.join(', ') || 'None'}. Failed: ${failed.join(', ')}.`,
         'Optimize'
       );
@@ -560,19 +589,27 @@
               <span class="font-semibold flex items-center gap-1.5 flex-wrap">
                 {tweak.label}
                 {#if tweakAppliedStates[tweak.id] === 'applying'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium"
+                  >
                     <Loader2 class="size-3 animate-spin" /> Applying...
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'on'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                  >
                     <CheckCircle2 class="size-3" /> Active
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'failed'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20"
+                  >
                     <AlertCircle class="size-3" /> Failed
                   </span>
                 {:else if !ACTION_ONLY_TWEAKS.includes(tweak.id)}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border"
+                  >
                     <Circle class="size-3" /> Inactive
                   </span>
                 {/if}
@@ -603,19 +640,27 @@
               <span class="font-semibold flex items-center gap-1.5 flex-wrap">
                 {tweak.label}
                 {#if tweakAppliedStates[tweak.id] === 'applying'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium"
+                  >
                     <Loader2 class="size-3 animate-spin" /> Applying...
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'on'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                  >
                     <CheckCircle2 class="size-3" /> Active
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'failed'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20"
+                  >
                     <AlertCircle class="size-3" /> Failed
                   </span>
                 {:else if !ACTION_ONLY_TWEAKS.includes(tweak.id)}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border"
+                  >
                     <Circle class="size-3" /> Inactive
                   </span>
                 {/if}
@@ -646,19 +691,27 @@
               <span class="font-semibold flex items-center gap-1.5 flex-wrap">
                 {tweak.label}
                 {#if tweakAppliedStates[tweak.id] === 'applying'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium"
+                  >
                     <Loader2 class="size-3 animate-spin" /> Applying...
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'on'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                  >
                     <CheckCircle2 class="size-3" /> Active
                   </span>
                 {:else if tweakAppliedStates[tweak.id] === 'failed'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20"
+                  >
                     <AlertCircle class="size-3" /> Failed
                   </span>
                 {:else if !ACTION_ONLY_TWEAKS.includes(tweak.id)}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border"
+                  >
                     <Circle class="size-3" /> Inactive
                   </span>
                 {/if}
@@ -691,19 +744,27 @@
               <span class="font-semibold flex items-center gap-1.5 flex-wrap">
                 {config.label}
                 {#if tweakAppliedStates[config.id] === 'applying'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-blue-500 font-medium"
+                  >
                     <Loader2 class="size-3 animate-spin" /> Applying...
                   </span>
                 {:else if tweakAppliedStates[config.id] === 'on'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-emerald-500 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                  >
                     <CheckCircle2 class="size-3" /> Active
                   </span>
                 {:else if tweakAppliedStates[config.id] === 'failed'}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-destructive font-medium bg-destructive/10 px-1.5 py-0.5 rounded border border-destructive/20"
+                  >
                     <AlertCircle class="size-3" /> Failed
                   </span>
                 {:else if !ACTION_ONLY_TWEAKS.includes(config.id)}
-                  <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border">
+                  <span
+                    class="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted px-1.5 py-0.5 rounded border border-border"
+                  >
                     <Circle class="size-3" /> Inactive
                   </span>
                 {/if}
@@ -724,27 +785,65 @@
       </CardHeader>
       <CardContent class="space-y-4">
         {#each fixActions as action (action.id)}
-          {@const isRecommendedWatermark = action.id === 'remove_activation_watermark' && !isActivated && !isWatermarkRemoved}
-          <div class="flex flex-col gap-2 rounded-md border px-3 py-2 transition-colors {isRecommendedWatermark ? 'border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10' : 'border-border/60'}">
+          {@const isRecommendedWatermark =
+            action.id === 'remove_activation_watermark' && !isActivated && !isWatermarkRemoved}
+          <div
+            class="flex flex-col gap-2 rounded-md border px-3 py-2 transition-colors {isRecommendedWatermark
+              ? 'border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10'
+              : 'border-border/60'}"
+          >
             <div class="flex items-center justify-between gap-3">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-semibold">{action.label}</span>
                 {#if isRecommendedWatermark}
-                  <span class="inline-flex items-center gap-0.5 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase text-emerald-600 dark:text-emerald-400">
+                  <span
+                    class="inline-flex items-center gap-0.5 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase text-emerald-600 dark:text-emerald-400"
+                  >
                     Recommended
                   </span>
                 {/if}
               </div>
               <Button
                 size="sm"
-                variant={fixStatus[action.id] === 'done' || (action.id === 'remove_activation_watermark' && isWatermarkRemoved) ? 'secondary' : (isRecommendedWatermark ? 'default' : 'outline')}
-                class={isRecommendedWatermark && fixStatus[action.id] !== 'done' ? 'bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 border-none' : ''}
+                variant={fixStatus[action.id] === 'done' ||
+                (action.id === 'remove_activation_watermark' && isWatermarkRemoved)
+                  ? 'secondary'
+                  : isRecommendedWatermark
+                    ? 'default'
+                    : 'outline'}
+                class={isRecommendedWatermark && fixStatus[action.id] !== 'done'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 border-none'
+                  : ''}
                 onclick={() => triggerFixAction(action.id)}
               >
-                {fixStatus[action.id] === 'done' || (action.id === 'remove_activation_watermark' && isWatermarkRemoved) ? 'Applied' : 'Run Fix'}
+                {fixStatus[action.id] === 'done'
+                  ? 'Applied'
+                  : action.id === 'remove_activation_watermark' && isWatermarkRemoved
+                    ? 'Applied (Re-run)'
+                    : 'Run Fix'}
               </Button>
             </div>
-            <p class="text-xs {isRecommendedWatermark ? 'text-emerald-700/80 dark:text-emerald-400/80' : 'text-muted-foreground'}">{action.description}</p>
+            <p
+              class="text-xs {isRecommendedWatermark
+                ? 'text-emerald-700/80 dark:text-emerald-400/80'
+                : 'text-muted-foreground'}"
+            >
+              {action.description}
+            </p>
+            {#if action.id === 'remove_activation_watermark' && isWatermarkRemoved}
+              <p
+                class="text-[10px] mt-1 text-amber-600 dark:text-amber-400 font-medium leading-relaxed"
+              >
+                Note: The app disables the watermark service (<code
+                  class="text-[9px] bg-amber-500/10 px-1 py-0.5 rounded">svsvc</code
+                >) and notification registry keys. If a major Windows Update re-enables it, click
+                "Applied (Re-run)". To permanently activate Windows digitally, run
+                <code
+                  class="text-[9px] bg-amber-500/10 px-1 py-0.5 rounded text-amber-700 dark:text-amber-300"
+                  >irm https://get.activated.win | iex</code
+                > in an Administrator PowerShell.
+              </p>
+            {/if}
           </div>
         {/each}
       </CardContent>
@@ -786,9 +885,11 @@
       <AlertDialogHeader>
         <AlertDialogTitle>Restart Required</AlertDialogTitle>
         <AlertDialogDescription>
-          Applying the activation watermark fix requires a system restart (reboot) to take effect fully.
+          Applying the activation watermark fix requires a system restart (reboot) to take effect
+          fully.
           <br /><br />
-          Your screen and Windows Explorer will restart briefly during the process, but the watermark will only disappear permanently after you reboot your computer.
+          Your screen and Windows Explorer will restart briefly during the process, but the watermark
+          will only disappear permanently after you reboot your computer.
           <br /><br />
           Do you want to continue?
         </AlertDialogDescription>

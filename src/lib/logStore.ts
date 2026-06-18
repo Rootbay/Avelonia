@@ -153,5 +153,3 @@ export function clearLogs() {
     logStorageError('clear', error);
   }
 }
-
-

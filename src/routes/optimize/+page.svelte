@@ -698,8 +698,7 @@
     taskActionLoading = true;
     try {
       const res = await executeTaskAction(taskAction, names);
-      const normalized: TaskActionResult =
-        typeof res === 'number' ? { success: res } : res ?? {};
+      const normalized: TaskActionResult = typeof res === 'number' ? { success: res } : (res ?? {});
       const success = Number(normalized.success ?? 0);
       const elevated = Number(normalized.elevated ?? 0);
       const stopped = Number(normalized.stopped ?? 0);
@@ -910,7 +909,6 @@
     pendingNames = names;
     showTaskConfirm = true;
   }
-
 
   function confirmRunAction() {
     showTaskConfirm = false;
@@ -1755,10 +1753,7 @@
                     <Trash2 class="mr-2 size-4 text-destructive" /> Delete
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={sortedTasks.length === 0}
-                    onclick={toggleAllTasks}
-                  >
+                  <DropdownMenuItem disabled={sortedTasks.length === 0} onclick={toggleAllTasks}>
                     {allTasksSelected ? 'Deselect all' : 'Select all'}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1931,23 +1926,42 @@
                 <Skeleton class="h-[68px] w-full rounded-lg" aria-hidden="true" />
               </div>
             {:else if !networkSummary}
-              <p class="text-xs text-muted-foreground text-center py-6">Unable to read network information.</p>
+              <p class="text-xs text-muted-foreground text-center py-6">
+                Unable to read network information.
+              </p>
             {:else}
               <div class="space-y-3">
                 <div class="grid gap-3 sm:grid-cols-2">
                   <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Primary Adapter</p>
-                    <p class="mt-1 text-sm font-medium truncate" title={networkSummary.primaryAdapter}>{networkSummary.primaryAdapter ?? '—'}</p>
+                    <p
+                      class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      Primary Adapter
+                    </p>
+                    <p
+                      class="mt-1 text-sm font-medium truncate"
+                      title={networkSummary.primaryAdapter}
+                    >
+                      {networkSummary.primaryAdapter ?? '—'}
+                    </p>
                   </div>
                   <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">IPv4 Address</p>
+                    <p
+                      class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      IPv4 Address
+                    </p>
                     <p class="mt-1 text-sm font-mono font-medium">{networkSummary.ipv4 ?? '—'}</p>
                   </div>
                 </div>
 
                 <div class="grid gap-3 sm:grid-cols-2">
                   <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">DNS Servers</p>
+                    <p
+                      class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      DNS Servers
+                    </p>
                     {#if networkSummary.dnsServers.length}
                       <div class="mt-1 space-y-1 font-mono text-xs">
                         {#each networkSummary.dnsServers as dns (dns)}
@@ -1959,7 +1973,11 @@
                     {/if}
                   </div>
                   <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Gateway / Router</p>
+                    <p
+                      class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      Gateway / Router
+                    </p>
                     {#if networkSummary.gateways.length}
                       <div class="mt-1 space-y-1 font-mono text-xs">
                         {#each networkSummary.gateways as gateway (gateway)}
@@ -1974,8 +1992,17 @@
 
                 {#if networkSummary.ipv6}
                   <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">IPv6 Address</p>
-                    <p class="mt-1 text-xs font-mono break-all truncate" title={networkSummary.ipv6}>{networkSummary.ipv6}</p>
+                    <p
+                      class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      IPv6 Address
+                    </p>
+                    <p
+                      class="mt-1 text-xs font-mono break-all truncate"
+                      title={networkSummary.ipv6}
+                    >
+                      {networkSummary.ipv6}
+                    </p>
                   </div>
                 {/if}
               </div>

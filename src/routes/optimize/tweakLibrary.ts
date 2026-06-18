@@ -108,7 +108,8 @@ export const essentialTweaks: TweakItem[] = [
   {
     id: 'enable_game_mode',
     label: 'Enable Windows Game Mode',
-    description: 'Prioritize your gaming experience by minimizing background activities and optimizing resource allocation.',
+    description:
+      'Prioritize your gaming experience by minimizing background activities and optimizing resource allocation.',
   },
 ];
 
@@ -151,17 +152,20 @@ export const advancedTweaks: TweakItem[] = [
   {
     id: 'enable_hags',
     label: 'Enable HAGS',
-    description: 'Enable Hardware-Accelerated GPU Scheduling to reduce input lag and support frame generation.',
+    description:
+      'Enable Hardware-Accelerated GPU Scheduling to reduce input lag and support frame generation.',
   },
   {
     id: 'disable_nagle',
     label: "Disable Nagle's Algorithm",
-    description: 'Disables TCP batching to improve Ethernet gaming responsiveness and reduce latency.',
+    description:
+      'Disables TCP batching to improve Ethernet gaming responsiveness and reduce latency.',
   },
   {
     id: 'disable_network_throttling',
     label: 'Disable Network Throttling',
-    description: 'Prevent Windows from throttling non-multimedia network traffic when games are running.',
+    description:
+      'Prevent Windows from throttling non-multimedia network traffic when games are running.',
   },
   {
     id: 'optimize_system_responsiveness',
@@ -176,17 +180,20 @@ export const advancedTweaks: TweakItem[] = [
   {
     id: 'ethernet_low_latency',
     label: 'Ethernet Adapter Latency Optimization',
-    description: 'Disable LSO, adapter power saving, Interrupt Moderation, and EEE for maximum responsiveness.',
+    description:
+      'Disable LSO, adapter power saving, Interrupt Moderation, and EEE for maximum responsiveness.',
   },
   {
     id: 'disable_power_throttling',
     label: 'Disable CPU Power Throttling',
-    description: 'Prevent Windows from dynamically down-clocking CPU resources for background gaming services.',
+    description:
+      'Prevent Windows from dynamically down-clocking CPU resources for background gaming services.',
   },
   {
     id: 'disable_hpet',
     label: 'Disable HPET (Platform Clock)',
-    description: 'Disable High Precision Event Timer to reduce CPU overhead and input stutters in some games.',
+    description:
+      'Disable High Precision Event Timer to reduce CPU overhead and input stutters in some games.',
   },
 ];
 
@@ -239,7 +246,8 @@ export const customizeTweaks: TweakItem[] = [
   {
     id: 'mouse_acceleration',
     label: 'Disable Mouse Acceleration',
-    description: 'Enforce raw mouse input by disabling Windows pointer acceleration (Enhance Pointer Precision).',
+    description:
+      'Enforce raw mouse input by disabling Windows pointer acceleration (Enhance Pointer Precision).',
   },
   {
     id: 'sticky_keys',
