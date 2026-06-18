@@ -443,3 +443,58 @@ pub(crate) fn run_powershell_commands(commands: &[String], prefix: &str) -> Resu
         Err(format!("powershell script failed for {}", prefix))
     }
 }
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_powershell_json(_script: &str) -> Result<Vec<Value>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn collect_string_values(_value: Option<&Value>, _keys: &[&str]) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn format_link_speed(_value: &Value) -> Option<String> {
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_cmd_elevated(_args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_reg(_args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_reg_elevated(_args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_powershell_elevated(_args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_elevated(_file: &str, _args: &[&str]) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn escape_single_quotes(value: &str) -> String {
+    value.to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn write_temp_ps_script(_prefix: &str, _contents: &str) -> Result<String, String> {
+    Err("Not supported on non-Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_powershell_commands(_commands: &[String], _prefix: &str) -> Result<(), String> {
+    Err("Not supported on non-Windows".to_string())
+}

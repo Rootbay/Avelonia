@@ -1092,6 +1092,7 @@ pub async fn vt_scan_startup(
     _app: AppHandle,
     _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
+    _force: Option<bool>,
 ) -> Result<Vec<VtItemReport>, AppError> {
     Ok(Vec::new())
 }
@@ -1101,6 +1102,7 @@ pub async fn vt_scan_registry(
     _app: AppHandle,
     _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
+    _force: Option<bool>,
 ) -> Result<Vec<VtItemReport>, AppError> {
     Ok(Vec::new())
 }
@@ -1110,6 +1112,7 @@ pub async fn vt_scan_all(
     _app: AppHandle,
     _state: State<'_, Arc<VtState>>,
     _limit: Option<u32>,
+    _force: Option<bool>,
 ) -> Result<(usize, usize), AppError> {
     Ok((0, 0))
 }

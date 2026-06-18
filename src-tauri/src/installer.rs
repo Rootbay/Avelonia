@@ -375,6 +375,18 @@ pub async fn verify_install(
     })
 }
 
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub async fn verify_install(
+    _display_name_hint: Option<String>,
+    _timeout_ms: Option<u64>,
+) -> Result<VerifyResult, String> {
+    Ok(VerifyResult {
+        verified: false,
+        matched: None,
+    })
+}
+
 fn is_match(display_name: &str, hint: &str) -> bool {
     let dn = display_name.to_lowercase();
     let h = hint.to_lowercase();

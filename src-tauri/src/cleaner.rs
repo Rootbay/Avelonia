@@ -1389,6 +1389,15 @@ pub async fn find_broken_shortcuts(
 }
 
 #[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub async fn find_broken_shortcuts(
+    _app_handle: tauri::AppHandle,
+    _exclusions: Option<Vec<String>>,
+) -> Result<Vec<String>, AppError> {
+    Ok(Vec::new())
+}
+
+#[tauri::command]
 pub async fn move_files(files: Vec<String>, destination: String) -> Result<usize, AppError> {
     let dest = PathBuf::from(&destination);
     if !dest.exists() {
