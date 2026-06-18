@@ -61,7 +61,9 @@
         <Select type="single" bind:value={installMode}>
           <SelectTrigger class="w-44">
             <p>
-              {installMode === 'silent' ? i18n.t('downloader.options_mode_silent') : i18n.t('downloader.options_mode_normal')}
+              {installMode === 'silent'
+                ? i18n.t('downloader.options_mode_silent')
+                : i18n.t('downloader.options_mode_normal')}
             </p>
           </SelectTrigger>
           <SelectContent>

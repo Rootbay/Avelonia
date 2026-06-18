@@ -32,11 +32,13 @@
     onCancel: (id: number) => Promise<void>;
   }>();
 
-  const sortColumns = $derived<Array<{
-    key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
-    label: string;
-    width: string;
-  }>>([
+  const sortColumns = $derived<
+    Array<{
+      key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
+      label: string;
+      width: string;
+    }>
+  >([
     { key: 'name', label: i18n.t('downloader.col_name'), width: 'w-[35%]' },
     { key: 'size', label: i18n.t('downloader.col_size'), width: 'w-28' },
     { key: 'fileType', label: i18n.t('downloader.col_type'), width: 'w-24' },

@@ -70,17 +70,26 @@
         {#if vtScan.phase === 'running'}
           {i18n.t('vt_scan.source', { source: vtScan.source ?? 'N/A' })}
         {:else}
-          {#if vtScan.startedAt}{i18n.t('vt_scan.started', { time: new Date(vtScan.startedAt).toLocaleTimeString() })}{/if}
+          {#if vtScan.startedAt}{i18n.t('vt_scan.started', {
+              time: new Date(vtScan.startedAt).toLocaleTimeString(),
+            })}{/if}
           {#if vtScan.finishedAt}
-            • {i18n.t('vt_scan.finished_at', { time: new Date(vtScan.finishedAt).toLocaleTimeString() })}{/if}
+            • {i18n.t('vt_scan.finished_at', {
+              time: new Date(vtScan.finishedAt).toLocaleTimeString(),
+            })}{/if}
           • {i18n.t('vt_scan.processed', { count: vtScan.items?.length ?? 0 })}
           {#if (vtScan.expectedStartup ?? undefined) !== undefined || (vtScan.expectedRegistry ?? undefined) !== undefined}
-            • {i18n.t('vt_scan.expected', { startup: vtScan.expectedStartup ?? '?', registry: vtScan.expectedRegistry ?? '?' })}
+            • {i18n.t('vt_scan.expected', {
+              startup: vtScan.expectedStartup ?? '?',
+              registry: vtScan.expectedRegistry ?? '?',
+            })}
           {/if}
         {/if}
       </p>
       <div class="mb-1 flex flex-wrap gap-2">
-        <Badge variant="secondary">{i18n.t('vt_scan.detected', { count: vtTotals().detected })}</Badge>
+        <Badge variant="secondary"
+          >{i18n.t('vt_scan.detected', { count: vtTotals().detected })}</Badge
+        >
         <Badge class="border-green-500/30 text-green-700 bg-green-500/10"
           >{i18n.t('vt_scan.clean', { count: vtTotals().clean })}</Badge
         >
@@ -137,13 +146,25 @@
                 <tr>
                   <td class="px-2 py-2 text-xs text-muted-foreground" colspan="5">
                     <div class="grid grid-cols-2 gap-2">
-                      <div>{i18n.t('vt_scan.malicious', { count: typeof it.malicious === 'number' ? it.malicious : '-' })}</div>
                       <div>
-                        {i18n.t('vt_scan.suspicious', { count: typeof it.suspicious === 'number' ? it.suspicious : '-' })}
+                        {i18n.t('vt_scan.malicious', {
+                          count: typeof it.malicious === 'number' ? it.malicious : '-',
+                        })}
                       </div>
-                      <div>{i18n.t('vt_scan.harmless', { count: typeof it.harmless === 'number' ? it.harmless : '-' })}</div>
                       <div>
-                        {i18n.t('vt_scan.undetected', { count: typeof it.undetected === 'number' ? it.undetected : '-' })}
+                        {i18n.t('vt_scan.suspicious', {
+                          count: typeof it.suspicious === 'number' ? it.suspicious : '-',
+                        })}
+                      </div>
+                      <div>
+                        {i18n.t('vt_scan.harmless', {
+                          count: typeof it.harmless === 'number' ? it.harmless : '-',
+                        })}
+                      </div>
+                      <div>
+                        {i18n.t('vt_scan.undetected', {
+                          count: typeof it.undetected === 'number' ? it.undetected : '-',
+                        })}
                       </div>
                     </div>
                     {#if it.reason}

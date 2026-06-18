@@ -151,11 +151,18 @@
     </DialogHeader>
     <div class="grid gap-3">
       <div class="space-y-1">
-        <label class="text-sm font-medium" for="add-url">{i18n.t('downloader.add_label_url')}</label>
-        <Input id="add-url" placeholder={i18n.t('downloader.add_placeholder_url')} bind:value={addUrl} />
+        <label class="text-sm font-medium" for="add-url">{i18n.t('downloader.add_label_url')}</label
+        >
+        <Input
+          id="add-url"
+          placeholder={i18n.t('downloader.add_placeholder_url')}
+          bind:value={addUrl}
+        />
       </div>
       <div class="space-y-1">
-        <label class="text-sm font-medium" for="add-cat">{i18n.t('downloader.add_label_category')}</label>
+        <label class="text-sm font-medium" for="add-cat"
+          >{i18n.t('downloader.add_label_category')}</label
+        >
         <Input
           id="add-cat"
           placeholder={i18n.t('downloader.add_placeholder_category')}
@@ -170,7 +177,9 @@
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div class="space-y-1">
-          <label class="text-sm font-medium" for="add-name">{i18n.t('downloader.add_label_name')}</label>
+          <label class="text-sm font-medium" for="add-name"
+            >{i18n.t('downloader.add_label_name')}</label
+          >
           <Input
             id="add-name"
             placeholder={i18n.t('downloader.add_placeholder_name')}
@@ -191,7 +200,9 @@
       </div>
     </div>
     <DialogFooter>
-      <Button type="button" variant="secondary" onclick={() => (open = false)}>{i18n.t('common.cancel')}</Button>
+      <Button type="button" variant="secondary" onclick={() => (open = false)}
+        >{i18n.t('common.cancel')}</Button
+      >
       <Button type="button" onclick={addNewDownload}>{i18n.t('downloader.btn_add')}</Button>
     </DialogFooter>
   </DialogContent>

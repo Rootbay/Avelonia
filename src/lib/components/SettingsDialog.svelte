@@ -147,7 +147,8 @@
         <section class="space-y-3">
           <p class="text-sm font-medium">{i18n.t('settings.language')}</p>
           <div class="flex flex-col gap-2">
-            <Label class="text-xs text-muted-foreground">{i18n.t('settings.select_language')}</Label>
+            <Label class="text-xs text-muted-foreground">{i18n.t('settings.select_language')}</Label
+            >
             <div class="max-w-[220px]">
               <Select type="single" bind:value={language}>
                 <SelectTrigger class="w-44">
@@ -155,14 +156,14 @@
                     {language === 'en'
                       ? 'English'
                       : language === 'sv'
-                      ? 'Svenska'
-                      : language === 'de'
-                      ? 'Deutsch'
-                      : language === 'fr'
-                      ? 'Français'
-                      : language === 'es'
-                      ? 'Español'
-                      : 'English'}
+                        ? 'Svenska'
+                        : language === 'de'
+                          ? 'Deutsch'
+                          : language === 'fr'
+                            ? 'Français'
+                            : language === 'es'
+                              ? 'Español'
+                              : 'English'}
                   </p>
                 </SelectTrigger>
                 <SelectContent>
@@ -195,7 +196,9 @@
                 class="rounded-md border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3 ml-0 sm:ml-4"
               >
                 <div class="flex flex-col gap-2">
-                  <Label class="text-xs text-muted-foreground">{i18n.t('settings.install_mode')}</Label>
+                  <Label class="text-xs text-muted-foreground"
+                    >{i18n.t('settings.install_mode')}</Label
+                  >
                   <div class="max-w-[220px]">
                     <Select type="single" bind:value={installMode}>
                       <SelectTrigger placeholder="Select mode" />
@@ -233,7 +236,9 @@
                   {i18n.t('settings.choose_file')}
                 </Button>
                 {#if catalogFilePath}
-                  <Button size="sm" variant="outline" onclick={clearCatalogFile}>{i18n.t('settings.clear')}</Button>
+                  <Button size="sm" variant="outline" onclick={clearCatalogFile}
+                    >{i18n.t('settings.clear')}</Button
+                  >
                 {/if}
               </div>
               <p class="text-xs text-muted-foreground">
@@ -253,7 +258,9 @@
               <span>{i18n.t('settings.save_key')}</span>
             </label>
             <div class="flex gap-2">
-              <Button onclick={saveVtKey} disabled={vtBusy}>{i18n.t('settings.btn_save_key')}</Button>
+              <Button onclick={saveVtKey} disabled={vtBusy}
+                >{i18n.t('settings.btn_save_key')}</Button
+              >
               <Button variant="secondary" onclick={runVtScanNow} disabled={!vtKeySet || vtBusy}
                 >{i18n.t('settings.btn_scan_now')}</Button
               >

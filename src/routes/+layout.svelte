@@ -258,7 +258,9 @@
                 {/snippet}
                 <Tooltip>
                   <TooltipTrigger child={ThemeToggleTrigger} />
-                  <TooltipContent side="right" align="center">{i18n.t('sidebar.theme_toggle')}</TooltipContent>
+                  <TooltipContent side="right" align="center"
+                    >{i18n.t('sidebar.theme_toggle')}</TooltipContent
+                  >
                 </Tooltip>
 
                 {#snippet SettingsButtonContent({ props }: ButtonSnippetContext)}
@@ -280,7 +282,9 @@
                 {/snippet}
                 <Tooltip>
                   <TooltipTrigger child={SettingsButtonContent} />
-                  <TooltipContent side="right" align="center">{i18n.t('sidebar.settings')}</TooltipContent>
+                  <TooltipContent side="right" align="center"
+                    >{i18n.t('sidebar.settings')}</TooltipContent
+                  >
                 </Tooltip>
               </div>
             {:else}

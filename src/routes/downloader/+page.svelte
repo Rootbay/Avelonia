@@ -414,7 +414,9 @@
       class="glass-card md:col-span-2 bg-card/80 shadow-sm p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.005]"
     >
       <div>
-        <h2 class="text-lg font-bold font-heading mb-1 text-foreground">{i18n.t('downloader.title')}</h2>
+        <h2 class="text-lg font-bold font-heading mb-1 text-foreground">
+          {i18n.t('downloader.title')}
+        </h2>
         <p class="text-xs text-muted-foreground leading-relaxed mb-3">
           {i18n.t('downloader.desc')}
         </p>
@@ -424,7 +426,12 @@
           class="flex items-center gap-1 bg-muted/40 border border-border/30 rounded px-2 py-0.5 text-muted-foreground"
         >
           <span class="size-1.5 rounded-full bg-border"></span>
-          <span>{i18n.t('downloader.showing_count', { filtered: filteredStats.count, total: globalStats.total })}</span>
+          <span
+            >{i18n.t('downloader.showing_count', {
+              filtered: filteredStats.count,
+              total: globalStats.total,
+            })}</span
+          >
         </div>
         <div
           class="flex items-center gap-1 bg-primary/10 border border-primary/20 rounded px-2 py-0.5 text-primary"
@@ -453,7 +460,9 @@
           <span class="text-2xl font-extrabold tracking-tight font-heading">
             {formatSpeed(totalSpeedBytes)}
           </span>
-          <span class="text-[10px] text-muted-foreground font-medium">{i18n.t('downloader.total_speed')}</span>
+          <span class="text-[10px] text-muted-foreground font-medium"
+            >{i18n.t('downloader.total_speed')}</span
+          >
         </div>
       </div>
 
@@ -492,13 +501,22 @@
   </div>
 
   <div class="flex flex-wrap items-center gap-3">
-    <Input class="flex-1 min-w-65" placeholder={i18n.t('downloader.search_downloads')} bind:value={searchTerm} />
+    <Input
+      class="flex-1 min-w-65"
+      placeholder={i18n.t('downloader.search_downloads')}
+      bind:value={searchTerm}
+    />
     <div class="flex items-center gap-2">
-      <Button size="sm" variant="outline" onclick={() => (addOpen = true)}>{i18n.t('downloader.btn_add')}</Button>
+      <Button size="sm" variant="outline" onclick={() => (addOpen = true)}
+        >{i18n.t('downloader.btn_add')}</Button
+      >
       <Button size="sm" variant="outline" onclick={() => (actionsOpen = true)}>
-        <ListChecks class="size-4 mr-2" /> {i18n.t('cleaner.actions')}
+        <ListChecks class="size-4 mr-2" />
+        {i18n.t('cleaner.actions')}
       </Button>
-      <Button size="sm" variant="outline" onclick={() => (optionsOpen = true)}>{i18n.t('downloader.btn_options')}</Button>
+      <Button size="sm" variant="outline" onclick={() => (optionsOpen = true)}
+        >{i18n.t('downloader.btn_options')}</Button
+      >
       <Button variant="ghost" size="icon" onclick={() => (showHelp = true)}>
         <Keyboard class="size-4" />
       </Button>
@@ -536,10 +554,14 @@
           <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
             >{i18n.t('downloader.selection')}</span
           >
-          <span class="text-sm font-semibold">{i18n.t('downloader.items_count', { count: selectedIds.size })}</span>
+          <span class="text-sm font-semibold"
+            >{i18n.t('downloader.items_count', { count: selectedIds.size })}</span
+          >
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" onclick={() => handleBulkAction('startSelected')}>{i18n.t('downloader.btn_start')}</Button>
+          <Button size="sm" onclick={() => handleBulkAction('startSelected')}
+            >{i18n.t('downloader.btn_start')}</Button
+          >
           <Button size="sm" variant="outline" onclick={() => handleBulkAction('cancelSelected')}
             >{i18n.t('common.cancel')}</Button
           >
@@ -572,32 +594,39 @@
 
   <Dialog bind:open={showInstallInfo}>
     <DialogContent
-      ><DialogHeader><DialogTitle>{i18n.t('downloader.silent_install_title')}</DialogTitle></DialogHeader>
-      <DialogDescription
-        >{i18n.t('downloader.silent_install_desc')}</DialogDescription
+      ><DialogHeader
+        ><DialogTitle>{i18n.t('downloader.silent_install_title')}</DialogTitle></DialogHeader
       >
-      <DialogFooter><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter>
+      <DialogDescription>{i18n.t('downloader.silent_install_desc')}</DialogDescription>
+      <DialogFooter
+        ><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter
+      >
     </DialogContent>
   </Dialog>
 
   <Dialog bind:open={showVerifyInfo}>
     <DialogContent
-      ><DialogHeader><DialogTitle>{i18n.t('downloader.verify_install_title')}</DialogTitle></DialogHeader>
-      <DialogDescription
-        >{i18n.t('downloader.verify_install_desc')}</DialogDescription
+      ><DialogHeader
+        ><DialogTitle>{i18n.t('downloader.verify_install_title')}</DialogTitle></DialogHeader
       >
-      <DialogFooter><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter>
+      <DialogDescription>{i18n.t('downloader.verify_install_desc')}</DialogDescription>
+      <DialogFooter
+        ><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter
+      >
     </DialogContent>
   </Dialog>
 
   <Dialog bind:open={showHelp}>
     <DialogContent
-      ><DialogHeader><DialogTitle>{i18n.t('downloader.shortcuts_title')}</DialogTitle></DialogHeader>
+      ><DialogHeader><DialogTitle>{i18n.t('downloader.shortcuts_title')}</DialogTitle></DialogHeader
+      >
       <div class="grid gap-2 text-sm">
         <p><strong>Ctrl/Cmd + A:</strong> {i18n.t('downloader.shortcut_select_all')}</p>
         <p><strong>Esc:</strong> {i18n.t('downloader.help_clear_selection')}</p>
       </div>
-      <DialogFooter><Button onclick={() => (showHelp = false)}>{i18n.t('common.close')}</Button></DialogFooter>
+      <DialogFooter
+        ><Button onclick={() => (showHelp = false)}>{i18n.t('common.close')}</Button></DialogFooter
+      >
     </DialogContent>
   </Dialog>
 </div>

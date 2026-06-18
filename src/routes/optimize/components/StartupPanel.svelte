@@ -282,7 +282,8 @@
   <Card class="gap-4 py-4">
     <CardHeader>
       <CardTitle class="flex items-center gap-2">
-        <Trash2 class="size-5" /> {i18n.t('optimize.startup_title')}
+        <Trash2 class="size-5" />
+        {i18n.t('optimize.startup_title')}
       </CardTitle>
       <CardDescription>{i18n.t('optimize.startup_desc')}</CardDescription>
     </CardHeader>
@@ -322,7 +323,11 @@
           <SearchIcon
             class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
           />
-          <Input class="pl-9" placeholder={i18n.t('optimize.startup_filter_placeholder')} bind:value={startupQuery} />
+          <Input
+            class="pl-9"
+            placeholder={i18n.t('optimize.startup_filter_placeholder')}
+            bind:value={startupQuery}
+          />
         </div>
         <div class="flex gap-1">
           <Button
@@ -331,7 +336,9 @@
             onclick={toggleAllStartup}
             disabled={filteredStartupItems.length === 0}
           >
-            {allStartupSelected ? i18n.t('optimize.startup_btn_deselect_all') : i18n.t('optimize.startup_btn_select_all')}
+            {allStartupSelected
+              ? i18n.t('optimize.startup_btn_deselect_all')
+              : i18n.t('optimize.startup_btn_select_all')}
           </Button>
         </div>
       </div>
@@ -464,8 +471,12 @@
         {/if}
       </div>
       <AlertDialogFooter>
-        <AlertDialogCancel onclick={() => (showStartupConfirm = false)}>{i18n.t('optimize.startup_confirm_btn_cancel')}</AlertDialogCancel>
-        <AlertDialogAction onclick={confirmRemoveStartup}>{i18n.t('optimize.startup_confirm_btn_continue')}</AlertDialogAction>
+        <AlertDialogCancel onclick={() => (showStartupConfirm = false)}
+          >{i18n.t('optimize.startup_confirm_btn_cancel')}</AlertDialogCancel
+        >
+        <AlertDialogAction onclick={confirmRemoveStartup}
+          >{i18n.t('optimize.startup_confirm_btn_continue')}</AlertDialogAction
+        >
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>

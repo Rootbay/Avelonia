@@ -1,6 +1,6 @@
 [package]
 name = "avelonia"
-version = "0.1.0"
+version = "1.0.0"
 description = "A PC maintaince suite app"
 authors = ["xeintdm", "Pysen"]
 edition = "2024"

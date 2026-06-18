@@ -39,7 +39,6 @@
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { toast } from '$lib/components/ui/sonner';
   import { cleanerScan, beginCleanerScan, clearAllScannedItems } from '$lib/cleanerScan.svelte';
-  import { loadCleanerCache } from '$lib/cleanerCache';
   import { i18n } from '$lib/i18n.svelte';
 
   // Read cleaner cache

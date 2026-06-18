@@ -2900,6 +2900,7 @@ class I18nManager {
   t(key: string, params?: Record<string, string | number>): string {
     const lang = this._lang;
     const keys = key.split('.');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let current: any = translations[lang as keyof typeof translations] || translations['en'];
 
     let found = true;
@@ -2917,6 +2918,7 @@ class I18nManager {
       text = current;
     } else {
       // Fallback to English
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let fallback: any = translations['en'];
       for (const fk of keys) {
         if (fallback && typeof fallback === 'object' && fk in fallback) {

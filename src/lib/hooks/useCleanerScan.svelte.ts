@@ -2,12 +2,7 @@ import { onMount, onDestroy } from 'svelte';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '$lib/components/ui/sonner';
-import {
-  beginCleanerScan,
-  endCleanerScan,
-  setCleanerMessage,
-  cleanerScan,
-} from '$lib/cleanerScan.svelte';
+import { endCleanerScan, setCleanerMessage, cleanerScan } from '$lib/cleanerScan.svelte';
 import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
 
 export function useCleanerScan() {
@@ -20,7 +15,7 @@ export function useCleanerScan() {
 
   // Queues and flushes for throttling updates
   let tempQueue: FilePair[] = [];
-  let tempFlushRaf: any = null;
+  let tempFlushRaf: number | null = null;
   function scheduleTempFlush() {
     if (tempFlushRaf !== null) return;
     const run = () => {
@@ -40,7 +35,7 @@ export function useCleanerScan() {
   }
 
   let largeQueue: FilePair[] = [];
-  let largeFlushRaf: any = null;
+  let largeFlushRaf: number | null = null;
   function scheduleLargeFlush() {
     if (largeFlushRaf !== null) return;
     const run = () => {
@@ -58,7 +53,7 @@ export function useCleanerScan() {
   }
 
   let dupGroupsQueue: Array<{ hash: string; size: number; files: string[] }> = [];
-  let dupFlushRaf: any = null;
+  let dupFlushRaf: number | null = null;
   function scheduleDupFlush() {
     if (dupFlushRaf !== null) return;
     const run = () => {
@@ -80,7 +75,7 @@ export function useCleanerScan() {
   }
 
   let emptyQueue: string[] = [];
-  let emptyFlushRaf: any = null;
+  let emptyFlushRaf: number | null = null;
   function scheduleEmptyFlush() {
     if (emptyFlushRaf !== null) return;
     const run = () => {
@@ -98,7 +93,7 @@ export function useCleanerScan() {
   }
 
   let shortcutQueue: string[] = [];
-  let shortcutFlushRaf: any = null;
+  let shortcutFlushRaf: number | null = null;
   function scheduleShortcutFlush() {
     if (shortcutFlushRaf !== null) return;
     const run = () => {
@@ -126,7 +121,9 @@ export function useCleanerScan() {
       tempQueue = [];
       if (tempFlushRaf) {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as any).cancelIdleCallback(tempFlushRaf);
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            tempFlushRaf
+          );
         } else {
           clearTimeout(tempFlushRaf);
         }
@@ -141,7 +138,9 @@ export function useCleanerScan() {
       largeQueue = [];
       if (largeFlushRaf) {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as any).cancelIdleCallback(largeFlushRaf);
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            largeFlushRaf
+          );
         } else {
           clearTimeout(largeFlushRaf);
         }
@@ -161,7 +160,9 @@ export function useCleanerScan() {
       dupGroupsQueue = [];
       if (dupFlushRaf) {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as any).cancelIdleCallback(dupFlushRaf);
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            dupFlushRaf
+          );
         } else {
           clearTimeout(dupFlushRaf);
         }
@@ -176,7 +177,9 @@ export function useCleanerScan() {
       emptyQueue = [];
       if (emptyFlushRaf) {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as any).cancelIdleCallback(emptyFlushRaf);
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            emptyFlushRaf
+          );
         } else {
           clearTimeout(emptyFlushRaf);
         }
@@ -191,7 +194,9 @@ export function useCleanerScan() {
       shortcutQueue = [];
       if (shortcutFlushRaf) {
         if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as any).cancelIdleCallback(shortcutFlushRaf);
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            shortcutFlushRaf
+          );
         } else {
           clearTimeout(shortcutFlushRaf);
         }
@@ -277,7 +282,7 @@ export function useCleanerScan() {
       unlistenFns.push(unTempBatch);
 
       // Listen for temp done
-      const unTempDone = await listen<{ total?: number }>('cleaner-temp-done', (ev) => {
+      const unTempDone = await listen<{ total?: number }>('cleaner-temp-done', (_ev) => {
         try {
           toast.message(`Temporary files scan complete.`, {
             id: cleanerToastId,

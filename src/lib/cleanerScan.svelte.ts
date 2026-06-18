@@ -1,3 +1,5 @@
+import { SvelteSet } from 'svelte/reactivity';
+
 export type CleanerPhase = 'idle' | 'running' | 'done';
 
 export type FileEntry = { path: string; size?: number };
@@ -16,7 +18,7 @@ export type CleanerScanState = {
   emptyFolders: FileEntry[];
   brokenShortcuts: FileEntry[];
   dupGroups: DuplicateGroup[];
-  selectedPaths: Set<string>;
+  selectedPaths: SvelteSet<string>;
 };
 
 const initial: CleanerScanState = {
@@ -36,7 +38,7 @@ const initial: CleanerScanState = {
   emptyFolders: [],
   brokenShortcuts: [],
   dupGroups: [],
-  selectedPaths: new Set<string>(),
+  selectedPaths: new SvelteSet<string>(),
 };
 
 export const cleanerScan = $state<CleanerScanState>(initial);
@@ -52,7 +54,7 @@ export function beginCleanerScan() {
   cleanerScan.emptyFolders = [];
   cleanerScan.brokenShortcuts = [];
   cleanerScan.dupGroups = [];
-  cleanerScan.selectedPaths = new Set<string>();
+  cleanerScan.selectedPaths = new SvelteSet<string>();
 }
 
 export function setCleanerMessage(msg: string) {
@@ -77,7 +79,7 @@ export function resetCleanerScan() {
   cleanerScan.emptyFolders = [];
   cleanerScan.brokenShortcuts = [];
   cleanerScan.dupGroups = [];
-  cleanerScan.selectedPaths = new Set<string>();
+  cleanerScan.selectedPaths = new SvelteSet<string>();
 }
 
 export function clearAllScannedItems() {
@@ -87,5 +89,5 @@ export function clearAllScannedItems() {
   cleanerScan.emptyFolders = [];
   cleanerScan.brokenShortcuts = [];
   cleanerScan.dupGroups = [];
-  cleanerScan.selectedPaths = new Set<string>();
+  cleanerScan.selectedPaths = new SvelteSet<string>();
 }

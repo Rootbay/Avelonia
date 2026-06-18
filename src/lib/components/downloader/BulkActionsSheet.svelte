@@ -68,7 +68,9 @@
     </SheetHeader>
     <div class="mt-3 space-y-3">
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_all_downloads')}</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">
+          {i18n.t('downloader.bulk_all_downloads')}
+        </p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -79,7 +81,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_all')}</span>
+            <span class="flex items-center gap-2"
+              ><Play class="size-4" /> {i18n.t('downloader.bulk_start_all')}</span
+            >
             {#if globalStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums">{globalStats.startable}</span
               >
@@ -95,7 +99,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_active')}</span>
+            <span class="flex items-center gap-2"
+              ><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_active')}</span
+            >
             {#if globalStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{globalStats.cancelable}</span
@@ -106,7 +112,9 @@
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_current_view')}</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">
+          {i18n.t('downloader.bulk_current_view')}
+        </p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -118,7 +126,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_filtered')}</span>
+            <span class="flex items-center gap-2"
+              ><Play class="size-4" /> {i18n.t('downloader.bulk_start_filtered')}</span
+            >
             {#if filteredStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.startable}</span
@@ -135,7 +145,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_filtered')}</span>
+            <span class="flex items-center gap-2"
+              ><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_filtered')}</span
+            >
             {#if filteredStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.cancelable}</span
@@ -152,7 +164,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_filtered')}</span>
+            <span class="flex items-center gap-2"
+              ><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_filtered')}</span
+            >
             {#if filteredStats.deletable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.deletable}</span
@@ -185,13 +199,17 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><FileDown class="size-4" /> {i18n.t('downloader.bulk_export_csv')}</span>
+            <span class="flex items-center gap-2"
+              ><FileDown class="size-4" /> {i18n.t('downloader.bulk_export_csv')}</span
+            >
           </Button>
         </div>
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_selected')}</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">
+          {i18n.t('downloader.bulk_selected')}
+        </p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -203,7 +221,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_selected')}</span>
+            <span class="flex items-center gap-2"
+              ><Play class="size-4" /> {i18n.t('downloader.bulk_start_selected')}</span
+            >
             {#if selectedStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.startable}</span
@@ -220,7 +240,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_selected')}</span>
+            <span class="flex items-center gap-2"
+              ><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_selected')}</span
+            >
             {#if selectedStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.cancelable}</span
@@ -236,7 +258,9 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_selected')}</span>
+            <span class="flex items-center gap-2"
+              ><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_selected')}</span
+            >
             {#if selectedStats.deletable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.deletable}</span
@@ -298,7 +322,9 @@
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_failed')}</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">
+          {i18n.t('downloader.bulk_failed')}
+        </p>
         <div class="grid gap-2">
           <Button
             variant="outline"

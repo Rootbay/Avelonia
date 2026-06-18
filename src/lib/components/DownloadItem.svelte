@@ -221,7 +221,9 @@
       <span class={`text-xs font-semibold uppercase tracking-wide shrink-0 ${statusTone}`}>
         {i18n.t('dashboard.status_' + download.status)}
         {#if download.progress < 0}
-          <span class="ml-1 text-muted-foreground">({i18n.t('dashboard.status_pending').toLowerCase()})</span>
+          <span class="ml-1 text-muted-foreground"
+            >({i18n.t('dashboard.status_pending').toLowerCase()})</span
+          >
         {/if}
         {#if download.status === 'downloading' && download.speed}
           <span class="ml-1 text-muted-foreground whitespace-nowrap hidden md:inline"
@@ -253,7 +255,9 @@
             </DropdownMenuContent>
           </DropdownMenu>
         {:else if download.status === 'failed'}
-          <Button type="button" variant="ghost" size="sm" class="h-7" onclick={retry}>{i18n.t('downloader.btn_retry')}</Button>
+          <Button type="button" variant="ghost" size="sm" class="h-7" onclick={retry}
+            >{i18n.t('downloader.btn_retry')}</Button
+          >
         {:else if cancelDownload && (download.status === 'downloading' || download.status === 'pending' || download.status === 'queued')}
           <Button type="button" variant="destructive" size="sm" class="h-7" onclick={cancel}
             >{i18n.t('downloader.btn_cancel')}</Button

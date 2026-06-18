@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { listen } from '@tauri-apps/api/event';
+  import { SvelteSet } from 'svelte/reactivity';
   import { Button } from '$lib/components/ui/button';
   import {
     Card,
@@ -41,15 +41,10 @@
     DropdownMenuItem,
   } from '$lib/components/ui/dropdown-menu';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
-  import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
+  import { saveCleanerCache } from '$lib/cleanerCache';
   import { pushLog, type LogLevel } from '$lib/logStore';
   import { Trash2, Scan, Eraser, Ellipsis } from '@lucide/svelte';
   import { i18n } from '$lib/i18n.svelte';
-
-  interface FileEntry {
-    path: string;
-    size?: number;
-  }
 
   import { cleanerScan, beginCleanerScan } from '$lib/cleanerScan.svelte';
 
@@ -67,7 +62,9 @@
   const emptyFolders = $derived(isDeferredLoaded ? cleanerScan.emptyFolders : []);
   const brokenShortcuts = $derived(isDeferredLoaded ? cleanerScan.brokenShortcuts : []);
   const dupGroups = $derived(isDeferredLoaded ? cleanerScan.dupGroups : []);
-  const selectedPaths = $derived(isDeferredLoaded ? cleanerScan.selectedPaths : new Set<string>());
+  const selectedPaths = $derived(
+    isDeferredLoaded ? cleanerScan.selectedPaths : new SvelteSet<string>()
+  );
 
   let totalDiskSpace = $state(0);
   let availableDiskSpace = $state(0);
@@ -218,7 +215,7 @@
   const allItems = $derived.by<CleanerItem[]>(() => {
     const cap = unifiedCap;
     const items: CleanerItem[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const term = qDeb.trim().toLowerCase();
     function tryPush(it: CleanerItem) {
       const p = it.path;
@@ -271,10 +268,8 @@
   });
 
   const MAX_TEMP_ITEMS = 20000;
-  const tempTruncated = $derived(cleanerScan.tempFiles.length >= MAX_TEMP_ITEMS);
 
   let unifiedContainer = $state<HTMLDivElement | null>(null);
-  let _unifiedLastScrollTs = 0;
   let _unifiedLastScrollTop = 0;
   let _unifiedLastDir: 'up' | 'down' | null = null;
   let UNIFIED_ROW_PX = $state(40);
@@ -381,12 +376,10 @@
         _unifiedScrollTick = false;
         return;
       }
-      const now = Date.now();
       const top = el.scrollTop;
       _unifiedLastDir =
         top < _unifiedLastScrollTop ? 'up' : top > _unifiedLastScrollTop ? 'down' : _unifiedLastDir;
       _unifiedLastScrollTop = top;
-      _unifiedLastScrollTs = now;
       if (unifiedVirtualize) {
         const approx = Math.floor(top / UNIFIED_ROW_PX);
         const first = approx - UNIFIED_PREBUFFER;
@@ -405,21 +398,6 @@
       }
       _unifiedScrollTick = false;
     });
-  }
-
-  async function statTempSizes() {
-    try {
-      const paths = tempFiles.map((f) => f.path);
-      if (paths.length === 0) return;
-      const res = (await invoke('stat_paths', { paths })) as [string, number][];
-      const map = new Map(res);
-      cleanerScan.tempFiles = cleanerScan.tempFiles.map((f) => ({
-        path: f.path,
-        size: map.get(f.path) ?? f.size,
-      }));
-    } catch (error) {
-      logCleanerError('Stat temp sizes failed', error);
-    }
   }
 
   async function scanAll() {
@@ -441,22 +419,23 @@
   }
 
   function toggleSelectUnified(p: string) {
-    const next = new Set(cleanerScan.selectedPaths);
-    if (next.has(p)) next.delete(p);
-    else next.add(p);
-    cleanerScan.selectedPaths = next;
+    if (cleanerScan.selectedPaths.has(p)) {
+      cleanerScan.selectedPaths.delete(p);
+    } else {
+      cleanerScan.selectedPaths.add(p);
+    }
   }
 
   function clearSelectionUnified() {
-    cleanerScan.selectedPaths = new Set();
+    cleanerScan.selectedPaths.clear();
   }
 
   function setSelectionForKind(kind: 'all' | Kind) {
-    const next = new Set(cleanerScan.selectedPaths);
     for (const it of allItems) {
-      if (kind === 'all' || it.kind === kind) next.add(it.path);
+      if (kind === 'all' || it.kind === kind) {
+        cleanerScan.selectedPaths.add(it.path);
+      }
     }
-    cleanerScan.selectedPaths = next;
   }
 
   async function deleteSelectedUnified() {
@@ -529,13 +508,13 @@
 
   function autoSelectDuplicatesKeepOne() {
     if (cleanerScan.dupGroups.length === 0) return;
-    const next = new Set(cleanerScan.selectedPaths);
     for (const g of cleanerScan.dupGroups) {
       if (!g.files || g.files.length < 2) continue;
       const sorted = [...g.files].sort();
-      for (let i = 1; i < sorted.length; i++) next.add(sorted[i]);
+      for (let i = 1; i < sorted.length; i++) {
+        cleanerScan.selectedPaths.add(sorted[i]);
+      }
     }
-    cleanerScan.selectedPaths = next;
     filterKind = 'duplicate';
   }
 
@@ -624,8 +603,12 @@
           </div>
         {:else}
           <span class="text-xs text-muted-foreground"
-            >{i18n.t('cleaner.category_temp')}: {tempFiles.length}, {i18n.t('cleaner.category_large')}: {largeFiles.length}, {i18n.t('cleaner.category_dup')}: {dupGroups.length},
-            {i18n.t('cleaner.category_empty')}: {emptyFolders.length}, {i18n.t('cleaner.category_shortcuts')}: {brokenShortcuts.length}</span
+            >{i18n.t('cleaner.category_temp')}: {tempFiles.length}, {i18n.t(
+              'cleaner.category_large'
+            )}: {largeFiles.length}, {i18n.t('cleaner.category_dup')}: {dupGroups.length},
+            {i18n.t('cleaner.category_empty')}: {emptyFolders.length}, {i18n.t(
+              'cleaner.category_shortcuts'
+            )}: {brokenShortcuts.length}</span
           >
         {/if}
       </div>
@@ -776,7 +759,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-purple-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.clutter')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.clutter')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(totalClutterSize)}</span
                 >
@@ -785,7 +770,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-zinc-400 dark:bg-zinc-600"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.system_other')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.system_other')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(
                     Math.max(0, totalDiskSpace - availableDiskSpace - totalClutterSize)
@@ -796,7 +783,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-emerald-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.free_space')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.free_space')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(availableDiskSpace)}</span
                 >
@@ -820,7 +809,9 @@
             <span class="text-2xl font-extrabold tracking-tight font-heading"
               >{formatBytes(totalClutterSize)}</span
             >
-            <span class="text-[10px] text-muted-foreground">{i18n.t('cleaner.scanned_removable')}</span>
+            <span class="text-[10px] text-muted-foreground"
+              >{i18n.t('cleaner.scanned_removable')}</span
+            >
           </div>
 
           <div
@@ -854,7 +845,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-violet-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_temp')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.category_temp')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(tempSize)} ({tempFiles.length})</span
                 >
@@ -863,7 +856,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-blue-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_large')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.category_large')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(largeSize)} ({largeFiles.length})</span
                 >
@@ -872,7 +867,9 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-amber-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_dup')}</span>
+                <span class="font-semibold text-foreground/80 leading-none"
+                  >{i18n.t('cleaner.category_dup')}</span
+                >
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(duplicateSize)} ({duplicateFiles.length})</span
                 >
@@ -925,7 +922,9 @@
                 ><Scan class="h-4 w-4" />{i18n.t('cleaner.scan_all')}</Button
               >
               {#if scanning}
-                <Button variant="secondary" onclick={stopScan} title="Stop scanning">{i18n.t('cleaner.stop')}</Button>
+                <Button variant="secondary" onclick={stopScan} title="Stop scanning"
+                  >{i18n.t('cleaner.stop')}</Button
+                >
               {/if}
               <Button
                 variant="secondary"
@@ -935,7 +934,8 @@
               <Button
                 variant="secondary"
                 onclick={autoSelectDuplicatesKeepOne}
-                title="Auto-select duplicate copies">{i18n.t('cleaner.auto_select_duplicates')}</Button
+                title="Auto-select duplicate copies"
+                >{i18n.t('cleaner.auto_select_duplicates')}</Button
               >
             </div>
           </div>
@@ -944,7 +944,9 @@
               variant="destructive"
               disabled={selectedPaths.size === 0 || isLoading}
               onclick={deleteSelectedUnified}
-              ><Trash2 class="h-4 w-4" />{i18n.t('cleaner.delete_selected', { count: selectedCount })}</Button
+              ><Trash2 class="h-4 w-4" />{i18n.t('cleaner.delete_selected', {
+                count: selectedCount,
+              })}</Button
             >
             <Button
               variant="secondary"
@@ -954,7 +956,8 @@
             <Button
               variant="secondary"
               disabled={selectedPaths.size === 0 || isErasing}
-              onclick={secureEraseSelectedUnified}><Eraser class="h-4 w-4" />{i18n.t('cleaner.secure_erase')}</Button
+              onclick={secureEraseSelectedUnified}
+              ><Eraser class="h-4 w-4" />{i18n.t('cleaner.secure_erase')}</Button
             >
             <span class="text-xs text-muted-foreground"
               >{i18n.t('cleaner.selected_size', { size: formatBytes(selectedSize) })}</span
@@ -979,8 +982,8 @@
                   <th class="px-3 py-2 text-left w-9">
                     <Checkbox
                       checked={selectedPaths.size > 0 &&
-                      selectedPaths.size === allItems.length &&
-                      allItems.length > 0}
+                        selectedPaths.size === allItems.length &&
+                        allItems.length > 0}
                       onCheckedChange={() =>
                         setSelectionForKind(filterKind === 'all' ? 'all' : filterKind)}
                     />
@@ -1145,7 +1148,9 @@
             {#each exclusions as ex (ex)}
               <li class="flex items-center justify-between gap-2 border-b px-3 py-2">
                 <span class="truncate" title={ex}>{ex}</span>
-                <Button variant="ghost" size="sm" onclick={() => removeExclusion(ex)}>{i18n.t('cleaner.remove')}</Button>
+                <Button variant="ghost" size="sm" onclick={() => removeExclusion(ex)}
+                  >{i18n.t('cleaner.remove')}</Button
+                >
               </li>
             {/each}
           {/if}
@@ -1153,7 +1158,9 @@
       </div>
     </div>
     <DialogFooter>
-      <Button variant="secondary" onclick={() => (showSettings = false)}>{i18n.t('common.close')}</Button>
+      <Button variant="secondary" onclick={() => (showSettings = false)}
+        >{i18n.t('common.close')}</Button
+      >
     </DialogFooter>
   </DialogContent>
 </Dialog>
@@ -1199,7 +1206,8 @@
         <Skeleton class="h-3 w-4/6" aria-hidden="true" />
       </div>
       <p class="text-sm text-muted-foreground">
-        {progressMessage || (isErasing ? i18n.t('cleaner.securely_erasing') : i18n.t('cleaner.working'))}
+        {progressMessage ||
+          (isErasing ? i18n.t('cleaner.securely_erasing') : i18n.t('cleaner.working'))}
       </p>
     </div>
   </div>
