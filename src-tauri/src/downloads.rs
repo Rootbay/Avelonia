@@ -164,10 +164,15 @@ pub async fn download_file_inner(
         request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
     }
 
-    let res = request.send().await.map_err(|e| AppError::Internal(format!("Failed to get response: {}", e)))?;
-    
+    let res = request
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to get response: {}", e)))?;
+
     // Check for HTTP errors (4xx, 5xx)
-    let res = res.error_for_status().map_err(|e| AppError::Internal(format!("Server returned error: {}", e)))?;
+    let res = res
+        .error_for_status()
+        .map_err(|e| AppError::Internal(format!("Server returned error: {}", e)))?;
 
     let status = res.status();
     let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
@@ -203,7 +208,9 @@ pub async fn download_file_inner(
             return Ok(());
         }
 
-        let chunk = item.map_err(|e: reqwest::Error| AppError::Internal(format!("Failed to download chunk: {}", e)))?;
+        let chunk = item.map_err(|e: reqwest::Error| {
+            AppError::Internal(format!("Failed to download chunk: {}", e))
+        })?;
         file.write_all(&chunk).map_err(|e| AppError::Io(e))?;
         downloaded += chunk.len() as u64;
 
@@ -235,7 +242,9 @@ pub async fn download_file_inner(
         std::fs::rename(&temp_path, &path).map_err(|e| AppError::Io(e))?;
         Ok(())
     } else {
-        Err(AppError::Internal("Download interrupted or incomplete".to_string()))
+        Err(AppError::Internal(
+            "Download interrupted or incomplete".to_string(),
+        ))
     }
 }
 

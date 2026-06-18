@@ -44,6 +44,7 @@
   import { loadCleanerCache, saveCleanerCache } from '$lib/cleanerCache';
   import { pushLog, type LogLevel } from '$lib/logStore';
   import { Trash2, Scan, Eraser, Ellipsis } from '@lucide/svelte';
+  import { i18n } from '$lib/i18n.svelte';
 
   interface FileEntry {
     path: string;
@@ -612,9 +613,9 @@
 <div class="space-y-6 text-foreground">
   <Card>
     <CardHeader>
-      <CardTitle class="text-2xl">Cleaner</CardTitle>
+      <CardTitle class="text-2xl">{i18n.t('cleaner.title')}</CardTitle>
       <div class="flex items-baseline justify-between">
-        <CardDescription>Scan, review and clean safely.</CardDescription>
+        <CardDescription>{i18n.t('cleaner.desc')}</CardDescription>
         {#if !isDeferredLoaded}
           <div class="flex items-center gap-2">
             <Skeleton class="h-3 w-16" />
@@ -623,8 +624,8 @@
           </div>
         {:else}
           <span class="text-xs text-muted-foreground"
-            >Counts ? Temp: {tempFiles.length}, Large: {largeFiles.length}, Dups: {dupGroups.length},
-            Empty: {emptyFolders.length}, Shortcuts: {brokenShortcuts.length}</span
+            >{i18n.t('cleaner.category_temp')}: {tempFiles.length}, {i18n.t('cleaner.category_large')}: {largeFiles.length}, {i18n.t('cleaner.category_dup')}: {dupGroups.length},
+            {i18n.t('cleaner.category_empty')}: {emptyFolders.length}, {i18n.t('cleaner.category_shortcuts')}: {brokenShortcuts.length}</span
           >
         {/if}
       </div>
@@ -642,7 +643,7 @@
           <h3
             class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
           >
-            Drive Storage Analyzer
+            {i18n.t('cleaner.drive_analyzer')}
           </h3>
           <div class="flex items-baseline gap-1.5 mb-3">
             <Skeleton class="h-7 w-28" />
@@ -687,7 +688,7 @@
           <h3
             class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
           >
-            Clutter Space Breakdown
+            {i18n.t('cleaner.clutter_breakdown')}
           </h3>
           <div class="flex items-baseline gap-1.5 mb-3">
             <Skeleton class="h-7 w-28" />
@@ -733,14 +734,14 @@
           <h3
             class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
           >
-            Drive Storage Analyzer
+            {i18n.t('cleaner.drive_analyzer')}
           </h3>
           <div class="flex items-baseline gap-1.5 mb-3">
             <span class="text-2xl font-extrabold tracking-tight font-heading"
               >{formatBytes(totalDiskSpace - availableDiskSpace)}</span
             >
             <span class="text-[10px] text-muted-foreground"
-              >Used of {formatBytes(totalDiskSpace)}</span
+              >{i18n.t('cleaner.used_of', { total: formatBytes(totalDiskSpace) })}</span
             >
           </div>
 
@@ -775,7 +776,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-purple-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">Clutter</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.clutter')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(totalClutterSize)}</span
                 >
@@ -784,7 +785,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-zinc-400 dark:bg-zinc-600"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">System/Other</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.system_other')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(
                     Math.max(0, totalDiskSpace - availableDiskSpace - totalClutterSize)
@@ -795,7 +796,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-emerald-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">Free Space</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.free_space')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(availableDiskSpace)}</span
                 >
@@ -813,13 +814,13 @@
           <h3
             class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 font-heading"
           >
-            Clutter Space Breakdown
+            {i18n.t('cleaner.clutter_breakdown')}
           </h3>
           <div class="flex items-baseline gap-1.5 mb-3">
             <span class="text-2xl font-extrabold tracking-tight font-heading"
               >{formatBytes(totalClutterSize)}</span
             >
-            <span class="text-[10px] text-muted-foreground">Scanned removable files</span>
+            <span class="text-[10px] text-muted-foreground">{i18n.t('cleaner.scanned_removable')}</span>
           </div>
 
           <div
@@ -853,7 +854,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-violet-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">Temp Files</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_temp')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(tempSize)} ({tempFiles.length})</span
                 >
@@ -862,7 +863,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-blue-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">Large Files</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_large')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(largeSize)} ({largeFiles.length})</span
                 >
@@ -871,7 +872,7 @@
             <div class="flex items-center gap-1.5">
               <span class="size-2 rounded-full bg-amber-500"></span>
               <div class="flex flex-col">
-                <span class="font-semibold text-foreground/80 leading-none">Duplicates</span>
+                <span class="font-semibold text-foreground/80 leading-none">{i18n.t('cleaner.category_dup')}</span>
                 <span class="text-[9px] text-muted-foreground mt-0.5"
                   >{formatBytes(duplicateSize)} ({duplicateFiles.length})</span
                 >
@@ -888,53 +889,53 @@
       <CardContent>
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-2">
-            <Input placeholder="Search path..." bind:value={q} class="w-70" />
+            <Input placeholder={i18n.t('cleaner.search_path')} bind:value={q} class="w-70" />
             <div class="flex items-center gap-2">
-              <Label for="kind">Type</Label>
+              <Label for="kind">{i18n.t('cleaner.type')}</Label>
               <Select type="single" bind:value={filterKind}>
                 <SelectTrigger id="kind" class="w-30">
                   <p class="truncate">
                     {filterKind === 'all'
-                      ? 'All'
+                      ? i18n.t('cleaner.all')
                       : filterKind === 'temp'
-                        ? 'Temp'
+                        ? i18n.t('cleaner.category_temp')
                         : filterKind === 'large'
-                          ? 'Large'
+                          ? i18n.t('cleaner.category_large')
                           : filterKind === 'duplicate'
-                            ? 'Duplicates'
+                            ? i18n.t('cleaner.category_dup')
                             : filterKind === 'empty'
-                              ? 'Empty'
+                              ? i18n.t('cleaner.category_empty')
                               : filterKind === 'shortcut'
-                                ? 'Shortcuts'
+                                ? i18n.t('cleaner.category_shortcuts')
                                 : filterKind}
                   </p>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="temp">Temp</SelectItem>
-                  <SelectItem value="large">Large</SelectItem>
-                  <SelectItem value="duplicate">Duplicates</SelectItem>
-                  <SelectItem value="empty">Empty</SelectItem>
-                  <SelectItem value="shortcut">Shortcuts</SelectItem>
+                  <SelectItem value="all">{i18n.t('cleaner.all')}</SelectItem>
+                  <SelectItem value="temp">{i18n.t('cleaner.category_temp')}</SelectItem>
+                  <SelectItem value="large">{i18n.t('cleaner.category_large')}</SelectItem>
+                  <SelectItem value="duplicate">{i18n.t('cleaner.category_dup')}</SelectItem>
+                  <SelectItem value="empty">{i18n.t('cleaner.category_empty')}</SelectItem>
+                  <SelectItem value="shortcut">{i18n.t('cleaner.category_shortcuts')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div class="ml-auto flex items-center gap-2">
               <Button onclick={scanAll} disabled={isLoading}
-                ><Scan class="h-4 w-4" />Scan All</Button
+                ><Scan class="h-4 w-4" />{i18n.t('cleaner.scan_all')}</Button
               >
               {#if scanning}
-                <Button variant="secondary" onclick={stopScan} title="Stop scanning">Stop</Button>
+                <Button variant="secondary" onclick={stopScan} title="Stop scanning">{i18n.t('cleaner.stop')}</Button>
               {/if}
               <Button
                 variant="secondary"
                 onclick={() => (showSettings = true)}
-                aria-label="Settings">Settings</Button
+                aria-label="Settings">{i18n.t('cleaner.settings')}</Button
               >
               <Button
                 variant="secondary"
                 onclick={autoSelectDuplicatesKeepOne}
-                title="Auto-select duplicate copies">Auto-select Duplicates</Button
+                title="Auto-select duplicate copies">{i18n.t('cleaner.auto_select_duplicates')}</Button
               >
             </div>
           </div>
@@ -943,27 +944,27 @@
               variant="destructive"
               disabled={selectedPaths.size === 0 || isLoading}
               onclick={deleteSelectedUnified}
-              ><Trash2 class="h-4 w-4" />Delete Selected ({selectedCount})</Button
+              ><Trash2 class="h-4 w-4" />{i18n.t('cleaner.delete_selected', { count: selectedCount })}</Button
             >
             <Button
               variant="secondary"
               disabled={selectedPaths.size === 0 || isLoading}
-              onclick={moveSelectedUnified}>Move Selected</Button
+              onclick={moveSelectedUnified}>{i18n.t('cleaner.move_selected')}</Button
             >
             <Button
               variant="secondary"
               disabled={selectedPaths.size === 0 || isErasing}
-              onclick={secureEraseSelectedUnified}><Eraser class="h-4 w-4" />Secure Erase</Button
+              onclick={secureEraseSelectedUnified}><Eraser class="h-4 w-4" />{i18n.t('cleaner.secure_erase')}</Button
             >
             <span class="text-xs text-muted-foreground"
-              >Selected size: {formatBytes(selectedSize)}</span
+              >{i18n.t('cleaner.selected_size', { size: formatBytes(selectedSize) })}</span
             >
             <Button
               variant="ghost"
               size="sm"
               onclick={() => {
                 clearSelectionUnified();
-              }}>Clear selection</Button
+              }}>{i18n.t('cleaner.clear_selection')}</Button
             >
           </div>
           <div
@@ -978,16 +979,16 @@
                   <th class="px-3 py-2 text-left w-9">
                     <Checkbox
                       checked={selectedPaths.size > 0 &&
-                        selectedPaths.size === allItems.length &&
-                        allItems.length > 0}
+                      selectedPaths.size === allItems.length &&
+                      allItems.length > 0}
                       onCheckedChange={() =>
                         setSelectionForKind(filterKind === 'all' ? 'all' : filterKind)}
                     />
                   </th>
-                  <th class="px-3 py-2 text-left">Path</th>
-                  <th class="px-3 py-2 text-left">Type</th>
-                  <th class="px-3 py-2 text-left w-30">Size</th>
-                  <th class="px-3 py-2 text-left w-40">Actions</th>
+                  <th class="px-3 py-2 text-left">{i18n.t('cleaner.path')}</th>
+                  <th class="px-3 py-2 text-left">{i18n.t('cleaner.type')}</th>
+                  <th class="px-3 py-2 text-left w-30">{i18n.t('common.size')}</th>
+                  <th class="px-3 py-2 text-left w-40">{i18n.t('cleaner.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1011,7 +1012,7 @@
                   {:else}
                     <tr>
                       <td colspan="5" class="px-3 py-6 text-center text-muted-foreground"
-                        >No items. Click Scan All.</td
+                        >{i18n.t('cleaner.no_items')}</td
                       >
                     </tr>
                   {/if}
@@ -1037,7 +1038,17 @@
                       <td class="px-3 py-2"
                         ><span
                           class="inline-flex items-center rounded border px-2 py-0.5 text-xs capitalize"
-                          >{it.kind}</span
+                          >{it.kind === 'temp'
+                            ? i18n.t('cleaner.category_temp')
+                            : it.kind === 'large'
+                              ? i18n.t('cleaner.category_large')
+                              : it.kind === 'duplicate'
+                                ? i18n.t('cleaner.category_dup')
+                                : it.kind === 'empty'
+                                  ? i18n.t('cleaner.category_empty')
+                                  : it.kind === 'shortcut'
+                                    ? i18n.t('cleaner.category_shortcuts')
+                                    : it.kind}</span
                         ></td
                       >
                       <td class="px-3 py-2">{it.size ? formatBytes(it.size) : '-'}</td>
@@ -1062,13 +1073,13 @@
                                 } catch (error) {
                                   logCleanerError('Reveal item failed', error);
                                 }
-                              }}>Reveal</DropdownMenuItem
+                              }}>{i18n.t('cleaner.reveal')}</DropdownMenuItem
                             >
                             <DropdownMenuItem
                               onclick={(e: MouseEvent) => {
                                 e.stopPropagation();
                                 addExclusion(it.path);
-                              }}>Exclude</DropdownMenuItem
+                              }}>{i18n.t('cleaner.exclude')}</DropdownMenuItem
                             >
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -1099,14 +1110,14 @@
 <Dialog open={showSettings} onOpenChange={(v) => (showSettings = !!v)}>
   <DialogContent>
     <DialogHeader>
-      <DialogTitle>Cleaner Settings</DialogTitle>
-      <DialogDescription>Exclude paths containing these patterns from results.</DialogDescription>
+      <DialogTitle>{i18n.t('cleaner.cleaner_settings')}</DialogTitle>
+      <DialogDescription>{i18n.t('cleaner.exclude_desc')}</DialogDescription>
     </DialogHeader>
     <div class="space-y-3">
       <div class="flex items-center gap-2">
         <Input
           id="ex-add"
-          placeholder="Add path substring, e.g. C:\\Games"
+          placeholder={i18n.t('cleaner.add_placeholder')}
           onkeydown={(e: KeyboardEvent) => {
             const input = e.currentTarget as HTMLInputElement;
             if (e.key === 'Enter') {
@@ -1123,19 +1134,18 @@
               addExclusion(el.value);
               el.value = '';
             }
-          }}>Add</Button
+          }}>{i18n.t('cleaner.add')}</Button
         >
       </div>
       <div class="rounded border">
         <ul class="max-h-48 overflow-auto text-sm">
           {#if exclusions.length === 0}
-            <li class="px-3 py-2 text-muted-foreground">No exclusions</li>
+            <li class="px-3 py-2 text-muted-foreground">{i18n.t('cleaner.no_exclusions')}</li>
           {:else}
             {#each exclusions as ex (ex)}
               <li class="flex items-center justify-between gap-2 border-b px-3 py-2">
                 <span class="truncate" title={ex}>{ex}</span>
-                <Button variant="ghost" size="sm" onclick={() => removeExclusion(ex)}>Remove</Button
-                >
+                <Button variant="ghost" size="sm" onclick={() => removeExclusion(ex)}>{i18n.t('cleaner.remove')}</Button>
               </li>
             {/each}
           {/if}
@@ -1143,7 +1153,7 @@
       </div>
     </div>
     <DialogFooter>
-      <Button variant="secondary" onclick={() => (showSettings = false)}>Close</Button>
+      <Button variant="secondary" onclick={() => (showSettings = false)}>{i18n.t('common.close')}</Button>
     </DialogFooter>
   </DialogContent>
 </Dialog>
@@ -1151,18 +1161,18 @@
 <AlertDialog open={showConfirmationModal} onOpenChange={(v) => (showConfirmationModal = v)}>
   <AlertDialogContent>
     <AlertDialogHeader>
-      <AlertDialogTitle>Delete selected?</AlertDialogTitle>
+      <AlertDialogTitle>{i18n.t('cleaner.delete_selected_title')}</AlertDialogTitle>
       <AlertDialogDescription>
-        This moves {filesToDelete.length} item(s) to the Recycle Bin.
+        {i18n.t('cleaner.delete_selected_desc', { count: filesToDelete.length })}
       </AlertDialogDescription>
     </AlertDialogHeader>
     <AlertDialogFooter>
-      <AlertDialogCancel onclick={cancelDeletion}>Cancel</AlertDialogCancel>
+      <AlertDialogCancel onclick={cancelDeletion}>{i18n.t('common.cancel')}</AlertDialogCancel>
       <AlertDialogAction
         class="bg-destructive text-destructive-foreground hover:opacity-90"
         onclick={executeDeletion}
       >
-        Delete
+        {i18n.t('cleaner.delete')}
       </AlertDialogAction>
     </AlertDialogFooter>
   </AlertDialogContent>
@@ -1189,7 +1199,7 @@
         <Skeleton class="h-3 w-4/6" aria-hidden="true" />
       </div>
       <p class="text-sm text-muted-foreground">
-        {progressMessage || (isErasing ? 'Securely erasing...' : 'Working...')}
+        {progressMessage || (isErasing ? i18n.t('cleaner.securely_erasing') : i18n.t('cleaner.working'))}
       </p>
     </div>
   </div>

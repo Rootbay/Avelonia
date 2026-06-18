@@ -54,7 +54,9 @@ pub async fn silent_install(
         if ok {
             return Ok(());
         }
-        return Err(AppError::Internal("Installation with custom flags failed".into()));
+        return Err(AppError::Internal(
+            "Installation with custom flags failed".into(),
+        ));
     }
 
     if ext == "msi" {
@@ -103,11 +105,15 @@ pub async fn silent_install(
             }
         }
         state.0.remove(&id);
-        return Err(AppError::Internal("no silent flag combination succeeded".into()));
+        return Err(AppError::Internal(
+            "no silent flag combination succeeded".into(),
+        ));
     }
 
     state.0.remove(&id);
-    Err(AppError::Internal("unsupported installer type (expecting .msi or .exe)".into()))
+    Err(AppError::Internal(
+        "unsupported installer type (expecting .msi or .exe)".into(),
+    ))
 }
 
 #[tauri::command]
@@ -125,7 +131,9 @@ pub async fn silent_install(
     _custom_flags: Option<String>,
     _state: State<'_, InstallState>,
 ) -> Result<(), AppError> {
-    Err(AppError::System("Silent install is only supported on Windows in this build".into()))
+    Err(AppError::System(
+        "Silent install is only supported on Windows in this build".into(),
+    ))
 }
 
 #[tauri::command]
@@ -396,7 +404,9 @@ fn directory_contains_exe(path: &std::path::Path) -> bool {
                 if let Ok(sub_entries) = std::fs::read_dir(p) {
                     for sub_entry in sub_entries.flatten() {
                         let sub_p = sub_entry.path();
-                        if sub_p.is_file() && sub_p.extension().and_then(|s| s.to_str()) == Some("exe") {
+                        if sub_p.is_file()
+                            && sub_p.extension().and_then(|s| s.to_str()) == Some("exe")
+                        {
                             return true;
                         }
                     }
@@ -409,7 +419,10 @@ fn directory_contains_exe(path: &std::path::Path) -> bool {
 
 #[cfg(target_os = "windows")]
 fn check_common_install_paths(hint: &str) -> bool {
-    let clean_hint = hint.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").trim().to_lowercase();
+    let clean_hint = hint
+        .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
+        .trim()
+        .to_lowercase();
     if clean_hint.is_empty() {
         return false;
     }
@@ -440,7 +453,10 @@ fn check_common_install_paths(hint: &str) -> bool {
                 if let Ok(file_type) = entry.file_type() {
                     if file_type.is_dir() {
                         let dir_name = entry.file_name().to_string_lossy().to_lowercase();
-                        if dir_name == clean_hint || dir_name.contains(&clean_hint) || clean_hint.contains(&dir_name) {
+                        if dir_name == clean_hint
+                            || dir_name.contains(&clean_hint)
+                            || clean_hint.contains(&dir_name)
+                        {
                             if directory_contains_exe(&entry.path()) {
                                 return true;
                             }
@@ -455,7 +471,9 @@ fn check_common_install_paths(hint: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn check_path_env(hint: &str) -> bool {
-    let clean_hint = hint.replace(|c: char| !c.is_alphanumeric(), "").to_lowercase();
+    let clean_hint = hint
+        .replace(|c: char| !c.is_alphanumeric(), "")
+        .to_lowercase();
     if clean_hint.is_empty() {
         return false;
     }
@@ -468,7 +486,10 @@ fn check_path_env(hint: &str) -> bool {
                 for entry in entries.flatten() {
                     let p = entry.path();
                     if p.is_file() {
-                        let name = p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+                        let name = p
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_lowercase())
+                            .unwrap_or_default();
                         if name == clean_hint {
                             if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                                 let ext_lower = ext.to_lowercase();
@@ -492,10 +513,13 @@ pub fn is_installed(display_name_hint: String) -> Result<bool, String> {
     if hint.trim().is_empty() {
         return Ok(false);
     }
-    
+
     // 1. Registry check
     let entries = read_uninstall_entries();
-    if entries.into_iter().any(|e| is_match(&e.display_name, &hint)) {
+    if entries
+        .into_iter()
+        .any(|e| is_match(&e.display_name, &hint))
+    {
         return Ok(true);
     }
 

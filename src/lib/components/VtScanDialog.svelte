@@ -14,6 +14,7 @@
   import { Ellipsis } from '@lucide/svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { openUrl as openExternal } from '@tauri-apps/plugin-opener';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { open = $bindable(false) } = $props();
 
@@ -53,49 +54,49 @@
 <Dialog bind:open>
   <DialogContent class="sm:max-w-2xl">
     <DialogHeader>
-      <DialogTitle>VirusTotal Scan</DialogTitle>
+      <DialogTitle>{i18n.t('vt_scan.title')}</DialogTitle>
       <DialogDescription>
         {#if vtScan.phase === 'running'}
-          Scanning startup and registry items...
+          {i18n.t('vt_scan.running')}
         {:else if vtScan.phase === 'done'}
-          Scan finished.
+          {i18n.t('vt_scan.finished')}
         {:else}
-          Idle. Trigger a scan from Settings.
+          {i18n.t('vt_scan.idle')}
         {/if}
       </DialogDescription>
     </DialogHeader>
     <div class="space-y-2 text-sm">
       <p class="text-xs text-muted-foreground">
         {#if vtScan.phase === 'running'}
-          Source: {vtScan.source ?? 'N/A'}
+          {i18n.t('vt_scan.source', { source: vtScan.source ?? 'N/A' })}
         {:else}
-          {#if vtScan.startedAt}Started {new Date(vtScan.startedAt).toLocaleTimeString()}{/if}
+          {#if vtScan.startedAt}{i18n.t('vt_scan.started', { time: new Date(vtScan.startedAt).toLocaleTimeString() })}{/if}
           {#if vtScan.finishedAt}
-            • Finished {new Date(vtScan.finishedAt).toLocaleTimeString()}{/if}
-          • Processed {vtScan.items?.length ?? 0} items
+            • {i18n.t('vt_scan.finished_at', { time: new Date(vtScan.finishedAt).toLocaleTimeString() })}{/if}
+          • {i18n.t('vt_scan.processed', { count: vtScan.items?.length ?? 0 })}
           {#if (vtScan.expectedStartup ?? undefined) !== undefined || (vtScan.expectedRegistry ?? undefined) !== undefined}
-            • Expected {vtScan.expectedStartup ?? '?'}/{vtScan.expectedRegistry ?? '?'}
+            • {i18n.t('vt_scan.expected', { startup: vtScan.expectedStartup ?? '?', registry: vtScan.expectedRegistry ?? '?' })}
           {/if}
         {/if}
       </p>
       <div class="mb-1 flex flex-wrap gap-2">
-        <Badge variant="secondary">Detected {vtTotals().detected}</Badge>
+        <Badge variant="secondary">{i18n.t('vt_scan.detected', { count: vtTotals().detected })}</Badge>
         <Badge class="border-green-500/30 text-green-700 bg-green-500/10"
-          >Clean {vtTotals().clean}</Badge
+          >{i18n.t('vt_scan.clean', { count: vtTotals().clean })}</Badge
         >
         <Badge class="border-yellow-500/30 text-yellow-700 bg-yellow-500/10"
-          >Not Scanned {vtTotals().notScanned}</Badge
+          >{i18n.t('vt_scan.not_scanned', { count: vtTotals().notScanned })}</Badge
         >
       </div>
       <div class="max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/10">
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70">
             <tr>
-              <th class="text-left px-2 py-1">Subject</th>
-              <th class="text-left px-2 py-1">From</th>
-              <th class="text-left px-2 py-1">Verdict</th>
-              <th class="text-left px-2 py-1">Not detected</th>
-              <th class="text-left px-2 py-1">Details</th>
+              <th class="text-left px-2 py-1">{i18n.t('vt_scan.subject')}</th>
+              <th class="text-left px-2 py-1">{i18n.t('vt_scan.from')}</th>
+              <th class="text-left px-2 py-1">{i18n.t('vt_scan.verdict')}</th>
+              <th class="text-left px-2 py-1">{i18n.t('vt_scan.not_detected')}</th>
+              <th class="text-left px-2 py-1">{i18n.t('vt_scan.details')}</th>
             </tr>
           </thead>
           <tbody>
@@ -136,17 +137,17 @@
                 <tr>
                   <td class="px-2 py-2 text-xs text-muted-foreground" colspan="5">
                     <div class="grid grid-cols-2 gap-2">
-                      <div>Malicious: {typeof it.malicious === 'number' ? it.malicious : '-'}</div>
+                      <div>{i18n.t('vt_scan.malicious', { count: typeof it.malicious === 'number' ? it.malicious : '-' })}</div>
                       <div>
-                        Suspicious: {typeof it.suspicious === 'number' ? it.suspicious : '-'}
+                        {i18n.t('vt_scan.suspicious', { count: typeof it.suspicious === 'number' ? it.suspicious : '-' })}
                       </div>
-                      <div>Harmless: {typeof it.harmless === 'number' ? it.harmless : '-'}</div>
+                      <div>{i18n.t('vt_scan.harmless', { count: typeof it.harmless === 'number' ? it.harmless : '-' })}</div>
                       <div>
-                        Undetected: {typeof it.undetected === 'number' ? it.undetected : '-'}
+                        {i18n.t('vt_scan.undetected', { count: typeof it.undetected === 'number' ? it.undetected : '-' })}
                       </div>
                     </div>
                     {#if it.reason}
-                      <div class="mt-1">Reason: {it.reason}</div>
+                      <div class="mt-1">{i18n.t('vt_scan.reason', { reason: it.reason })}</div>
                     {/if}
                     {#if it.permalink}
                       <div class="mt-2">
@@ -161,7 +162,7 @@
                             }
                           }}
                         >
-                          Open on VirusTotal
+                          {i18n.t('vt_scan.open_vt')}
                         </button>
                       </div>
                     {/if}
@@ -172,7 +173,7 @@
             {#if (vtScan.items?.length ?? 0) === 0}
               <tr
                 ><td colspan="5" class="px-2 py-3 text-center text-muted-foreground"
-                  >No items yet.</td
+                  >{i18n.t('vt_scan.no_items')}</td
                 ></tr
               >
             {/if}
@@ -182,7 +183,7 @@
     </div>
     <DialogFooter>
       <DialogClose>
-        <Button>Close</Button>
+        <Button>{i18n.t('common.close')}</Button>
       </DialogClose>
     </DialogFooter>
   </DialogContent>

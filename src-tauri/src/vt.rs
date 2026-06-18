@@ -606,7 +606,7 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
     let lower = first.to_lowercase();
     if lower.ends_with(".exe") && !lower.contains('\\') && !lower.contains('/') {
         let mut roots: Vec<PathBuf> = Vec::new();
-        if let Some(system_root) = 
+        if let Some(system_root) =
             std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
         {
             roots.push(PathBuf::from(&system_root).join("System32"));
@@ -644,7 +644,7 @@ fn extract_exe_from_command(cmd: &str) -> Option<String> {
                 .map(|x| x.to_string_lossy().to_string())
             {
                 let mut roots: Vec<PathBuf> = Vec::new();
-                if let Some(system_root) = 
+                if let Some(system_root) =
                     std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR"))
                 {
                     roots.push(PathBuf::from(&system_root).join("System32"));
@@ -909,7 +909,9 @@ pub async fn vt_scan_registry(
     let limit = limit.unwrap_or(10).max(1).min(50) as usize;
     let force = force.unwrap_or(false);
     let mut out: Vec<VtItemReport> = Vec::new();
-    let items_full = crate::optimize::list_registry_run().await.unwrap_or_default();
+    let items_full = crate::optimize::list_registry_run()
+        .await
+        .unwrap_or_default();
     for it in items_full.into_iter().take(limit) {
         let display = it.command.clone();
         let name = it.name.clone();
@@ -1075,8 +1077,7 @@ pub async fn vt_scan_all(
     limit: Option<u32>,
     force: Option<bool>,
 ) -> Result<(usize, usize), AppError> {
-    let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force)
-        .await?;
+    let n1 = vt_scan_startup(app.clone(), state.clone(), limit, force).await?;
     let n2 = vt_scan_registry(app, state, limit, force).await?;
     let prev = load_snapshot();
     let mut cur = build_current_snapshot(prev.last_scan).await;
@@ -1145,13 +1146,13 @@ pub async fn vt_auto_maybe_scan(
         save_snapshot(&cur);
         let _ = app.emit(
             "vt-autoscan-done",
-            &serde_json::json!({"reason": r, "startup": n1, "registry": n2})
+            &serde_json::json!({"reason": r, "startup": n1, "registry": n2}),
         );
         return Ok(Some(r.to_string()));
     }
     let _ = app.emit(
         "vt-autoscan-skip",
-        &serde_json::json!({"reason": "no-change"})
+        &serde_json::json!({"reason": "no-change"}),
     );
     Ok(None)
 }

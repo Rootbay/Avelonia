@@ -18,6 +18,7 @@
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
   import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+  import { i18n } from '$lib/i18n.svelte';
 
   type ButtonSnippetContext = { props?: Record<string, unknown> & { class?: string } };
 
@@ -55,20 +56,20 @@
     event.stopPropagation();
     const path = await ensurePath();
     if (!path) {
-      toast.error('File path is not available yet');
+      toast.error(i18n.t('downloader.toast_open_error'));
       return;
     }
     try {
       const exists = await invoke<boolean>('path_exists', { path });
       if (!exists) {
-        toast.error('File no longer exists');
+        toast.error(i18n.t('downloader.toast_not_exist'));
         return;
       }
       await openPath(path);
-      toast.success(`Opened ${download.name ?? 'file'}`);
+      toast.success(i18n.t('downloader.toast_opened', { name: download.name ?? 'file' }));
     } catch (error) {
       pushLog('WARN', `openPath failed: ${String(error)}`, 'Downloader');
-      toast.error('Unable to open file');
+      toast.error(i18n.t('downloader.toast_open_failed'));
     }
   }
 
@@ -76,27 +77,27 @@
     event.stopPropagation();
     const path = await ensurePath();
     if (!path) {
-      toast.error('File path is not available yet');
+      toast.error(i18n.t('downloader.toast_open_error'));
       return;
     }
     try {
       const exists = await invoke<boolean>('path_exists', { path });
       if (!exists) {
-        toast.error('File no longer exists');
+        toast.error(i18n.t('downloader.toast_not_exist'));
         return;
       }
       await revealItemInDir(path);
-      toast.success(`Showing ${download.name ?? 'file'} in folder`);
+      toast.success(i18n.t('downloader.toast_showing', { name: download.name ?? 'file' }));
     } catch (error) {
       pushLog('WARN', `revealItemInDir failed: ${String(error)}`, 'Downloader');
-      toast.error('Unable to open containing folder');
+      toast.error(i18n.t('downloader.toast_reveal_failed'));
     }
   }
 
   function retry(event: MouseEvent) {
     event.stopPropagation();
     startDownload(download.id);
-    toast.success(`Retrying ${download.name ?? 'download'}`);
+    toast.success(i18n.t('downloader.toast_retrying', { name: download.name ?? 'download' }));
   }
 
   function cancel(event: MouseEvent) {
@@ -166,7 +167,7 @@
         }
       }}
     >
-      <Checkbox checked={selected} title="Select download" />
+      <Checkbox checked={selected} title={i18n.t('downloader.selection')} />
       <span
         class="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted text-sm font-semibold uppercase text-muted-foreground"
         >{download.name?.[0] ?? '?'}
@@ -218,9 +219,9 @@
   <TableCell class="w-52 pl-8">
     <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-start overflow-hidden">
       <span class={`text-xs font-semibold uppercase tracking-wide shrink-0 ${statusTone}`}>
-        {download.status}
+        {i18n.t('dashboard.status_' + download.status)}
         {#if download.progress < 0}
-          <span class="ml-1 text-muted-foreground">(preparing)</span>
+          <span class="ml-1 text-muted-foreground">({i18n.t('dashboard.status_pending').toLowerCase()})</span>
         {/if}
         {#if download.status === 'downloading' && download.speed}
           <span class="ml-1 text-muted-foreground whitespace-nowrap hidden md:inline"
@@ -241,21 +242,21 @@
                 onclick={(e: MouseEvent) => {
                   e.stopPropagation();
                   void openFile(e);
-                }}>Open file</DropdownMenuItem
+                }}>{i18n.t('downloader.btn_open_file')}</DropdownMenuItem
               >
               <DropdownMenuItem
                 onclick={(e: MouseEvent) => {
                   e.stopPropagation();
                   void showInFolder(e);
-                }}>Show in folder</DropdownMenuItem
+                }}>{i18n.t('downloader.btn_show_in_folder')}</DropdownMenuItem
               >
             </DropdownMenuContent>
           </DropdownMenu>
         {:else if download.status === 'failed'}
-          <Button type="button" variant="ghost" size="sm" class="h-7" onclick={retry}>Retry</Button>
+          <Button type="button" variant="ghost" size="sm" class="h-7" onclick={retry}>{i18n.t('downloader.btn_retry')}</Button>
         {:else if cancelDownload && (download.status === 'downloading' || download.status === 'pending' || download.status === 'queued')}
           <Button type="button" variant="destructive" size="sm" class="h-7" onclick={cancel}
-            >Cancel</Button
+            >{i18n.t('downloader.btn_cancel')}</Button
           >
         {/if}
       </div>

@@ -2,10 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::env;
 use std::net::IpAddr;
-#[cfg(target_os = "windows")]
-use std::process::Command;
 
-#[cfg(target_os = "windows")]
 pub(crate) fn fmt_command_text(output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -19,9 +16,8 @@ pub(crate) fn fmt_command_text(output: &std::process::Output) -> String {
     parts.join("\n")
 }
 
-#[cfg(target_os = "windows")]
 pub(crate) fn run_command_text(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(cmd)
+    let output = std::process::Command::new(cmd)
         .args(args)
         .output()
         .map_err(|e| format!("failed to run {}: {}", cmd, e))?;
@@ -319,7 +315,9 @@ pub(crate) fn run_reg_elevated(args: &[&str]) -> bool {
 #[cfg(target_os = "windows")]
 pub(crate) fn is_elevated() -> bool {
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::Security::{
+        GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     unsafe {

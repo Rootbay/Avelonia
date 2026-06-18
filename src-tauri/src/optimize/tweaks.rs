@@ -1,10 +1,23 @@
+#[cfg(target_os = "windows")]
 use super::shell_helpers::run_powershell_commands;
+#[cfg(target_os = "windows")]
 use super::update_profiles::apply_update_profile_impl;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use winreg::RegKey;
-use winreg::enums::*;
+
+#[cfg(target_os = "windows")]
 use winreg::HKEY;
+#[cfg(target_os = "windows")]
+use winreg::RegKey;
+#[cfg(target_os = "windows")]
+use winreg::enums::*;
+
+#[cfg(not(target_os = "windows"))]
+pub type HKEY = u32;
+#[cfg(not(target_os = "windows"))]
+pub const HKEY_LOCAL_MACHINE: HKEY = 0;
+#[cfg(not(target_os = "windows"))]
+pub const HKEY_CURRENT_USER: HKEY = 1;
 
 #[derive(Serialize, Deserialize)]
 pub struct TweakApplyRequest {
@@ -20,6 +33,7 @@ pub struct TweakApplyResponse {
     pub profile_applied: Option<String>,
 }
 
+#[cfg(target_os = "windows")]
 pub enum TweakAction {
     RegistryValue {
         hive: HKEY,
@@ -31,15 +45,22 @@ pub enum TweakAction {
     Script(Vec<String>),
 }
 
+#[cfg(target_os = "windows")]
 struct TweakDefinition {
     id: &'static str,
     action: TweakAction,
 }
 
+#[cfg(target_os = "windows")]
 impl TweakDefinition {
     fn check_applied(&self) -> bool {
         match &self.action {
-            TweakAction::RegistryValue { hive, path, name, value } => {
+            TweakAction::RegistryValue {
+                hive,
+                path,
+                name,
+                value,
+            } => {
                 let key = RegKey::predef(*hive);
                 if let Ok(subkey) = key.open_subkey(path) {
                     if let Ok(actual_value) = subkey.get_value::<u32, _>(name) {
@@ -54,11 +75,26 @@ impl TweakDefinition {
 
     fn get_commands(&self) -> Vec<String> {
         match &self.action {
-            TweakAction::RegistryValue { hive, path, name, value } => {
-                let hive_str = if *hive == HKEY_LOCAL_MACHINE { "HKLM" } else { "HKCU" };
+            TweakAction::RegistryValue {
+                hive,
+                path,
+                name,
+                value,
+            } => {
+                let hive_str = if *hive == HKEY_LOCAL_MACHINE {
+                    "HKLM"
+                } else {
+                    "HKCU"
+                };
                 vec![
-                    format!("if (-not (Test-Path '{}:\\{}')) {{ New-Item -Path '{}:\\{}' | Out-Null }}", hive_str, path, hive_str, path),
-                    format!("Set-ItemProperty -Path '{}:\\{}' -Name '{}' -Value {} -Type DWord -Force", hive_str, path, name, value),
+                    format!(
+                        "if (-not (Test-Path '{}:\\{}')) {{ New-Item -Path '{}:\\{}' | Out-Null }}",
+                        hive_str, path, hive_str, path
+                    ),
+                    format!(
+                        "Set-ItemProperty -Path '{}:\\{}' -Name '{}' -Value {} -Type DWord -Force",
+                        hive_str, path, name, value
+                    ),
                 ]
             }
             TweakAction::Script(cmds) => cmds.clone(),
@@ -403,30 +439,41 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Fo
 }
 
 pub fn apply_tweaks(payload: TweakApplyRequest) -> Result<TweakApplyResponse, String> {
-    let mut commands = Vec::new();
-    let mut seen = HashSet::new();
-    for id in &payload.tweaks {
-        if seen.insert(id.clone()) {
-            commands.extend(script_for_tweak(id));
+    #[cfg(target_os = "windows")]
+    {
+        let mut commands = Vec::new();
+        let mut seen = HashSet::new();
+        for id in &payload.tweaks {
+            if seen.insert(id.clone()) {
+                commands.extend(script_for_tweak(id));
+            }
         }
-    }
-    seen.clear();
-    for id in &payload.configs {
-        if seen.insert(id.clone()) {
-            commands.extend(script_for_config(id));
+        seen.clear();
+        for id in &payload.configs {
+            if seen.insert(id.clone()) {
+                commands.extend(script_for_config(id));
+            }
         }
+        if !commands.is_empty() {
+            run_powershell_commands(&commands, "tweaks")?;
+        }
+        if let Some(ref profile) = payload.update_profile {
+            apply_update_profile_impl(profile)?;
+        }
+        Ok(TweakApplyResponse {
+            tweaks_applied: payload.tweaks.len(),
+            configs_applied: payload.configs.len(),
+            profile_applied: payload.update_profile,
+        })
     }
-    if !commands.is_empty() {
-        run_powershell_commands(&commands, "tweaks")?;
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(TweakApplyResponse {
+            tweaks_applied: payload.tweaks.len(),
+            configs_applied: payload.configs.len(),
+            profile_applied: payload.update_profile,
+        })
     }
-    if let Some(ref profile) = payload.update_profile {
-        apply_update_profile_impl(profile)?;
-    }
-    Ok(TweakApplyResponse {
-        tweaks_applied: payload.tweaks.len(),
-        configs_applied: payload.configs.len(),
-        profile_applied: payload.update_profile,
-    })
 }
 
 #[cfg(target_os = "windows")]
@@ -510,7 +557,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "enable_end_task" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("TaskbarEndTask") {
                     return val == 1;
                 }
@@ -519,7 +568,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_powershell7_telemetry" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment") {
+            if let Ok(subkey) =
+                key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+            {
                 if let Ok(val) = subkey.get_value::<String, _>("POWERSHELL_TELEMETRY_OPTOUT") {
                     return val == "1";
                 }
@@ -537,7 +588,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "dark_theme" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("AppsUseLightTheme") {
                     return val == 0;
                 }
@@ -546,7 +599,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "bing_search_start" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Search") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Search")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("BingSearchEnabled") {
                     return val == 1;
                 }
@@ -564,7 +619,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "verbose_logon" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("VerboseStatus") {
                     return val == 1;
                 }
@@ -573,7 +630,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "start_recommendations" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("Start_IrisRecommendations") {
                     return val == 1;
                 }
@@ -591,7 +650,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "snap_assist_flyout" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("SnapAssist") {
                     return val == 1;
                 }
@@ -600,7 +661,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "snap_assist_suggestion" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("JointResize") {
                     return val == 1;
                 }
@@ -636,7 +699,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "remove_settings_home" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartPage") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartPage")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("HideSettingsFromStartMenu") {
                     return val == 1;
                 }
@@ -645,7 +710,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_background_apps" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Policies\\Microsoft\\Windows\\AppPrivacy") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Policies\\Microsoft\\Windows\\AppPrivacy")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("LetAppsRunInBackground") {
                     return val == 2;
                 }
@@ -654,7 +721,8 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "detailed_bso_d" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\CrashControl") {
+            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\CrashControl")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("VerboseStatus") {
                     return val == 1;
                 }
@@ -672,7 +740,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "cross_device_resume" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("EnableSharedExperiences") {
                     return val == 1;
                 }
@@ -681,7 +751,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "new_outlook" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Policies\\Microsoft\\Office\\16.0\\outlook\\newoutlook") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Policies\\Microsoft\\Office\\16.0\\outlook\\newoutlook")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("ForceNewOutlook") {
                     return val == 1;
                 }
@@ -690,7 +762,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "show_hidden_files" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("Hidden") {
                     return val == 1;
                 }
@@ -699,7 +773,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_search" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Search") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Search")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("SearchboxTaskbarMode") {
                     return val == 0;
                 }
@@ -708,7 +784,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_task_view" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("ShowTaskViewButton") {
                     return val == 0;
                 }
@@ -717,7 +795,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "center_taskbar_items" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("TaskbarAl") {
                     return val == 1;
                 }
@@ -726,7 +806,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_widgets" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("TaskbarDa") {
                     return val == 0;
                 }
@@ -735,7 +817,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_chat" => {
             let key = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(subkey) = key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced") {
+            if let Ok(subkey) =
+                key.open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("TaskbarMn") {
                     return val == 0;
                 }
@@ -744,7 +828,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_ipv6" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters") {
+            if let Ok(subkey) =
+                key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("DisabledComponents") {
                     return val == 0xFFFFFFFF;
                 }
@@ -753,7 +839,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "prefer_ipv4" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters") {
+            if let Ok(subkey) =
+                key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("DisabledComponents") {
                     return val == 32;
                 }
@@ -762,7 +850,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_homegroup" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\HomeGroupListener") {
+            if let Ok(subkey) =
+                key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\HomeGroupListener")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("Start") {
                     return val == 4;
                 }
@@ -771,7 +861,8 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "services_manual" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\WaSMedicSvc") {
+            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\WaSMedicSvc")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("Start") {
                     return val == 3;
                 }
@@ -789,7 +880,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "debloat_adobe" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(subkey) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\AdobeARMservice") {
+            if let Ok(subkey) =
+                key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\AdobeARMservice")
+            {
                 if let Ok(val) = subkey.get_value::<u32, _>("Start") {
                     return val == 4;
                 }
@@ -803,7 +896,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "disable_nagle" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(interfaces) = key.open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces") {
+            if let Ok(interfaces) = key
+                .open_subkey("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces")
+            {
                 for subkey_name in interfaces.enum_keys().map(|r| r.unwrap_or_default()) {
                     if let Ok(subkey) = interfaces.open_subkey(&subkey_name) {
                         if let Ok(val) = subkey.get_value::<u32, _>("TcpAckFrequency") {
@@ -828,7 +923,9 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
         }
         "ethernet_low_latency" => {
             let key = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(class_key) = key.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}") {
+            if let Ok(class_key) = key.open_subkey(
+                "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}",
+            ) {
                 for subkey_name in class_key.enum_keys().map(|r| r.unwrap_or_default()) {
                     if let Ok(subkey) = class_key.open_subkey(&subkey_name) {
                         if let Ok(val) = subkey.get_value::<String, _>("*InterruptModeration") {
@@ -845,7 +942,11 @@ pub fn check_tweak_applied_by_id(id: &str) -> bool {
             if super::shell_helpers::is_elevated() {
                 if let Ok(output) = std::process::Command::new("bcdedit").output() {
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    if stdout.contains("useplatformclock") && (stdout.contains("No") || stdout.contains("false") || stdout.contains("no")) {
+                    if stdout.contains("useplatformclock")
+                        && (stdout.contains("No")
+                            || stdout.contains("false")
+                            || stdout.contains("no"))
+                    {
                         return true;
                     }
                 }
@@ -872,20 +973,60 @@ pub fn get_tweaks_status() -> Result<std::collections::HashMap<String, bool>, St
     {
         let mut status = std::collections::HashMap::new();
         let all_tweaks = vec![
-            "disable_telemetry", "disable_gamedvr", "disable_recall", "show_file_extensions",
-            "show_hidden_files", "disable_activity_history", "disable_explorer_discovery",
-            "disable_hibernation", "set_hibernation_default", "disable_location_tracking",
-            "disable_storage_sense", "disable_wifi_sense", "enable_end_task",
-            "disable_powershell7_telemetry", "disable_fullscreen_optimizations", "dark_theme",
-            "bing_search_start", "numlock_on_startup", "verbose_logon", "start_recommendations",
-            "snap_window", "snap_assist_flyout", "snap_assist_suggestion", "mouse_acceleration",
-            "sticky_keys", "multiplane_overlay", "remove_settings_home", "disable_background_apps",
-            "detailed_bso_d", "s3_sleep", "cross_device_resume", "new_outlook",
-            "disable_search", "disable_task_view", "center_taskbar_items", "disable_widgets", "disable_chat", "disable_consumer_features",
-            "disable_ipv6", "prefer_ipv4", "disable_homegroup", "services_manual", "debloat_edge",
-            "debloat_adobe", "daily_registry_backup", "enable_game_mode", "enable_hags", "disable_nagle",
-            "disable_network_throttling", "optimize_system_responsiveness", "optimize_game_priority", "ethernet_low_latency",
-            "disable_power_throttling", "disable_hpet"
+            "disable_telemetry",
+            "disable_gamedvr",
+            "disable_recall",
+            "show_file_extensions",
+            "show_hidden_files",
+            "disable_activity_history",
+            "disable_explorer_discovery",
+            "disable_hibernation",
+            "set_hibernation_default",
+            "disable_location_tracking",
+            "disable_storage_sense",
+            "disable_wifi_sense",
+            "enable_end_task",
+            "disable_powershell7_telemetry",
+            "disable_fullscreen_optimizations",
+            "dark_theme",
+            "bing_search_start",
+            "numlock_on_startup",
+            "verbose_logon",
+            "start_recommendations",
+            "snap_window",
+            "snap_assist_flyout",
+            "snap_assist_suggestion",
+            "mouse_acceleration",
+            "sticky_keys",
+            "multiplane_overlay",
+            "remove_settings_home",
+            "disable_background_apps",
+            "detailed_bso_d",
+            "s3_sleep",
+            "cross_device_resume",
+            "new_outlook",
+            "disable_search",
+            "disable_task_view",
+            "center_taskbar_items",
+            "disable_widgets",
+            "disable_chat",
+            "disable_consumer_features",
+            "disable_ipv6",
+            "prefer_ipv4",
+            "disable_homegroup",
+            "services_manual",
+            "debloat_edge",
+            "debloat_adobe",
+            "daily_registry_backup",
+            "enable_game_mode",
+            "enable_hags",
+            "disable_nagle",
+            "disable_network_throttling",
+            "optimize_system_responsiveness",
+            "optimize_game_priority",
+            "ethernet_low_latency",
+            "disable_power_throttling",
+            "disable_hpet",
         ];
         for id in all_tweaks {
             status.insert(id.to_string(), check_tweak_applied_by_id(id));
@@ -1196,7 +1337,10 @@ pub fn apply_tweaks_state_batch(changes: Vec<TweakStateChange>) -> Result<(), St
 pub fn restart_explorer() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        run_powershell_commands(&["Stop-Process -Name explorer -Force".to_string()], "restart_explorer")?;
+        run_powershell_commands(
+            &["Stop-Process -Name explorer -Force".to_string()],
+            "restart_explorer",
+        )?;
     }
     Ok(())
 }

@@ -1,10 +1,10 @@
+use super::shell_helpers::{run_cmd_elevated, run_powershell_elevated, run_reg, run_reg_elevated};
+use lnk::ShellLink;
+use lnk::encoding::WINDOWS_1252;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Stdio;
 use walkdir::WalkDir;
-use lnk::ShellLink;
-use lnk::encoding::WINDOWS_1252;
-use super::shell_helpers::{run_cmd_elevated, run_reg, run_reg_elevated, run_powershell_elevated};
 
 #[derive(Serialize, Clone)]
 pub struct StartupShortcut {
@@ -22,131 +22,203 @@ pub struct StartupRegItem {
 
 use crate::AppError;
 
+#[cfg(not(target_os = "windows"))]
+fn scan_unix_startup_dir(
+    dir: &std::path::Path,
+    items: &mut Vec<StartupShortcut>,
+) -> Result<(), AppError> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("desktop") {
+                    if let Ok(content) = std::fs::read_to_string(&p) {
+                        let name = content
+                            .lines()
+                            .find(|l| l.starts_with("Name="))
+                            .map(|l| l["Name=".len()..].trim().to_string())
+                            .unwrap_or_else(|| {
+                                p.file_stem()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string()
+                            });
+                        items.push(StartupShortcut {
+                            path: p.display().to_string(),
+                            name,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("plist") {
+                    let name = p
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    items.push(StartupShortcut {
+                        path: p.display().to_string(),
+                        name,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_startup_shortcuts() -> Result<Vec<StartupShortcut>, AppError> {
-    let mut items: Vec<StartupShortcut> = Vec::new();
-    let wp = crate::paths::WindowsPaths::get();
-    
-    let user_startup = wp.startup_user();
-    if user_startup.exists() && user_startup.is_dir() {
-        for entry in WalkDir::new(&user_startup)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if entry.file_type().is_file() {
-                let p = entry.path();
-                if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                    if fname.eq_ignore_ascii_case("desktop.ini") {
+    #[cfg(target_os = "windows")]
+    {
+        let mut items: Vec<StartupShortcut> = Vec::new();
+        let wp = crate::paths::WindowsPaths::get();
+
+        let user_startup = wp.startup_user();
+        if user_startup.exists() && user_startup.is_dir() {
+            for entry in WalkDir::new(&user_startup)
+                .min_depth(1)
+                .max_depth(1)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file() {
+                    let p = entry.path();
+                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                        if fname.eq_ignore_ascii_case("desktop.ini") {
+                            continue;
+                        }
+                    }
+                    let mut allowed = false;
+                    if let Some(ext) = p.extension() {
+                        if ext.eq_ignore_ascii_case("lnk")
+                            || ext.eq_ignore_ascii_case("url")
+                            || ext.eq_ignore_ascii_case("exe")
+                        {
+                            allowed = true;
+                        }
+                    }
+                    if !allowed {
                         continue;
                     }
-                }
-                let mut allowed = false;
-                if let Some(ext) = p.extension() {
-                    if ext.eq_ignore_ascii_case("lnk")
-                        || ext.eq_ignore_ascii_case("url")
-                        || ext.eq_ignore_ascii_case("exe")
-                    {
-                        allowed = true;
-                    }
-                }
-                if !allowed {
-                    continue;
-                }
 
-                let mut name = p
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                if let Some(ext) = p.extension() {
-                    if ext.eq_ignore_ascii_case("lnk") {
-                        if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
-                            if let Some(li) = link.link_info() {
-                                let target = li.common_path_suffix();
-                                let target_name = PathBuf::from(target.to_string())
-                                    .file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .map(|s| s.to_string());
-                                if let Some(n) = target_name {
-                                    name = n;
+                    let mut name = p
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some(ext) = p.extension() {
+                        if ext.eq_ignore_ascii_case("lnk") {
+                            if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
+                                if let Some(li) = link.link_info() {
+                                    let target = li.common_path_suffix();
+                                    let target_name = PathBuf::from(target.to_string())
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .map(|s| s.to_string());
+                                    if let Some(n) = target_name {
+                                        name = n;
+                                    }
                                 }
                             }
                         }
                     }
+                    if name.is_empty() {
+                        name = p.display().to_string();
+                    }
+                    items.push(StartupShortcut {
+                        path: p.display().to_string(),
+                        name,
+                    });
                 }
-                if name.is_empty() {
-                    name = p.display().to_string();
-                }
-                items.push(StartupShortcut {
-                    path: p.display().to_string(),
-                    name,
-                });
             }
         }
-    }
 
-    let all_startup = wp.startup_common();
-    if all_startup.exists() && all_startup.is_dir() {
-        for entry in WalkDir::new(&all_startup)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if entry.file_type().is_file() {
-                let p = entry.path();
-                if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                    if fname.eq_ignore_ascii_case("desktop.ini") {
+        let all_startup = wp.startup_common();
+        if all_startup.exists() && all_startup.is_dir() {
+            for entry in WalkDir::new(&all_startup)
+                .min_depth(1)
+                .max_depth(1)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file() {
+                    let p = entry.path();
+                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                        if fname.eq_ignore_ascii_case("desktop.ini") {
+                            continue;
+                        }
+                    }
+                    let mut allowed = false;
+                    if let Some(ext) = p.extension() {
+                        if ext.eq_ignore_ascii_case("lnk")
+                            || ext.eq_ignore_ascii_case("url")
+                            || ext.eq_ignore_ascii_case("exe")
+                        {
+                            allowed = true;
+                        }
+                    }
+                    if !allowed {
                         continue;
                     }
-                }
-                let mut allowed = false;
-                if let Some(ext) = p.extension() {
-                    if ext.eq_ignore_ascii_case("lnk")
-                        || ext.eq_ignore_ascii_case("url")
-                        || ext.eq_ignore_ascii_case("exe")
-                    {
-                        allowed = true;
-                    }
-                }
-                if !allowed {
-                    continue;
-                }
 
-                let mut name = p
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                if let Some(ext) = p.extension() {
-                    if ext.eq_ignore_ascii_case("lnk") {
-                        if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
-                            if let Some(li) = link.link_info() {
-                                let target = li.common_path_suffix();
-                                let target_name = PathBuf::from(target.to_string())
-                                    .file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .map(|s| s.to_string());
-                                if let Some(n) = target_name {
-                                    name = n;
+                    let mut name = p
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some(ext) = p.extension() {
+                        if ext.eq_ignore_ascii_case("lnk") {
+                            if let Ok(link) = ShellLink::open(p, WINDOWS_1252) {
+                                if let Some(li) = link.link_info() {
+                                    let target = li.common_path_suffix();
+                                    let target_name = PathBuf::from(target.to_string())
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .map(|s| s.to_string());
+                                    if let Some(n) = target_name {
+                                        name = n;
+                                    }
                                 }
                             }
                         }
                     }
+                    if name.is_empty() {
+                        name = p.display().to_string();
+                    }
+                    items.push(StartupShortcut {
+                        path: p.display().to_string(),
+                        name,
+                    });
                 }
-                if name.is_empty() {
-                    name = p.display().to_string();
-                }
-                items.push(StartupShortcut {
-                    path: p.display().to_string(),
-                    name,
-                });
             }
         }
+        Ok(items)
     }
-    Ok(items)
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut items: Vec<StartupShortcut> = Vec::new();
+        let wp = crate::paths::WindowsPaths::get();
+
+        let user_startup = wp.startup_user();
+        if user_startup.exists() && user_startup.is_dir() {
+            let _ = scan_unix_startup_dir(&user_startup, &mut items);
+        }
+
+        let common_startup = wp.startup_common();
+        if common_startup.exists() && common_startup.is_dir() {
+            let _ = scan_unix_startup_dir(&common_startup, &mut items);
+        }
+        Ok(items)
+    }
 }
 
 #[tauri::command]
@@ -200,7 +272,9 @@ pub async fn list_registry_run() -> Result<Vec<StartupRegItem>, AppError> {
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn list_registry_run() -> Result<Vec<StartupRegItem>, AppError> {
-    Err(AppError::System("list_registry_run is only implemented on Windows".into()))
+    Err(AppError::System(
+        "list_registry_run is only implemented on Windows".into(),
+    ))
 }
 
 #[tauri::command]
@@ -265,7 +339,9 @@ pub async fn remove_registry_run(entries: Vec<StartupRegItem>) -> Result<usize, 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn remove_registry_run(_entries: Vec<StartupRegItem>) -> Result<usize, AppError> {
-    Err(AppError::System("remove_registry_run is only implemented on Windows".into()))
+    Err(AppError::System(
+        "remove_registry_run is only implemented on Windows".into(),
+    ))
 }
 
 #[tauri::command]
@@ -412,7 +488,7 @@ pub async fn open_registry_key(hive: String, key: String) -> Result<(), AppError
                 let _ = std::process::Command::new("powershell")
                     .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
                     .spawn();
-                return Ok(())
+                return Ok(());
             }
             Err(AppError::System(format!("failed to launch regedit: {}", e)))
         }
@@ -422,7 +498,9 @@ pub async fn open_registry_key(hive: String, key: String) -> Result<(), AppError
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn open_registry_key(_hive: String, _key: String) -> Result<(), AppError> {
-    Err(AppError::System("open_registry_key is only implemented on Windows".into()))
+    Err(AppError::System(
+        "open_registry_key is only implemented on Windows".into(),
+    ))
 }
 
 pub fn extract_image_from_command(cmd: &str) -> Option<String> {
@@ -488,9 +566,18 @@ mod tests {
 
     #[test]
     fn test_extract_image_from_command() {
-        assert_eq!(extract_image_from_command("\"C:\\Program Files\\App\\app.exe\" --start"), Some("app.exe".to_string()));
-        assert_eq!(extract_image_from_command("C:\\Windows\\system32\\cmd.exe /c echo"), Some("cmd.exe".to_string()));
-        assert_eq!(extract_image_from_command("powershell.exe -NoProfile"), Some("powershell.exe".to_string()));
+        assert_eq!(
+            extract_image_from_command("\"C:\\Program Files\\App\\app.exe\" --start"),
+            Some("app.exe".to_string())
+        );
+        assert_eq!(
+            extract_image_from_command("C:\\Windows\\system32\\cmd.exe /c echo"),
+            Some("cmd.exe".to_string())
+        );
+        assert_eq!(
+            extract_image_from_command("powershell.exe -NoProfile"),
+            Some("powershell.exe".to_string())
+        );
         assert_eq!(extract_image_from_command("malicious.vbs"), None);
     }
 }

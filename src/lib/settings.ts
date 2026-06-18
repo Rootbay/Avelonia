@@ -14,10 +14,22 @@ export type DownloaderSettings = {
 
 export type AppSettings = {
   downloader: DownloaderSettings;
+  language: string;
 };
 
 const STORAGE_KEY = 'avelonia_settings_v1';
 const SETTINGS_WRITE_DEBOUNCE_MS = 200;
+
+function getDefaultLanguage(): string {
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    const lang = navigator.language.split('-')[0].toLowerCase();
+    const supported = ['en', 'sv', 'de', 'fr', 'es'];
+    if (supported.includes(lang)) {
+      return lang;
+    }
+  }
+  return 'en';
+}
 
 const defaultSettings: AppSettings = {
   downloader: {
@@ -29,6 +41,7 @@ const defaultSettings: AppSettings = {
     preferWinget: false,
     downloadCatalogPath: '',
   },
+  language: getDefaultLanguage(),
 };
 
 let initialized = false;
@@ -46,7 +59,7 @@ function isTauriRuntime(): boolean {
 function normalizeSettings(parsed: unknown): AppSettings {
   const p =
     typeof parsed === 'object' && parsed !== null
-      ? (parsed as { downloader?: Partial<DownloaderSettings> })
+      ? (parsed as { downloader?: Partial<DownloaderSettings>; language?: string })
       : {};
   const d = p.downloader ?? {};
   const normalized: DownloaderSettings = {
@@ -58,7 +71,10 @@ function normalizeSettings(parsed: unknown): AppSettings {
     preferWinget: d.preferWinget ?? false,
     downloadCatalogPath: typeof d.downloadCatalogPath === 'string' ? d.downloadCatalogPath : '',
   };
-  return { downloader: normalized };
+  return {
+    downloader: normalized,
+    language: typeof p.language === 'string' ? p.language : getDefaultLanguage(),
+  };
 }
 
 function loadFromLocalStorage(): AppSettings | null {
@@ -144,9 +160,13 @@ settings.subscribe((s) => {
 });
 
 export function updateDownloaderSettings(patch: Partial<DownloaderSettings>) {
-  settings.update((s) => ({ downloader: { ...s.downloader, ...patch } }));
+  settings.update((s) => ({ ...s, downloader: { ...s.downloader, ...patch } }));
 }
 
 export function getDownloaderSettings(): DownloaderSettings {
   return get(settings).downloader;
+}
+
+export function updateLanguage(lang: string) {
+  settings.update((s) => ({ ...s, language: lang }));
 }

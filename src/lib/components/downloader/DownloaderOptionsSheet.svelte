@@ -10,6 +10,7 @@
     SheetTitle,
   } from '$lib/components/ui/sheet';
   import { settings, updateDownloaderSettings } from '$lib/settings';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { open = $bindable(false), onShowInfo } = $props<{
     open: boolean;
@@ -44,59 +45,59 @@
 <Sheet bind:open>
   <SheetContent side="right" class="w-85 sm:w-95 p-4 sm:p-6">
     <SheetHeader class="space-y-1 p-0">
-      <SheetTitle>Beta options</SheetTitle>
-      <SheetDescription>Defaults for post-download behavior.</SheetDescription>
+      <SheetTitle>{i18n.t('downloader.options_beta_title')}</SheetTitle>
+      <SheetDescription>{i18n.t('downloader.options_beta_desc')}</SheetDescription>
     </SheetHeader>
     <div class="mt-3 space-y-6 text-sm">
       <div class="space-y-2">
-        <p class="font-medium">Install after download</p>
+        <p class="font-medium">{i18n.t('downloader.options_install_after')}</p>
         <label class="inline-flex items-center gap-2">
           <Checkbox bind:checked={autoInstall} class="h-4 w-4" />
-          Auto install after download
+          {i18n.t('downloader.options_auto_install')}
         </label>
       </div>
       <div class="space-y-2">
-        <p class="font-medium">Install mode</p>
+        <p class="font-medium">{i18n.t('downloader.options_install_mode')}</p>
         <Select type="single" bind:value={installMode}>
           <SelectTrigger class="w-44">
             <p>
-              {installMode === 'silent' ? 'Silent' : 'Normal'}
+              {installMode === 'silent' ? i18n.t('downloader.options_mode_silent') : i18n.t('downloader.options_mode_normal')}
             </p>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="silent">Silent</SelectItem>
-            <SelectItem value="normal">Normal</SelectItem>
+            <SelectItem value="silent">{i18n.t('downloader.options_mode_silent')}</SelectItem>
+            <SelectItem value="normal">{i18n.t('downloader.options_mode_normal')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
       <div class="space-y-2">
-        <p class="font-medium">Advanced</p>
+        <p class="font-medium">{i18n.t('downloader.options_advanced')}</p>
         <label class="inline-flex items-center gap-2">
           <Checkbox bind:checked={elevateInstall} class="h-4 w-4" />
-          Run elevated (may prompt UAC)
+          {i18n.t('downloader.options_run_elevated')}
         </label>
         <label class="inline-flex items-center gap-2">
           <Checkbox bind:checked={fallbackOpen} class="h-4 w-4" />
-          If silent fails, open installer normally
+          {i18n.t('downloader.options_fallback')}
         </label>
       </div>
       <div class="flex flex-wrap gap-2">
         <Button variant="secondary" size="sm" onclick={() => onShowInfo('install')}
-          >Silent install?</Button
+          >{i18n.t('downloader.options_btn_silent_q')}</Button
         >
         <Button variant="secondary" size="sm" onclick={() => onShowInfo('verify')}
-          >Verify install?</Button
+          >{i18n.t('downloader.options_btn_verify_q')}</Button
         >
       </div>
 
       <div class="space-y-2">
-        <p class="font-medium">Verification</p>
+        <p class="font-medium">{i18n.t('downloader.options_verification')}</p>
         <label class="inline-flex items-center gap-2">
           <Checkbox bind:checked={verifyInstall} class="h-4 w-4" />
-          Verify installation via system registry (Windows)
+          {i18n.t('downloader.options_verify_registry')}
         </label>
         <p class="text-xs text-muted-foreground">
-          Checks Uninstall entries after installer exits; helps confirm success.
+          {i18n.t('downloader.options_verify_desc')}
         </p>
       </div>
     </div>

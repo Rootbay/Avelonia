@@ -15,6 +15,7 @@
   import { tags as customTags, addTag, BUILT_IN_TAGS } from '$lib/tags';
   import { sanitizeFileName, normalizeExtension } from '$lib/downloadPath';
   import { prettifyDisplayName } from '$lib/name';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { open = $bindable(false) } = $props();
 
@@ -114,11 +115,11 @@
   function addNewDownload() {
     const url = addUrl.trim();
     if (!url) {
-      toast.error('Enter a valid URL');
+      toast.error(i18n.t('downloader.toast_valid_url'));
       return;
     }
     if (!/^https?:\/\//i.test(url)) {
-      toast.error('Only http(s) URLs are supported');
+      toast.error(i18n.t('downloader.toast_http_only'));
       return;
     }
     const name = (addName || '').trim() || effectiveName;
@@ -138,26 +139,26 @@
     open = false;
     addUrl = '';
     addCategory = '';
-    toast.success('Added to list');
+    toast.success(i18n.t('downloader.toast_added'));
   }
 </script>
 
 <Dialog bind:open>
   <DialogContent>
     <DialogHeader>
-      <DialogTitle>Add download</DialogTitle>
-      <DialogDescription>Paste a direct download link and choose a category.</DialogDescription>
+      <DialogTitle>{i18n.t('downloader.add_title')}</DialogTitle>
+      <DialogDescription>{i18n.t('downloader.add_desc')}</DialogDescription>
     </DialogHeader>
     <div class="grid gap-3">
       <div class="space-y-1">
-        <label class="text-sm font-medium" for="add-url">URL</label>
-        <Input id="add-url" placeholder="https://example.com/file.exe" bind:value={addUrl} />
+        <label class="text-sm font-medium" for="add-url">{i18n.t('downloader.add_label_url')}</label>
+        <Input id="add-url" placeholder={i18n.t('downloader.add_placeholder_url')} bind:value={addUrl} />
       </div>
       <div class="space-y-1">
-        <label class="text-sm font-medium" for="add-cat">Category</label>
+        <label class="text-sm font-medium" for="add-cat">{i18n.t('downloader.add_label_category')}</label>
         <Input
           id="add-cat"
-          placeholder="e.g. Utilities"
+          placeholder={i18n.t('downloader.add_placeholder_category')}
           bind:value={addCategory}
           list="category-options"
         />
@@ -169,29 +170,29 @@
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div class="space-y-1">
-          <label class="text-sm font-medium" for="add-name">Name</label>
+          <label class="text-sm font-medium" for="add-name">{i18n.t('downloader.add_label_name')}</label>
           <Input
             id="add-name"
-            placeholder="App name"
+            placeholder={i18n.t('downloader.add_placeholder_name')}
             bind:value={addName}
             oninput={() => (nameTouched = true)}
           />
           {#if !nameTouched}
             <p class="text-xs text-muted-foreground">
-              Suggested: {effectiveName}{#if probing}
-                (detecting...){/if}
+              {i18n.t('downloader.add_suggested', { name: effectiveName })}{#if probing}
+                {i18n.t('downloader.add_detecting')}{/if}
             </p>
           {/if}
         </div>
         <div class="space-y-1">
-          <div class="text-sm font-medium">Type</div>
+          <div class="text-sm font-medium">{i18n.t('downloader.add_label_type')}</div>
           <div class="text-sm text-foreground">{normalizeExtension(effectiveExt) || '—'}</div>
         </div>
       </div>
     </div>
     <DialogFooter>
-      <Button type="button" variant="secondary" onclick={() => (open = false)}>Cancel</Button>
-      <Button type="button" onclick={addNewDownload}>Add</Button>
+      <Button type="button" variant="secondary" onclick={() => (open = false)}>{i18n.t('common.cancel')}</Button>
+      <Button type="button" onclick={addNewDownload}>{i18n.t('downloader.btn_add')}</Button>
     </DialogFooter>
   </DialogContent>
 </Dialog>

@@ -8,9 +8,9 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
@@ -70,7 +70,7 @@ impl ExclusionFilter {
                 || name_lower == ".cargo"
                 || name_lower == ".gradle"
                 || name_lower == "bower_components";
-            
+
             if is_default_ignored {
                 return true;
             }
@@ -109,7 +109,7 @@ fn clear_directory_contents(root: &Path) -> Result<CleanupStats, AppError> {
         return Ok(CleanupStats::default());
     }
     let mut stats = CleanupStats::default();
-    
+
     for entry in WalkDir::new(root)
         .min_depth(1)
         .contents_first(true)
@@ -170,11 +170,10 @@ pub async fn get_temp_files(
                 temp_files.push(entry.path().display().to_string());
                 scanned_count += 1;
                 if scanned_count % 100 == 0 {
-                    app_handle
-                        .emit(
-                            "scan_progress",
-                            format!("Scanned {} temporary files...", scanned_count),
-                        )?;
+                    app_handle.emit(
+                        "scan_progress",
+                        format!("Scanned {} temporary files...", scanned_count),
+                    )?;
                 }
             }
         }
@@ -197,7 +196,7 @@ pub async fn get_temp_files_stream(
     let wp = crate::paths::WindowsPaths::get();
     let mut roots: Vec<PathBuf> = Vec::new();
 
-    roots.push(wp.temp);
+    roots.push(wp.temp.clone());
     roots.push(wp.local_app_data.join("Temp"));
 
     roots.push(PathBuf::from("/tmp"));
@@ -205,18 +204,55 @@ pub async fn get_temp_files_stream(
     roots.push(PathBuf::from("/var/tmp"));
 
     let local_app_data = &wp.local_app_data;
-    roots.push(local_app_data.join("Google/Chrome/User Data/Default/Cache"));
-    roots.push(local_app_data.join("Google/Chrome/User Data/Default/Code Cache"));
 
-    roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Cache"));
-    roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Code Cache"));
+    #[cfg(target_os = "windows")]
+    {
+        roots.push(local_app_data.join("Google/Chrome/User Data/Default/Cache"));
+        roots.push(local_app_data.join("Google/Chrome/User Data/Default/Code Cache"));
+        roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Cache"));
+        roots.push(local_app_data.join("Microsoft/Edge/User Data/Default/Code Cache"));
 
-    let firefox_profiles = local_app_data.join("Mozilla/Firefox/Profiles");
-    if firefox_profiles.exists() {
-        if let Ok(entries) = fs::read_dir(firefox_profiles) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                roots.push(entry.path().join("cache2"));
-                roots.push(entry.path().join("jumpListCache"));
+        let firefox_profiles = local_app_data.join("Mozilla/Firefox/Profiles");
+        if firefox_profiles.exists() {
+            if let Ok(entries) = fs::read_dir(firefox_profiles) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    roots.push(entry.path().join("cache2"));
+                    roots.push(entry.path().join("jumpListCache"));
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        roots.push(local_app_data.join("Google/Chrome/Default/Cache"));
+        roots.push(local_app_data.join("Google/Chrome/Default/Code Cache"));
+        roots.push(local_app_data.join("Microsoft Edge/Default/Cache"));
+        roots.push(local_app_data.join("Microsoft Edge/Default/Code Cache"));
+
+        let firefox_profiles = local_app_data.join("Firefox/Profiles");
+        if firefox_profiles.exists() {
+            if let Ok(entries) = fs::read_dir(firefox_profiles) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    roots.push(entry.path().join("cache2"));
+                    roots.push(entry.path().join("jumpListCache"));
+                }
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))] // Linux/Unix
+    {
+        roots.push(local_app_data.join("google-chrome/Default/Cache"));
+        roots.push(local_app_data.join("google-chrome/Default/Code Cache"));
+        roots.push(local_app_data.join("microsoft-edge/Default/Cache"));
+        roots.push(local_app_data.join("microsoft-edge/Default/Code Cache"));
+
+        let firefox_profiles = local_app_data.join("mozilla/firefox");
+        if firefox_profiles.exists() {
+            if let Ok(entries) = fs::read_dir(firefox_profiles) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    roots.push(entry.path().join("cache2"));
+                    roots.push(entry.path().join("jumpListCache"));
+                }
             }
         }
     }
@@ -236,7 +272,7 @@ pub async fn get_temp_files_stream(
         .into_iter()
         .filter(|p| p.exists() && p.is_dir())
         .collect();
-    
+
     let (tx, rx) = mpsc::channel::<(String, u64)>();
     let scanned_total = std::sync::atomic::AtomicUsize::new(0);
 
@@ -247,7 +283,7 @@ pub async fn get_temp_files_stream(
         let ah = app_handle.clone();
         let filter_clone = Arc::clone(&filter);
         let filter_clone2 = Arc::clone(&filter);
-        
+
         for entry in WalkDir::new(&root)
             .into_iter()
             .filter_entry(move |e| !filter_clone.should_prune_dir(e))
@@ -263,7 +299,7 @@ pub async fn get_temp_files_stream(
                 let size = entry.metadata().ok().map(|m| m.len()).unwrap_or(0);
                 let _ = txc.send((entry.path().display().to_string(), size));
             }
-            
+
             let c = scanned_total.fetch_add(1, Ordering::Relaxed);
             if c % 2000 == 0 {
                 let _ = ah.emit(
@@ -302,7 +338,7 @@ pub async fn get_temp_files_stream(
     if !batch.is_empty() {
         app_handle.emit("cleaner-temp-batch", &batch)?;
     }
-    
+
     app_handle.emit("cleaner-temp-done", json!({"total": total}))?;
     Ok(total)
 }
@@ -313,9 +349,14 @@ pub fn cancel_temp_scan() -> Result<(), AppError> {
     Ok(())
 }
 
-fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chunk: usize) -> Result<(), AppError> {
+fn emit_chunked_pairs(
+    app: &AppHandle,
+    event: &str,
+    items: &[(String, u64)],
+    chunk: usize,
+) -> Result<(), AppError> {
     if items.is_empty() {
-        return Ok(())
+        return Ok(());
     }
     for slice in items.chunks(chunk) {
         app.emit(event, slice)?;
@@ -327,9 +368,14 @@ fn emit_chunked_pairs(app: &AppHandle, event: &str, items: &[(String, u64)], chu
     Ok(())
 }
 
-fn emit_chunked_strings(app: &AppHandle, event: &str, items: &[String], chunk: usize) -> Result<(), AppError> {
+fn emit_chunked_strings(
+    app: &AppHandle,
+    event: &str,
+    items: &[String],
+    chunk: usize,
+) -> Result<(), AppError> {
     if items.is_empty() {
-        return Ok(())
+        return Ok(());
     }
     for slice in items.chunks(chunk) {
         app.emit(event, slice)?;
@@ -354,7 +400,13 @@ pub async fn start_cleaner_scan(
     tokio::spawn(async move {
         let _ = app.emit("cleaner-progress", "Starting scan...");
         let _ = app.emit("cleaner-progress", "Scanning temporary files...");
-        let _ = get_temp_files_stream(app.clone(), Some(250), Some(max_temp.unwrap_or(500_000)), exclusions_clone.clone()).await;
+        let _ = get_temp_files_stream(
+            app.clone(),
+            Some(250),
+            Some(max_temp.unwrap_or(500_000)),
+            exclusions_clone.clone(),
+        )
+        .await;
 
         if TEMP_CANCEL.load(Ordering::Relaxed) {
             let _ = app.emit("cleaner-stopped", json!({"scope":"temp"}));
@@ -549,7 +601,10 @@ fn _delete_files_helper(files: Vec<String>) -> Result<usize, AppError> {
                 match fs::remove_dir_all(&path) {
                     Ok(_) => deleted_count += 1,
                     Err(e) => {
-                        errors.push(format!("Failed to delete directory {}: {}", file_path_str, e));
+                        errors.push(format!(
+                            "Failed to delete directory {}: {}",
+                            file_path_str, e
+                        ));
                     }
                 }
             }
@@ -581,7 +636,10 @@ pub async fn empty_recycle_bin() -> Result<(), AppError> {
         if result.is_ok() {
             Ok(())
         } else {
-            Err(AppError::System(format!("Failed to empty recycle bin: {:?}", result)))
+            Err(AppError::System(format!(
+                "Failed to empty recycle bin: {:?}",
+                result
+            )))
         }
     }
 }
@@ -589,7 +647,9 @@ pub async fn empty_recycle_bin() -> Result<(), AppError> {
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
 pub async fn empty_recycle_bin() -> Result<(), AppError> {
-    Err(AppError::Internal("Emptying recycle bin is only supported on Windows.".to_string()))
+    Err(AppError::Internal(
+        "Emptying recycle bin is only supported on Windows.".to_string(),
+    ))
 }
 
 #[tauri::command]
@@ -657,23 +717,62 @@ pub async fn quick_clear_recent() -> Result<CleanupStats, AppError> {
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_user_temp() -> Result<CleanupStats, AppError> {
-    Err(AppError::Internal("Only on Windows".into()))
+pub async fn quick_clear_user_temp() -> Result<CleanupStats, AppError> {
+    let mut stats = CleanupStats::default();
+
+    // Clear user temp/cache directory
+    let cache_dir = env::var_os("HOME").map(PathBuf::from).map(|h| {
+        #[cfg(target_os = "macos")]
+        {
+            h.join("Library/Caches")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            h.join(".cache")
+        }
+    });
+
+    if let Some(p) = cache_dir {
+        if let Ok(s) = clear_directory_contents(&p) {
+            stats.files_deleted += s.files_deleted;
+            stats.bytes_deleted += s.bytes_deleted;
+        }
+    }
+
+    // Also clear global temp
+    let temp_dir = env::temp_dir();
+    if let Ok(s) = clear_directory_contents(&temp_dir) {
+        stats.files_deleted += s.files_deleted;
+        stats.bytes_deleted += s.bytes_deleted;
+    }
+
+    Ok(stats)
 }
+
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_system_temp() -> Result<CleanupStats, AppError> {
-    Err(AppError::Internal("Only on Windows".into()))
+pub async fn quick_clear_system_temp() -> Result<CleanupStats, AppError> {
+    let mut stats = CleanupStats::default();
+    for p in &["/var/tmp", "/tmp", "/private/tmp"] {
+        let path = Path::new(p);
+        if let Ok(s) = clear_directory_contents(path) {
+            stats.files_deleted += s.files_deleted;
+            stats.bytes_deleted += s.bytes_deleted;
+        }
+    }
+    Ok(stats)
 }
+
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_prefetch() -> Result<CleanupStats, AppError> {
-    Err(AppError::Internal("Only on Windows".into()))
+pub async fn quick_clear_prefetch() -> Result<CleanupStats, AppError> {
+    Ok(CleanupStats::default())
 }
+
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn quick_clear_recent() -> Result<CleanupStats, AppError> {
-    Err(AppError::Internal("Only on Windows".into()))
+pub async fn quick_clear_recent() -> Result<CleanupStats, AppError> {
+    Ok(CleanupStats::default())
 }
 
 #[tauri::command]
@@ -709,7 +808,7 @@ pub async fn find_large_files_min(
     if user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let paths_to_scan = vec![
         user_profile.join("Downloads"),
         user_profile.join("Desktop"),
@@ -775,7 +874,7 @@ pub async fn find_large_files_top(
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let paths_to_scan = vec![
         wp.user_profile.join("Downloads"),
         wp.user_profile.join("Desktop"),
@@ -784,7 +883,7 @@ pub async fn find_large_files_top(
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
     let filter = Arc::new(ExclusionFilter::new(exclusions));
-    
+
     let sized: Vec<(u64, String)> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
@@ -802,7 +901,7 @@ pub async fn find_large_files_top(
                 if c % 1000 == 0 {
                     let _ = app_handle.emit("scan_progress", format!("Scanned {} entries...", c));
                 }
-                
+
                 if entry.file_type().is_file() {
                     if filter_clone.should_exclude_file(&entry) {
                         return None;
@@ -845,7 +944,7 @@ pub async fn find_duplicate_files(
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let paths_to_scan = vec![
         wp.user_profile.join("Downloads"),
         wp.user_profile.join("Documents"),
@@ -853,7 +952,7 @@ pub async fn find_duplicate_files(
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
     let filter = Arc::new(ExclusionFilter::new(exclusions));
-    
+
     let files: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
@@ -885,7 +984,10 @@ pub async fn find_duplicate_files(
     let mut size_buckets: HashMap<u64, Vec<String>> = HashMap::new();
     for p in files {
         if let Ok(meta) = fs::metadata(&p) {
-            size_buckets.entry(meta.len()).or_default().push(p.display().to_string());
+            size_buckets
+                .entry(meta.len())
+                .or_default()
+                .push(p.display().to_string());
         }
     }
 
@@ -951,7 +1053,7 @@ pub async fn find_duplicate_groups(
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let paths_to_scan = vec![
         wp.user_profile.join("Downloads"),
         wp.user_profile.join("Documents"),
@@ -987,7 +1089,8 @@ pub async fn find_duplicate_groups(
                 }
 
                 if current % 1000 == 0 {
-                    let _ = app_handle.emit("scan_progress", format!("Scanned {} files...", current));
+                    let _ =
+                        app_handle.emit("scan_progress", format!("Scanned {} files...", current));
                 }
 
                 if entry.file_type().is_file() {
@@ -1131,7 +1234,7 @@ pub async fn find_empty_folders(
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let paths_to_scan = vec![
         wp.user_profile.join("Downloads"),
         wp.user_profile.join("Desktop"),
@@ -1140,7 +1243,7 @@ pub async fn find_empty_folders(
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
     let filter = Arc::new(ExclusionFilter::new(exclusions));
-    
+
     let dirs: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
         .flat_map(|root| {
@@ -1160,7 +1263,8 @@ pub async fn find_empty_folders(
                     }
                     let c = scanned_count.fetch_add(1, Ordering::Relaxed);
                     if c % 500 == 0 {
-                        let _ = app_handle.emit("scan_progress", format!("Scanned {} directories...", c));
+                        let _ = app_handle
+                            .emit("scan_progress", format!("Scanned {} directories...", c));
                     }
                     return Some(entry.path().to_path_buf());
                 }
@@ -1193,7 +1297,7 @@ pub async fn find_broken_shortcuts(
     if wp.user_profile.as_os_str().is_empty() {
         return Err(AppError::System("USERPROFILE not found".to_string()));
     }
-    
+
     let mut paths_to_scan = vec![
         wp.user_profile.join("Downloads"),
         wp.user_profile.join("Desktop"),
@@ -1213,7 +1317,7 @@ pub async fn find_broken_shortcuts(
 
     let scanned_count = std::sync::atomic::AtomicUsize::new(0);
     let filter = Arc::new(ExclusionFilter::new(exclusions));
-    
+
     let app_handle_clone = app_handle.clone();
     let lnk_files: Vec<PathBuf> = paths_to_scan
         .into_par_iter()
@@ -1235,9 +1339,10 @@ pub async fn find_broken_shortcuts(
                     }
                     let c = scanned_count.fetch_add(1, Ordering::Relaxed);
                     if c % 400 == 0 {
-                        let _ = app_handle_inner.emit("scan_progress", format!("Scanned {} files...", c));
+                        let _ = app_handle_inner
+                            .emit("scan_progress", format!("Scanned {} files...", c));
                     }
-                    
+
                     let path = entry.path();
                     if let Some(ext) = path.extension() {
                         if ext.eq_ignore_ascii_case("lnk") {
@@ -1250,7 +1355,10 @@ pub async fn find_broken_shortcuts(
         })
         .collect();
 
-    app_handle.emit("scan_progress", format!("Found {} shortcuts. Verifying...", lnk_files.len()))?;
+    app_handle.emit(
+        "scan_progress",
+        format!("Found {} shortcuts. Verifying...", lnk_files.len()),
+    )?;
 
     let results: Vec<String> = lnk_files
         .into_par_iter()

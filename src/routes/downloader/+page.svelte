@@ -29,6 +29,7 @@
   import DownloadsTable from '$lib/components/downloader/DownloadsTable.svelte';
   import type { Download } from '$lib/downloadManager';
   import { toast } from '$lib/components/ui/sonner';
+  import { i18n } from '$lib/i18n.svelte';
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
@@ -56,13 +57,13 @@
   let sortDirection = $state<'asc' | 'desc'>('asc');
   let selectedIds = new SvelteSet<number>();
 
-  const statusFilters: Array<{ value: StatusGroup; label: string }> = [
-    { value: 'all', label: 'All' },
-    { value: 'available', label: 'Available' },
-    { value: 'active', label: 'Active' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'failed', label: 'Failed' },
-  ];
+  const statusFilters = $derived<Array<{ value: StatusGroup; label: string }>>([
+    { value: 'all', label: i18n.t('downloader.category_all') },
+    { value: 'available', label: i18n.t('dashboard.status_available') },
+    { value: 'active', label: i18n.t('common.active') },
+    { value: 'completed', label: i18n.t('dashboard.status_completed') },
+    { value: 'failed', label: i18n.t('dashboard.status_failed') },
+  ]);
 
   $effect(() => {
     const t = setTimeout(() => {
@@ -377,8 +378,8 @@
         if (links) {
           navigator.clipboard
             .writeText(links)
-            .then(() => toast.success('Copied download links to clipboard'))
-            .catch(() => toast.error('Failed to copy to clipboard'));
+            .then(() => toast.success(i18n.t('downloader.toast_copied')))
+            .catch(() => toast.error(i18n.t('downloader.toast_copy_failed')));
         }
         break;
       }
@@ -399,7 +400,7 @@
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success('Exported filtered downloads to CSV');
+        toast.success(i18n.t('downloader.toast_exported_csv'));
         break;
       }
     }
@@ -413,9 +414,9 @@
       class="glass-card md:col-span-2 bg-card/80 shadow-sm p-4 flex flex-col justify-between transition-all duration-300 hover:scale-[1.005]"
     >
       <div>
-        <h2 class="text-lg font-bold font-heading mb-1 text-foreground">Downloader</h2>
+        <h2 class="text-lg font-bold font-heading mb-1 text-foreground">{i18n.t('downloader.title')}</h2>
         <p class="text-xs text-muted-foreground leading-relaxed mb-3">
-          Search, filter, and manage app downloads. Run silent installers securely.
+          {i18n.t('downloader.desc')}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] font-semibold">
@@ -423,19 +424,19 @@
           class="flex items-center gap-1 bg-muted/40 border border-border/30 rounded px-2 py-0.5 text-muted-foreground"
         >
           <span class="size-1.5 rounded-full bg-border"></span>
-          <span>Showing {filteredStats.count} / {globalStats.total}</span>
+          <span>{i18n.t('downloader.showing_count', { filtered: filteredStats.count, total: globalStats.total })}</span>
         </div>
         <div
           class="flex items-center gap-1 bg-primary/10 border border-primary/20 rounded px-2 py-0.5 text-primary"
         >
           <span class="size-1.5 rounded-full bg-primary animate-pulse"></span>
-          <span>{globalStats.active} Active</span>
+          <span>{i18n.t('downloader.active_count', { count: globalStats.active })}</span>
         </div>
         <div
           class="flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5 text-emerald-500"
         >
           <span class="size-1.5 rounded-full bg-emerald-500"></span>
-          <span>{globalStats.completed} Done</span>
+          <span>{i18n.t('downloader.done_count', { count: globalStats.completed })}</span>
         </div>
       </div>
     </Card>
@@ -446,13 +447,13 @@
     >
       <div class="z-10">
         <h3 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-0.5">
-          Download Speed
+          {i18n.t('downloader.download_speed')}
         </h3>
         <div class="flex items-baseline gap-1">
           <span class="text-2xl font-extrabold tracking-tight font-heading">
             {formatSpeed(totalSpeedBytes)}
           </span>
-          <span class="text-[10px] text-muted-foreground font-medium">total speed</span>
+          <span class="text-[10px] text-muted-foreground font-medium">{i18n.t('downloader.total_speed')}</span>
         </div>
       </div>
 
@@ -483,7 +484,7 @@
           <div
             class="flex items-center justify-center h-full text-[10px] text-muted-foreground/30 font-medium pb-1 select-none"
           >
-            No active downloads
+            {i18n.t('dashboard.no_active_downloads')}
           </div>
         {/if}
       </div>
@@ -491,13 +492,13 @@
   </div>
 
   <div class="flex flex-wrap items-center gap-3">
-    <Input class="flex-1 min-w-65" placeholder="Search downloads..." bind:value={searchTerm} />
+    <Input class="flex-1 min-w-65" placeholder={i18n.t('downloader.search_downloads')} bind:value={searchTerm} />
     <div class="flex items-center gap-2">
-      <Button size="sm" variant="outline" onclick={() => (addOpen = true)}>Add</Button>
+      <Button size="sm" variant="outline" onclick={() => (addOpen = true)}>{i18n.t('downloader.btn_add')}</Button>
       <Button size="sm" variant="outline" onclick={() => (actionsOpen = true)}>
-        <ListChecks class="size-4 mr-2" /> Actions
+        <ListChecks class="size-4 mr-2" /> {i18n.t('cleaner.actions')}
       </Button>
-      <Button size="sm" variant="outline" onclick={() => (optionsOpen = true)}>Options</Button>
+      <Button size="sm" variant="outline" onclick={() => (optionsOpen = true)}>{i18n.t('downloader.btn_options')}</Button>
       <Button variant="ghost" size="icon" onclick={() => (showHelp = true)}>
         <Keyboard class="size-4" />
       </Button>
@@ -533,14 +534,14 @@
       >
         <div class="flex flex-col border-r pr-3">
           <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
-            >Selection</span
+            >{i18n.t('downloader.selection')}</span
           >
-          <span class="text-sm font-semibold">{selectedIds.size} items</span>
+          <span class="text-sm font-semibold">{i18n.t('downloader.items_count', { count: selectedIds.size })}</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" onclick={() => handleBulkAction('startSelected')}>Start</Button>
+          <Button size="sm" onclick={() => handleBulkAction('startSelected')}>{i18n.t('downloader.btn_start')}</Button>
           <Button size="sm" variant="outline" onclick={() => handleBulkAction('cancelSelected')}
-            >Cancel</Button
+            >{i18n.t('common.cancel')}</Button
           >
           <Button size="sm" variant="ghost" onclick={() => (actionsOpen = true)}
             ><ListChecks class="size-4" /></Button
@@ -571,32 +572,32 @@
 
   <Dialog bind:open={showInstallInfo}>
     <DialogContent
-      ><DialogHeader><DialogTitle>Silent install</DialogTitle></DialogHeader>
+      ><DialogHeader><DialogTitle>{i18n.t('downloader.silent_install_title')}</DialogTitle></DialogHeader>
       <DialogDescription
-        >Tries to install supported installers silently using common flags.</DialogDescription
+        >{i18n.t('downloader.silent_install_desc')}</DialogDescription
       >
-      <DialogFooter><DialogClose><Button>Got it</Button></DialogClose></DialogFooter>
+      <DialogFooter><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter>
     </DialogContent>
   </Dialog>
 
   <Dialog bind:open={showVerifyInfo}>
     <DialogContent
-      ><DialogHeader><DialogTitle>Installation verification</DialogTitle></DialogHeader>
+      ><DialogHeader><DialogTitle>{i18n.t('downloader.verify_install_title')}</DialogTitle></DialogHeader>
       <DialogDescription
-        >Checks for entries in Windows "Programs and Features" after install.</DialogDescription
+        >{i18n.t('downloader.verify_install_desc')}</DialogDescription
       >
-      <DialogFooter><DialogClose><Button>Got it</Button></DialogClose></DialogFooter>
+      <DialogFooter><DialogClose><Button>{i18n.t('downloader.btn_got_it')}</Button></DialogClose></DialogFooter>
     </DialogContent>
   </Dialog>
 
   <Dialog bind:open={showHelp}>
     <DialogContent
-      ><DialogHeader><DialogTitle>Keyboard shortcuts</DialogTitle></DialogHeader>
+      ><DialogHeader><DialogTitle>{i18n.t('downloader.shortcuts_title')}</DialogTitle></DialogHeader>
       <div class="grid gap-2 text-sm">
-        <p><strong>Ctrl/Cmd + A:</strong> Select all</p>
-        <p><strong>Esc:</strong> Clear selection</p>
+        <p><strong>Ctrl/Cmd + A:</strong> {i18n.t('downloader.shortcut_select_all')}</p>
+        <p><strong>Esc:</strong> {i18n.t('downloader.help_clear_selection')}</p>
       </div>
-      <DialogFooter><Button onclick={() => (showHelp = false)}>Close</Button></DialogFooter>
+      <DialogFooter><Button onclick={() => (showHelp = false)}>{i18n.t('common.close')}</Button></DialogFooter>
     </DialogContent>
   </Dialog>
 </div>

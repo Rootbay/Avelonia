@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
 mod cleaner;
+mod downloads;
 mod eraser;
+mod error;
 mod installer;
 mod optimize;
+mod paths;
+mod settings;
 mod system_info;
 mod vt;
-mod paths;
-mod error;
-mod downloads;
-mod settings;
 
-pub use error::AppError;
 pub use downloads::DownloadState;
+pub use error::AppError;
 
 #[tauri::command]
 fn path_exists(path: String) -> Result<bool, AppError> {
@@ -22,18 +22,15 @@ fn path_exists(path: String) -> Result<bool, AppError> {
 #[tauri::command]
 async fn verify_hash(path: String, expected_hash: String) -> Result<bool, AppError> {
     use sha2::{Digest, Sha256};
-    use std::io::Read;
     use std::fs::File;
+    use std::io::Read;
 
-    let mut file =
-        File::open(&path).map_err(|e| AppError::Io(e))?;
+    let mut file = File::open(&path).map_err(|e| AppError::Io(e))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 65536];
 
     loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|e| AppError::Io(e))?;
+        let count = file.read(&mut buffer).map_err(|e| AppError::Io(e))?;
         if count == 0 {
             break;
         }

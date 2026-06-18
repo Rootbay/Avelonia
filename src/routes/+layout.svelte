@@ -39,6 +39,7 @@
   import VtScanDialog from '$lib/components/VtScanDialog.svelte';
   import { useVtScan } from '$lib/hooks/useVtScan.svelte';
   import { useCleanerScan } from '$lib/hooks/useCleanerScan.svelte';
+  import { i18n } from '$lib/i18n.svelte';
   import '../app.css';
 
   let { children }: { children?: Snippet } = $props();
@@ -67,14 +68,14 @@
 
   const menuItems: Array<{
     href: AppRoute;
-    label: string;
+    key: string;
     icon: MenuIcon;
     showBadge?: boolean;
   }> = [
-    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/optimize', label: 'Optimize', icon: Gauge },
-    { href: '/downloader', label: 'Downloader', icon: Download, showBadge: true },
-    { href: '/cleaner', label: 'Cleaner', icon: Eraser },
+    { href: '/dashboard', key: 'sidebar.dashboard', icon: LayoutDashboard },
+    { href: '/optimize', key: 'sidebar.optimize', icon: Gauge },
+    { href: '/downloader', key: 'sidebar.downloader', icon: Download, showBadge: true },
+    { href: '/cleaner', key: 'sidebar.cleaner', icon: Eraser },
   ];
 
   const activeCount = $derived(
@@ -104,8 +105,8 @@
       <button
         type="button"
         class="absolute top-1/2 -translate-y-1/2 right-0 z-20 opacity-0 pointer-events-none group-hover/sidebar:opacity-100 group-hover/sidebar:pointer-events-auto h-8 w-8 flex items-center justify-center rounded-l-md rounded-r-none border bg-background text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 transition cursor-pointer"
-        aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
-        title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-label={open ? i18n.t('sidebar.collapse') : i18n.t('sidebar.expand')}
+        title={open ? i18n.t('sidebar.collapse') : i18n.t('sidebar.expand')}
         onclick={() => (open = !open)}
       >
         {#if open}
@@ -152,7 +153,7 @@
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={$page.url.pathname === item.href}
-                  tooltipContent={collapsed ? item.label : undefined}
+                  tooltipContent={collapsed ? i18n.t(item.key) : undefined}
                 >
                   {#snippet child({ props }: ButtonSnippetContext)}
                     {@const rawProps = (props ?? {}) as Record<string, unknown> & {
@@ -198,7 +199,7 @@
                         aria-hidden="true"
                       />
                       {#if !collapsed}
-                        <span>{item.label}</span>
+                        <span>{i18n.t(item.key)}</span>
                       {/if}
                       {#if item.showBadge && activeCount > 0}
                         {#if collapsed}
@@ -245,7 +246,7 @@
                     size="icon"
                     class={cn('relative', propsClass)}
                     onclick={toggleMode}
-                    aria-label="Toggle theme"
+                    aria-label={i18n.t('sidebar.theme_toggle')}
                   >
                     <Sun
                       class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"
@@ -257,7 +258,7 @@
                 {/snippet}
                 <Tooltip>
                   <TooltipTrigger child={ThemeToggleTrigger} />
-                  <TooltipContent side="right" align="center">Toggle theme</TooltipContent>
+                  <TooltipContent side="right" align="center">{i18n.t('sidebar.theme_toggle')}</TooltipContent>
                 </Tooltip>
 
                 {#snippet SettingsButtonContent({ props }: ButtonSnippetContext)}
@@ -271,7 +272,7 @@
                     variant="outline"
                     size="icon"
                     class={cn('relative', propsClass)}
-                    aria-label="Open settings"
+                    aria-label={i18n.t('sidebar.settings')}
                     onclick={() => (settingsOpen = true)}
                   >
                     <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
@@ -279,7 +280,7 @@
                 {/snippet}
                 <Tooltip>
                   <TooltipTrigger child={SettingsButtonContent} />
-                  <TooltipContent side="right" align="center">Settings</TooltipContent>
+                  <TooltipContent side="right" align="center">{i18n.t('sidebar.settings')}</TooltipContent>
                 </Tooltip>
               </div>
             {:else}
@@ -288,18 +289,18 @@
                   variant="outline"
                   size="sm"
                   class="flex items-center gap-2"
-                  aria-label="Open settings"
+                  aria-label={i18n.t('sidebar.settings')}
                   onclick={() => (settingsOpen = true)}
                 >
                   <SettingsIcon class="h-[1.2rem] w-[1.2rem] text-current" />
-                  <span>Settings</span>
+                  <span>{i18n.t('sidebar.settings')}</span>
                 </Button>
                 <Button
                   onclick={toggleMode}
                   variant="outline"
                   size="icon"
                   class="relative ml-auto"
-                  aria-label="Toggle theme"
+                  aria-label={i18n.t('sidebar.theme_toggle')}
                 >
                   <Sun
                     class="h-[1.2rem] w-[1.2rem] text-current rotate-0 scale-100 transition-all! dark:-rotate-90 dark:scale-0"

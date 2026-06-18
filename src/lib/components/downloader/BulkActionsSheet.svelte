@@ -18,6 +18,7 @@
     FolderOpen,
     Trash2,
   } from '@lucide/svelte';
+  import { i18n } from '$lib/i18n.svelte';
 
   interface GlobalStats {
     active: number;
@@ -62,12 +63,12 @@
 <Sheet bind:open>
   <SheetContent side="right" class="w-85 sm:w-95 p-4 sm:p-6">
     <SheetHeader class="space-y-1 p-0">
-      <SheetTitle>Bulk actions</SheetTitle>
-      <SheetDescription>Apply actions to the current selection or filtered list.</SheetDescription>
+      <SheetTitle>{i18n.t('downloader.bulk_title')}</SheetTitle>
+      <SheetDescription>{i18n.t('downloader.bulk_desc')}</SheetDescription>
     </SheetHeader>
     <div class="mt-3 space-y-3">
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">All downloads</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_all_downloads')}</p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -78,7 +79,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> Start all</span>
+            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_all')}</span>
             {#if globalStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums">{globalStats.startable}</span
               >
@@ -94,7 +95,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> Cancel active</span>
+            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_active')}</span>
             {#if globalStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{globalStats.cancelable}</span
@@ -105,7 +106,7 @@
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">Current view</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_current_view')}</p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -117,7 +118,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> Start filtered</span>
+            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_filtered')}</span>
             {#if filteredStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.startable}</span
@@ -134,7 +135,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> Cancel filtered</span>
+            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_filtered')}</span>
             {#if filteredStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.cancelable}</span
@@ -151,7 +152,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete filtered</span>
+            <span class="flex items-center gap-2"><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_filtered')}</span>
             {#if filteredStats.deletable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{filteredStats.deletable}</span
@@ -169,7 +170,7 @@
             }}
           >
             <span class="flex items-center gap-2"
-              ><RefreshCcw class="size-4" /> Retry failed (filtered)</span
+              ><RefreshCcw class="size-4" /> {i18n.t('downloader.bulk_retry_failed_filtered')}</span
             >
             {#if filteredStats.failed > 0}
               <span class="text-xs text-muted-foreground tabular-nums">{filteredStats.failed}</span>
@@ -184,13 +185,13 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><FileDown class="size-4" /> Export CSV</span>
+            <span class="flex items-center gap-2"><FileDown class="size-4" /> {i18n.t('downloader.bulk_export_csv')}</span>
           </Button>
         </div>
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_selected')}</p>
         <div class="grid gap-2">
           <Button
             type="button"
@@ -202,7 +203,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Play class="size-4" /> Start selected</span>
+            <span class="flex items-center gap-2"><Play class="size-4" /> {i18n.t('downloader.bulk_start_selected')}</span>
             {#if selectedStats.startable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.startable}</span
@@ -219,7 +220,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><CircleX class="size-4" /> Cancel selected</span>
+            <span class="flex items-center gap-2"><CircleX class="size-4" /> {i18n.t('downloader.bulk_cancel_selected')}</span>
             {#if selectedStats.cancelable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.cancelable}</span
@@ -235,7 +236,7 @@
               open = false;
             }}
           >
-            <span class="flex items-center gap-2"><Trash2 class="size-4" /> Delete selected</span>
+            <span class="flex items-center gap-2"><Trash2 class="size-4" /> {i18n.t('downloader.bulk_delete_selected')}</span>
             {#if selectedStats.deletable > 0}
               <span class="text-xs text-muted-foreground tabular-nums"
                 >{selectedStats.deletable}</span
@@ -253,7 +254,7 @@
               }}
             >
               <Eye class="size-4" />
-              <span class="ml-2">Open</span>
+              <span class="ml-2">{i18n.t('downloader.bulk_open')}</span>
             </Button>
             <Button
               variant="outline"
@@ -265,7 +266,7 @@
               }}
             >
               <FolderOpen class="size-4" />
-              <span class="ml-2">Show</span>
+              <span class="ml-2">{i18n.t('downloader.bulk_show')}</span>
             </Button>
           </div>
           <div class="grid grid-cols-2 gap-2">
@@ -279,7 +280,7 @@
               }}
             >
               <ClipboardIcon class="size-4" />
-              <span class="ml-2">Copy links</span>
+              <span class="ml-2">{i18n.t('downloader.bulk_copy_links')}</span>
             </Button>
             <Button
               variant="ghost"
@@ -290,14 +291,14 @@
               }}
             >
               <FileDown class="size-4" />
-              <span class="ml-2">Export</span>
+              <span class="ml-2">{i18n.t('downloader.bulk_export')}</span>
             </Button>
           </div>
         </div>
       </div>
       <Separator />
       <div class="space-y-2">
-        <p class="text-xs uppercase tracking-wide text-muted-foreground">Failed</p>
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">{i18n.t('downloader.bulk_failed')}</p>
         <div class="grid gap-2">
           <Button
             variant="outline"
@@ -309,7 +310,7 @@
             }}
           >
             <span class="flex items-center gap-2"
-              ><RefreshCcw class="size-4" /> Retry all failed</span
+              ><RefreshCcw class="size-4" /> {i18n.t('downloader.bulk_retry_all_failed')}</span
             >
             {#if globalStats.failed > 0}
               <span class="text-xs text-muted-foreground tabular-nums">{globalStats.failed}</span>

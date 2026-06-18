@@ -13,12 +13,13 @@
     DialogFooter,
     DialogClose,
   } from '$lib/components/ui/dialog';
-  import { settings, updateDownloaderSettings } from '$lib/settings';
+  import { settings, updateDownloaderSettings, updateLanguage } from '$lib/settings';
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '$lib/components/ui/sonner';
   import { pushLog, clearLogs } from '$lib/logStore';
   import { save } from '@tauri-apps/plugin-dialog';
   import { beginScan, endScan } from '$lib/scanStatus.svelte';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -33,6 +34,7 @@
   let fallbackOpen = $state($settings.downloader.fallbackOpen);
   let verifyInstall = $state($settings.downloader.verifyInstall);
   let catalogFilePath = $state($settings.downloader.downloadCatalogPath ?? '');
+  let language = $state($settings.language);
 
   $effect(() => {
     autoInstall = $settings.downloader.autoInstall;
@@ -41,6 +43,7 @@
     fallbackOpen = $settings.downloader.fallbackOpen;
     verifyInstall = $settings.downloader.verifyInstall;
     catalogFilePath = $settings.downloader.downloadCatalogPath ?? '';
+    language = $settings.language;
   });
 
   $effect(() => {
@@ -51,6 +54,10 @@
       fallbackOpen,
       verifyInstall,
     });
+  });
+
+  $effect(() => {
+    updateLanguage(language);
   });
 
   $effect(() => {
@@ -72,10 +79,10 @@
       await invoke('vt_set_api_key', { key: vtKey || null, persist: vtPersist });
       const st = (await invoke('vt_get_status')) as { key_set?: boolean };
       vtKeySet = !!st?.key_set;
-      toast.success('VirusTotal key saved');
+      toast.success(i18n.t('settings.toast_vt_saved'));
       pushLog('SUCCESS', `VT key saved${vtPersist ? ' (persisted)' : ''}.`, 'Optimize');
     } catch (e) {
-      toast.error('Failed to save VirusTotal key');
+      toast.error(i18n.t('settings.toast_vt_save_failed'));
       pushLog('ERROR', `Saving VT key failed: ${String(e)}`, 'Optimize');
     } finally {
       vtBusy = false;
@@ -85,13 +92,13 @@
   async function chooseCatalogFile() {
     try {
       const selected = await save({
-        title: 'Select catalog (JSON)',
+        title: i18n.t('settings.choose_file'),
         filters: [{ name: 'JSON', extensions: ['json'] }],
         defaultPath: catalogFilePath || 'avelonia-downloads.json',
       });
       if (typeof selected === 'string' && selected) {
         updateDownloaderSettings({ downloadCatalogPath: selected });
-        toast.success('Download catalog file selected');
+        toast.success(i18n.t('settings.toast_catalog_selected'));
       }
     } catch (error) {
       pushLog('ERROR', `Failed to select catalog file: ${String(error)}`, 'Downloader');
@@ -102,7 +109,7 @@
   function clearCatalogFile() {
     if (!catalogFilePath) return;
     updateDownloaderSettings({ downloadCatalogPath: '' });
-    toast.info('Download catalog cleared');
+    toast.info(i18n.t('settings.toast_catalog_clear'));
   }
 
   async function runVtScanNow() {
@@ -132,13 +139,46 @@
   <DialogContent class="sm:max-w-xl">
     <div class="flex flex-col">
       <DialogHeader>
-        <DialogTitle>Settings</DialogTitle>
-        <DialogDescription>Configure Avelonia preferences.</DialogDescription>
+        <DialogTitle>{i18n.t('settings.title')}</DialogTitle>
+        <DialogDescription>{i18n.t('settings.description')}</DialogDescription>
       </DialogHeader>
 
       <div class="space-y-6">
         <section class="space-y-3">
-          <p class="text-sm font-medium">Downloads</p>
+          <p class="text-sm font-medium">{i18n.t('settings.language')}</p>
+          <div class="flex flex-col gap-2">
+            <Label class="text-xs text-muted-foreground">{i18n.t('settings.select_language')}</Label>
+            <div class="max-w-[220px]">
+              <Select type="single" bind:value={language}>
+                <SelectTrigger class="w-44">
+                  <p>
+                    {language === 'en'
+                      ? 'English'
+                      : language === 'sv'
+                      ? 'Svenska'
+                      : language === 'de'
+                      ? 'Deutsch'
+                      : language === 'fr'
+                      ? 'Français'
+                      : language === 'es'
+                      ? 'Español'
+                      : 'English'}
+                  </p>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="sv">Svenska</SelectItem>
+                  <SelectItem value="de">Deutsch</SelectItem>
+                  <SelectItem value="fr">Français</SelectItem>
+                  <SelectItem value="es">Español</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </section>
+
+        <section class="space-y-3">
+          <p class="text-sm font-medium">{i18n.t('settings.downloads')}</p>
           <div class="grid gap-3">
             <label class="flex items-center gap-2 text-sm">
               <Checkbox
@@ -146,7 +186,7 @@
                 aria-controls="auto-install-advanced"
                 aria-expanded={autoInstall}
               />
-              <span>Auto-install downloaded installers</span>
+              <span>{i18n.t('settings.auto_install')}</span>
             </label>
 
             {#if autoInstall}
@@ -155,7 +195,7 @@
                 class="rounded-md border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3 ml-0 sm:ml-4"
               >
                 <div class="flex flex-col gap-2">
-                  <Label class="text-xs text-muted-foreground">Install mode</Label>
+                  <Label class="text-xs text-muted-foreground">{i18n.t('settings.install_mode')}</Label>
                   <div class="max-w-[220px]">
                     <Select type="single" bind:value={installMode}>
                       <SelectTrigger placeholder="Select mode" />
@@ -168,21 +208,21 @@
                 </div>
                 <label class="flex items-center gap-2 text-sm">
                   <Checkbox bind:checked={elevateInstall} />
-                  <span>Run installers elevated (UAC)</span>
+                  <span>{i18n.t('settings.elevate')}</span>
                 </label>
                 <label class="flex items-center gap-2 text-sm">
                   <Checkbox bind:checked={fallbackOpen} />
-                  <span>Open normally if silent install fails</span>
+                  <span>{i18n.t('settings.fallback')}</span>
                 </label>
               </div>
             {/if}
 
             <label class="flex items-center gap-2 text-sm">
               <Checkbox bind:checked={verifyInstall} />
-              <span>Verify installation in Uninstall registry</span>
+              <span>{i18n.t('settings.verify')}</span>
             </label>
             <div class="space-y-2">
-              <Label class="text-xs text-muted-foreground">Download catalog (.json)</Label>
+              <Label class="text-xs text-muted-foreground">{i18n.t('settings.catalog')}</Label>
               <Input
                 value={catalogFilePath || 'Not configured'}
                 readonly
@@ -190,59 +230,59 @@
               />
               <div class="flex flex-wrap gap-2">
                 <Button size="sm" variant="secondary" onclick={chooseCatalogFile}>
-                  Choose JSON file
+                  {i18n.t('settings.choose_file')}
                 </Button>
                 {#if catalogFilePath}
-                  <Button size="sm" variant="outline" onclick={clearCatalogFile}>Clear</Button>
+                  <Button size="sm" variant="outline" onclick={clearCatalogFile}>{i18n.t('settings.clear')}</Button>
                 {/if}
               </div>
               <p class="text-xs text-muted-foreground">
-                The selected JSON keeps the downloader catalog in sync with your saved paths.
+                {i18n.t('settings.catalog_desc')}
               </p>
             </div>
           </div>
         </section>
 
         <section class="space-y-3">
-          <p class="text-sm font-medium">Security / VirusTotal</p>
+          <p class="text-sm font-medium">{i18n.t('settings.security_vt')}</p>
           <div class="space-y-2">
-            <Label class="text-xs text-muted-foreground">API key</Label>
+            <Label class="text-xs text-muted-foreground">{i18n.t('settings.api_key')}</Label>
             <Input type="password" placeholder="Paste your VT API key" bind:value={vtKey} />
             <label class="flex items-center gap-2 text-sm">
               <Checkbox bind:checked={vtPersist} />
-              <span>Save key on this device</span>
+              <span>{i18n.t('settings.save_key')}</span>
             </label>
             <div class="flex gap-2">
-              <Button onclick={saveVtKey} disabled={vtBusy}>Save key</Button>
+              <Button onclick={saveVtKey} disabled={vtBusy}>{i18n.t('settings.btn_save_key')}</Button>
               <Button variant="secondary" onclick={runVtScanNow} disabled={!vtKeySet || vtBusy}
-                >Run scan now</Button
+                >{i18n.t('settings.btn_scan_now')}</Button
               >
             </div>
             {#if !vtKeySet}
               <p class="text-xs text-muted-foreground">
-                Set an API key to enable reputation scans.
+                {i18n.t('settings.vt_desc')}
               </p>
             {/if}
           </div>
         </section>
 
         <section class="space-y-3">
-          <p class="text-sm font-medium">Privacy & Data</p>
+          <p class="text-sm font-medium">{i18n.t('settings.privacy_data')}</p>
           <div class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-sm">System logs</p>
-              <p class="text-xs text-muted-foreground">Clear all logs stored locally.</p>
+              <p class="text-sm">{i18n.t('settings.system_logs')}</p>
+              <p class="text-xs text-muted-foreground">{i18n.t('settings.clear_logs_desc')}</p>
             </div>
             <Button
               variant="secondary"
               onclick={() => {
                 try {
                   clearLogs();
-                  toast.success('Logs cleared');
+                  toast.success(i18n.t('settings.toast_logs_cleared'));
                 } catch {
                   /* noop */
                 }
-              }}>Clear logs</Button
+              }}>{i18n.t('settings.btn_clear_logs')}</Button
             >
           </div>
         </section>
@@ -250,10 +290,10 @@
 
       <DialogFooter class="mt-6">
         <DialogClose>
-          <Button variant="ghost">Close</Button>
+          <Button variant="ghost">{i18n.t('common.close')}</Button>
         </DialogClose>
         <DialogClose>
-          <Button>Done</Button>
+          <Button>{i18n.t('common.done')}</Button>
         </DialogClose>
       </DialogFooter>
     </div>

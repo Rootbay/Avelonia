@@ -22,8 +22,8 @@ fn exe_dir() -> Result<PathBuf, AppError> {
 #[cfg(target_os = "windows")]
 fn is_removable_drive(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::core::PCWSTR;
 
     let root = match drive_root(path) {
         Some(root) => root,

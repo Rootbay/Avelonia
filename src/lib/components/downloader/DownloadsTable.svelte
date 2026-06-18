@@ -12,6 +12,7 @@
   import DownloadItem from '$lib/components/DownloadItem.svelte';
   import type { Download } from '$lib/downloadManager';
   import { SvelteSet } from 'svelte/reactivity';
+  import { i18n } from '$lib/i18n.svelte';
 
   let {
     downloads,
@@ -31,18 +32,18 @@
     onCancel: (id: number) => Promise<void>;
   }>();
 
-  const sortColumns: Array<{
+  const sortColumns = $derived<Array<{
     key: 'name' | 'size' | 'fileType' | 'category' | 'eta' | 'status';
     label: string;
     width: string;
-  }> = [
-    { key: 'name', label: 'Name', width: 'w-[35%]' },
-    { key: 'size', label: 'Size', width: 'w-28' },
-    { key: 'fileType', label: 'Type', width: 'w-24' },
-    { key: 'category', label: 'Category', width: 'w-32' },
-    { key: 'eta', label: 'ETA', width: 'w-28' },
-    { key: 'status', label: 'Status', width: 'w-52 pl-8' },
-  ];
+  }>>([
+    { key: 'name', label: i18n.t('downloader.col_name'), width: 'w-[35%]' },
+    { key: 'size', label: i18n.t('downloader.col_size'), width: 'w-28' },
+    { key: 'fileType', label: i18n.t('downloader.col_type'), width: 'w-24' },
+    { key: 'category', label: i18n.t('downloader.col_category'), width: 'w-32' },
+    { key: 'eta', label: i18n.t('downloader.col_eta'), width: 'w-28' },
+    { key: 'status', label: i18n.t('downloader.col_status'), width: 'w-52 pl-8' },
+  ]);
 
   let tableEl = $state<HTMLTableElement | null>(null);
   let scrollEl = $state<HTMLDivElement | null>(null);
@@ -249,7 +250,7 @@
         {#if downloads.length === 0}
           <TableRow>
             <TableCell colspan={7} class="py-12 text-center text-sm text-muted-foreground">
-              No downloads match the current filters.
+              {i18n.t('downloader.no_filtered_downloads')}
             </TableCell>
           </TableRow>
         {/if}

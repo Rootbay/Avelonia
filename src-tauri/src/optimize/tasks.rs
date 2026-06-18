@@ -1,8 +1,8 @@
+use super::shell_helpers::run_schtasks;
+use crate::AppError;
 use serde::Serialize;
 use std::process::Command;
 use std::time::Duration;
-use super::shell_helpers::run_schtasks;
-use crate::AppError;
 
 #[derive(Serialize, Clone)]
 pub struct ScheduledTask {
@@ -47,18 +47,32 @@ fn get_danger_keywords() -> Vec<String> {
 }
 
 pub fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i32) {
-    let cmd = task_to_run.to_lowercase().replace('"', "").trim().to_string();
+    let cmd = task_to_run
+        .to_lowercase()
+        .replace('"', "")
+        .trim()
+        .to_string();
     let auth = author.to_lowercase().trim().to_string();
     let name_lower = name.to_lowercase().trim().to_string();
 
     let mut score = 0;
 
-    let trusted_authors = ["microsoft", "google", "mozilla", "adobe", "nvidia", "intel", "amd"];
+    let trusted_authors = [
+        "microsoft",
+        "google",
+        "mozilla",
+        "adobe",
+        "nvidia",
+        "intel",
+        "amd",
+    ];
     if trusted_authors.iter().any(|&a| auth.contains(a)) || name_lower.starts_with(r"\microsoft\") {
         score -= 1000;
     }
 
-    if cmd.contains(&(" -en".to_string() + "c ")) || cmd.contains(&(" -encodedco".to_string() + "mmand ")) {
+    if cmd.contains(&(" -en".to_string() + "c "))
+        || cmd.contains(&(" -encodedco".to_string() + "mmand "))
+    {
         score += 1500;
     }
 
@@ -72,7 +86,9 @@ pub fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (boo
         if cmd.contains("-w hidden") || cmd.contains("-noninteractive") {
             score += 200;
         }
-        if cmd.contains(&("downlo".to_string() + "adstring")) || cmd.contains(&("webre".to_string() + "quest")) {
+        if cmd.contains(&("downlo".to_string() + "adstring"))
+            || cmd.contains(&("webre".to_string() + "quest"))
+        {
             score += 300;
         }
     }
@@ -107,13 +123,20 @@ pub fn try_delete_as_system(target_tn: &str) -> bool {
     let temp_name = format!(r"\_AveloniaSysDel_{}", rand::Rng::r#gen::<u32>(&mut rng));
     let escaped = target_tn.replace('"', "\\\"");
     let tr = format!("cmd.exe /c schtasks /Delete /TN \"{}\" /F", escaped);
-    
-    if !run_schtasks(&["/Create", "/TN", &temp_name, "/TR", &tr, "/SC", "ONCE", "/ST", "23:59", "/RU", "SYSTEM", "/RL", "HIGHEST"]) {
+
+    if !run_schtasks(&[
+        "/Create", "/TN", &temp_name, "/TR", &tr, "/SC", "ONCE", "/ST", "23:59", "/RU", "SYSTEM",
+        "/RL", "HIGHEST",
+    ]) {
         return false;
     }
     let _ = run_schtasks(&["/Run", "/TN", &temp_name]);
     std::thread::sleep(Duration::from_secs(2));
-    let exists = Command::new("schtasks").args(["/Query", "/TN", target_tn]).status().map(|s| s.success()).unwrap_or(false);
+    let exists = Command::new("schtasks")
+        .args(["/Query", "/TN", target_tn])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
     let _ = run_schtasks(&["/Delete", "/TN", &temp_name, "/F"]);
     !exists
 }
@@ -124,10 +147,19 @@ pub async fn disable_scheduled_tasks(names: Vec<String>) -> Result<OpResult, App
     let mut ok = 0usize;
     for n in names {
         let mut tn = n.trim().to_string();
-        if !tn.starts_with('\\') { tn.insert(0, '\\'); }
-        if run_schtasks(&["/Change", "/TN", &tn, "/Disable"]) { ok += 1; }
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/Change", "/TN", &tn, "/Disable"]) {
+            ok += 1;
+        }
     }
-    Ok(OpResult { success: ok, elevated: 0, stopped: 0, failures: Vec::new() })
+    Ok(OpResult {
+        success: ok,
+        elevated: 0,
+        stopped: 0,
+        failures: Vec::new(),
+    })
 }
 
 #[tauri::command]
@@ -141,10 +173,19 @@ pub async fn run_scheduled_tasks(names: Vec<String>) -> Result<OpResult, AppErro
     let mut ok = 0usize;
     for n in names {
         let mut tn = n.trim().to_string();
-        if !tn.starts_with('\\') { tn.insert(0, '\\'); }
-        if run_schtasks(&["/Run", "/TN", &tn]) { ok += 1; }
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/Run", "/TN", &tn]) {
+            ok += 1;
+        }
     }
-    Ok(OpResult { success: ok, elevated: 0, stopped: 0, failures: Vec::new() })
+    Ok(OpResult {
+        success: ok,
+        elevated: 0,
+        stopped: 0,
+        failures: Vec::new(),
+    })
 }
 
 #[tauri::command]
@@ -152,10 +193,19 @@ pub async fn end_scheduled_tasks(names: Vec<String>) -> Result<OpResult, AppErro
     let mut ok = 0usize;
     for n in names {
         let mut tn = n.trim().to_string();
-        if !tn.starts_with('\\') { tn.insert(0, '\\'); }
-        if run_schtasks(&["/End", "/TN", &tn]) { ok += 1; }
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/End", "/TN", &tn]) {
+            ok += 1;
+        }
     }
-    Ok(OpResult { success: ok, elevated: 0, stopped: 0, failures: Vec::new() })
+    Ok(OpResult {
+        success: ok,
+        elevated: 0,
+        stopped: 0,
+        failures: Vec::new(),
+    })
 }
 
 #[tauri::command]
@@ -164,10 +214,19 @@ pub async fn enable_scheduled_tasks(names: Vec<String>) -> Result<OpResult, AppE
     let mut ok = 0usize;
     for n in names {
         let mut tn = n.trim().to_string();
-        if !tn.starts_with('\\') { tn.insert(0, '\\'); }
-        if run_schtasks(&["/Change", "/TN", &tn, "/Enable"]) { ok += 1; }
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/Change", "/TN", &tn, "/Enable"]) {
+            ok += 1;
+        }
     }
-    Ok(OpResult { success: ok, elevated: 0, stopped: 0, failures: Vec::new() })
+    Ok(OpResult {
+        success: ok,
+        elevated: 0,
+        stopped: 0,
+        failures: Vec::new(),
+    })
 }
 
 #[tauri::command]
@@ -176,10 +235,19 @@ pub async fn delete_scheduled_tasks(names: Vec<String>) -> Result<OpResult, AppE
     let mut ok = 0usize;
     for n in names {
         let mut tn = n.trim().to_string();
-        if !tn.starts_with('\\') { tn.insert(0, '\\'); }
-        if run_schtasks(&["/Delete", "/TN", &tn, "/F"]) { ok += 1; }
+        if !tn.starts_with('\\') {
+            tn.insert(0, '\\');
+        }
+        if run_schtasks(&["/Delete", "/TN", &tn, "/F"]) {
+            ok += 1;
+        }
     }
-    Ok(OpResult { success: ok, elevated: 0, stopped: 0, failures: Vec::new() })
+    Ok(OpResult {
+        success: ok,
+        elevated: 0,
+        stopped: 0,
+        failures: Vec::new(),
+    })
 }
 
 #[tauri::command]
@@ -201,12 +269,12 @@ pub async fn get_task_details(task_name: String) -> Result<(String, String, bool
         return Ok((String::new(), String::new(), false, 0));
     }
     let escaped = task_name.replace('"', "\\\"");
-    let cmd = format!("chcp 65001>nul & schtasks /Query /FO CSV /V /TN \"{}\"", escaped);
+    let cmd = format!(
+        "chcp 65001>nul & schtasks /Query /FO CSV /V /TN \"{}\"",
+        escaped
+    );
     let output = Command::new("cmd")
-        .args([
-            "/C",
-            &cmd,
-        ])
+        .args(["/C", &cmd])
         .output()
         .map_err(|e| AppError::System(format!("failed to run schtasks: {}", e)))?;
 
@@ -230,7 +298,10 @@ pub async fn list_suspicious_tasks() -> Result<Vec<String>, AppError> {
 }
 
 #[tauri::command]
-pub async fn delete_tasks_by_match(images: Vec<String>, paths: Vec<String>) -> Result<usize, AppError> {
+pub async fn delete_tasks_by_match(
+    images: Vec<String>,
+    paths: Vec<String>,
+) -> Result<usize, AppError> {
     let list = list_scheduled_tasks().await?;
     let imgs: Vec<String> = images.into_iter().map(|s| s.to_lowercase()).collect();
     let pths: Vec<String> = paths.into_iter().map(|s| s.to_lowercase()).collect();
@@ -353,7 +424,11 @@ mod tests {
 
     #[test]
     fn test_check_if_task_is_sus_trusted() {
-        let (is_sus, score) = check_if_task_is_sus("OneDrive", "C:\\Windows\\System32\\OneDrive.exe", "Microsoft Corporation");
+        let (is_sus, score) = check_if_task_is_sus(
+            "OneDrive",
+            "C:\\Windows\\System32\\OneDrive.exe",
+            "Microsoft Corporation",
+        );
         assert!(!is_sus);
         assert!(score < 0);
     }

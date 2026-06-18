@@ -40,6 +40,7 @@
   import { toast } from '$lib/components/ui/sonner';
   import { cleanerScan, beginCleanerScan, clearAllScannedItems } from '$lib/cleanerScan.svelte';
   import { loadCleanerCache } from '$lib/cleanerCache';
+  import { i18n } from '$lib/i18n.svelte';
 
   // Read cleaner cache
   const totalCleanerFiles = $derived.by(() => {
@@ -164,8 +165,8 @@
   const healthStatus = $derived.by(() => {
     if (healthScore >= 80) {
       return {
-        label: 'Excellent',
-        desc: 'Your system is running smoothly with optimized configurations.',
+        label: i18n.t('dashboard.status_excellent'),
+        desc: i18n.t('dashboard.desc_excellent'),
         color: 'text-emerald-500',
         bg: 'bg-emerald-500/10',
         border: 'border-emerald-500/20',
@@ -174,8 +175,8 @@
     }
     if (healthScore >= 50) {
       return {
-        label: 'Good but Tweakable',
-        desc: 'Minor optimizations can help improve performance and retrieve space.',
+        label: i18n.t('dashboard.status_good'),
+        desc: i18n.t('dashboard.desc_good'),
         color: 'text-amber-500',
         bg: 'bg-amber-500/10',
         border: 'border-amber-500/20',
@@ -183,8 +184,8 @@
       };
     }
     return {
-      label: 'Needs Attention',
-      desc: 'Significant junk files or unapplied optimizations are degrading performance.',
+      label: i18n.t('dashboard.status_attention'),
+      desc: i18n.t('dashboard.desc_attention'),
       color: 'text-rose-500',
       bg: 'bg-rose-500/10',
       border: 'border-rose-500/20',
@@ -192,16 +193,18 @@
     };
   });
 
+  const healthScoreLabel = $derived(i18n.t('dashboard.health_score'));
+
   let diagnosticState = $state<'idle' | 'scanning' | 'done'>('idle');
   let diagnosticMessage = $state('');
 
   async function startDiagnosticScan() {
     if (diagnosticState === 'scanning') return;
     diagnosticState = 'scanning';
-    diagnosticMessage = 'Checking CPU and Memory load...';
+    diagnosticMessage = i18n.t('dashboard.diagnostics_cpu_ram');
     await new Promise((r) => setTimeout(r, 600));
 
-    diagnosticMessage = 'Scanning for temporary files and disk clutter...';
+    diagnosticMessage = i18n.t('dashboard.diagnostics_temp');
     try {
       let exclusions: string[] = [];
       try {
@@ -228,20 +231,20 @@
       attempts++;
     }
 
-    diagnosticMessage = 'Analyzing optimization tweak opportunities...';
+    diagnosticMessage = i18n.t('dashboard.diagnostics_tweaks');
     await fetchTweaksCount();
     await new Promise((r) => setTimeout(r, 600));
 
     diagnosticState = 'done';
-    diagnosticMessage = 'System diagnostics complete!';
-    toast.success('Diagnostics completed successfully!');
+    diagnosticMessage = i18n.t('dashboard.diagnostics_done');
+    toast.success(i18n.t('dashboard.toast_diagnostics_success'));
   }
 
   let isFixing = $state(false);
   async function runQuickFix() {
     if (isFixing) return;
     isFixing = true;
-    toast.info('Running Quick Clean & Optimize...');
+    toast.info(i18n.t('dashboard.toast_quick_fix'));
 
     try {
       // 1. Quick clear user & system temp
@@ -249,7 +252,7 @@
       await invoke('quick_clear_system_temp');
       await invoke('quick_clear_prefetch');
       await invoke('quick_clear_recent');
-      pushLog('SUCCESS', 'Cleared user and system temporary files.', 'Cleaner');
+      pushLog('SUCCESS', i18n.t('dashboard.log_cleared_temp'), 'Cleaner');
 
       // Clear the local sessionStorage cleaner cache so count updates immediately
       if (typeof window !== 'undefined') {
@@ -277,12 +280,12 @@
 
       const changes = standardProfileTweaks.map((id) => ({ id, enabled: true }));
       await invoke('apply_tweaks_state_batch', { changes });
-      pushLog('SUCCESS', 'Successfully applied standard optimization tweaks profile.', 'Optimize');
+      pushLog('SUCCESS', i18n.t('dashboard.log_applied_standard'), 'Optimize');
 
-      toast.success('System optimized successfully!');
+      toast.success(i18n.t('dashboard.toast_quick_fix_success'));
 
       diagnosticState = 'done';
-      diagnosticMessage = 'System is running optimally.';
+      diagnosticMessage = i18n.t('dashboard.diagnostics_done');
 
       clearAllScannedItems();
       await fetchTweaksCount();
@@ -293,18 +296,6 @@
       isFixing = false;
     }
   }
-
-  const downloadStatusLabels: Record<Download['status'], string> = {
-    available: 'Available',
-    pending: 'Preparing',
-    downloading: 'Downloading',
-    paused: 'Paused',
-    completed: 'Completed',
-    installed: 'Installed',
-    queued: 'Queued',
-    failed: 'Failed',
-    verifying: 'Verifying',
-  };
 
   function formatBytes(bytes: number, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
@@ -323,7 +314,28 @@
   }
 
   function readableDownloadStatus(status: Download['status']) {
-    return downloadStatusLabels[status] ?? status;
+    switch (status) {
+      case 'available':
+        return i18n.t('dashboard.status_available');
+      case 'pending':
+        return i18n.t('dashboard.status_pending');
+      case 'downloading':
+        return i18n.t('dashboard.status_downloading');
+      case 'paused':
+        return i18n.t('dashboard.status_paused');
+      case 'completed':
+        return i18n.t('dashboard.status_completed');
+      case 'installed':
+        return i18n.t('dashboard.status_installed');
+      case 'queued':
+        return i18n.t('dashboard.status_queued');
+      case 'failed':
+        return i18n.t('dashboard.status_failed');
+      case 'verifying':
+        return i18n.t('dashboard.status_verifying');
+      default:
+        return status;
+    }
   }
 
   function getProgressValue(progress: number) {
@@ -343,9 +355,15 @@
       case 'available':
         return null;
       case 'failed':
-        return { level: 'ERROR', message: `Download ${dl.name} failed.` };
+        return {
+          level: 'ERROR',
+          message: i18n.t('dashboard.log_download_failed', { name: dl.name }),
+        };
       case 'paused':
-        return { level: 'WARN', message: `Download ${dl.name} paused.` };
+        return {
+          level: 'WARN',
+          message: i18n.t('dashboard.log_download_paused', { name: dl.name }),
+        };
       default:
         return null;
     }
@@ -381,7 +399,7 @@
       } catch (error) {
         if (!systemInfoErrorLogged) {
           const reason = error instanceof Error ? error.message : String(error);
-          pushLog('ERROR', `Failed to fetch system info: ${reason}`);
+          pushLog('ERROR', i18n.t('dashboard.log_fetch_sys_info_failed', { reason }));
           systemInfoErrorLogged = true;
         }
       }
@@ -849,7 +867,7 @@
     >
       <CardHeader class="pb-1 w-full p-2">
         <CardTitle class="text-xs font-semibold tracking-wider uppercase text-muted-foreground"
-          >System Health Score</CardTitle
+          >{i18n.t('dashboard.system_health_score')}</CardTitle
         >
       </CardHeader>
       <CardContent class="flex flex-col items-center justify-center w-full relative p-2">
@@ -875,11 +893,27 @@
               stroke-linecap="round"
               class="transition-[stroke-dashoffset,stroke] duration-1000 ease-out"
             />
+            <text
+              x="40"
+              y="38"
+              class="fill-foreground font-extrabold tracking-tight font-heading"
+              text-anchor="middle"
+              transform="rotate(90 40 40)"
+              font-size="20"
+            >
+              {healthScore}
+            </text>
+            <text
+              x="40"
+              y="52"
+              class="fill-muted-foreground font-bold tracking-wider"
+              text-anchor="middle"
+              transform="rotate(90 40 40)"
+              font-size={Math.max(5.0, Math.min(8.2, 90 / healthScoreLabel.length))}
+            >
+              {healthScoreLabel}
+            </text>
           </svg>
-          <div class="absolute flex flex-col items-center justify-center">
-            <span class="text-2xl font-extrabold tracking-tight font-heading">{healthScore}</span>
-            <span class="text-[9px] uppercase font-bold text-muted-foreground">Score</span>
-          </div>
         </div>
 
         <div class="mt-2.5">
@@ -899,7 +933,9 @@
     >
       <div>
         <div class="flex items-center gap-2 mb-1">
-          <h2 class="text-lg font-bold font-heading">System Diagnostics & Fix</h2>
+          <h2 class="text-lg font-bold font-heading">
+            {i18n.t('dashboard.system_diagnostics_fix')}
+          </h2>
         </div>
         <p class="text-xs text-muted-foreground leading-relaxed mb-3">
           {healthStatus.desc}
@@ -918,14 +954,14 @@
               <span>{diagnosticMessage}</span>
             {:else}
               <Activity class="size-3.5 text-blue-500" />
-              <span class="text-muted-foreground">Ready to analyze system health.</span>
+              <span class="text-muted-foreground">{i18n.t('dashboard.ready_message')}</span>
             {/if}
           </div>
 
           {#if cleanerScan.phase === 'running'}
             <div class="space-y-1">
               <div class="flex justify-between text-[10px] text-muted-foreground">
-                <span>Scanning files...</span>
+                <span>{i18n.t('dashboard.scanning_files')}</span>
                 <span>{cleanerScan.found} items</span>
               </div>
               <Progress value={Math.min(100, (cleanerScan.found / 1000) * 100)} class="h-1" />
@@ -937,13 +973,13 @@
             class="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-border/20 text-[11px] text-muted-foreground"
           >
             <div class="flex justify-between">
-              <span>Clutter items:</span>
+              <span>{i18n.t('dashboard.clutter_items')}</span>
               <span class="font-mono text-foreground font-semibold">
                 {cleanerScan.phase === 'running' ? cleanerScan.found : totalCleanerFiles}
               </span>
             </div>
             <div class="flex justify-between">
-              <span>Applied tweaks:</span>
+              <span>{i18n.t('dashboard.applied_tweaks')}</span>
               <span class="font-mono text-foreground font-semibold"
                 >{activeTweaksCount} / {totalTweaksCount}</span
               >
@@ -961,9 +997,9 @@
           class="min-w-28 text-xs h-8"
         >
           {#if diagnosticState === 'scanning'}
-            <Loader2 class="size-3.5 mr-1 animate-spin" /> Scanning...
+            <Loader2 class="size-3.5 mr-1 animate-spin" /> {i18n.t('dashboard.btn_scanning')}
           {:else}
-            Scan System
+            {i18n.t('dashboard.btn_scan')}
           {/if}
         </Button>
         <Button
@@ -973,9 +1009,9 @@
           class="min-w-28 text-xs h-8 bg-primary text-primary-foreground hover:bg-primary/95 shadow-md flex items-center gap-1.5"
         >
           {#if isFixing}
-            <Loader2 class="size-3.5 animate-spin" /> Optimizing...
+            <Loader2 class="size-3.5 animate-spin" /> {i18n.t('dashboard.btn_optimizing')}
           {:else}
-            <Zap class="size-3.5 fill-current" /> Quick Optimize
+            <Zap class="size-3.5 fill-current" /> {i18n.t('dashboard.btn_quick_optimize')}
           {/if}
         </Button>
       </div>
@@ -985,7 +1021,7 @@
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
     <Card>
       <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle class="text-sm font-medium">CPU Usage</CardTitle>
+        <CardTitle class="text-sm font-medium">{i18n.t('dashboard.cpu_usage')}</CardTitle>
         <Cpu class="size-5 text-muted-foreground" />
       </CardHeader>
       <CardContent>
@@ -993,33 +1029,37 @@
           <span class="text-3xl font-semibold">{cpuUsage.toFixed(1)}</span>
           <span class="text-muted-foreground">%</span>
         </div>
-        <p class="mt-1 text-sm text-muted-foreground">Current performance</p>
+        <p class="mt-1 text-sm text-muted-foreground">{i18n.t('dashboard.current_performance')}</p>
       </CardContent>
     </Card>
 
     <Card>
       <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle class="text-sm font-medium">Memory Usage</CardTitle>
+        <CardTitle class="text-sm font-medium">{i18n.t('dashboard.memory_usage')}</CardTitle>
         <MemoryStick class="size-5 text-muted-foreground" />
       </CardHeader>
       <CardContent>
         <div class="flex items-baseline gap-2">
           <span class="text-3xl font-semibold">{formatBytes(usedMemory)}</span>
         </div>
-        <p class="mt-1 text-sm text-muted-foreground">Used of {formatBytes(totalMemory)}</p>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {i18n.t('dashboard.used_of', { total: formatBytes(totalMemory) })}
+        </p>
       </CardContent>
     </Card>
 
     <Card>
       <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle class="text-sm font-medium">Disk Space</CardTitle>
+        <CardTitle class="text-sm font-medium">{i18n.t('dashboard.disk_space')}</CardTitle>
         <HardDrive class="size-5 text-muted-foreground" />
       </CardHeader>
       <CardContent>
         <div class="flex items-baseline gap-2">
           <span class="text-3xl font-semibold">{formatBytes(availableDiskSpace)}</span>
         </div>
-        <p class="mt-1 text-sm text-muted-foreground">Available of {formatBytes(totalDiskSpace)}</p>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {i18n.t('dashboard.available_of', { total: formatBytes(totalDiskSpace) })}
+        </p>
       </CardContent>
     </Card>
   </div>
@@ -1029,9 +1069,9 @@
       <CardHeader>
         <div class="flex items-center gap-2">
           <DownloadIcon class="size-5 text-muted-foreground" />
-          <CardTitle>Active Downloads</CardTitle>
+          <CardTitle>{i18n.t('dashboard.active_downloads')}</CardTitle>
         </div>
-        <CardDescription>Items currently downloading or queued.</CardDescription>
+        <CardDescription>{i18n.t('dashboard.active_downloads_desc')}</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
         {#if activeDownloads.length > 0}
@@ -1046,10 +1086,10 @@
                     >
                       <span>{readableDownloadStatus(entry.data.status)}</span>
                       {#if entry.data.speed}
-                        <span>Speed {entry.data.speed}</span>
+                        <span>{i18n.t('dashboard.speed', { speed: entry.data.speed })}</span>
                       {/if}
                       {#if entry.data.eta && entry.data.eta !== 'N/A'}
-                        <span>ETA {entry.data.eta}</span>
+                        <span>{i18n.t('dashboard.eta', { eta: entry.data.eta })}</span>
                       {/if}
                     </div>
                   </div>
@@ -1076,15 +1116,17 @@
             {/each}
           </div>
         {:else}
-          <p class="text-sm text-muted-foreground">No active downloads.</p>
+          <p class="text-sm text-muted-foreground">
+            {i18n.t('dashboard.no_active_downloads_text')}
+          </p>
         {/if}
       </CardContent>
     </Card>
 
     <Card>
       <CardHeader>
-        <CardTitle>System Logs</CardTitle>
-        <CardDescription>Live application and system events.</CardDescription>
+        <CardTitle>{i18n.t('dashboard.system_logs')}</CardTitle>
+        <CardDescription>{i18n.t('dashboard.system_logs_desc')}</CardDescription>
       </CardHeader>
       <CardContent>
         <div
@@ -1097,9 +1139,15 @@
               class="sticky top-0 bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70"
             >
               <TableRow class="border-0!">
-                <TableHead class="w-20 text-xs text-muted-foreground">Time</TableHead>
-                <TableHead class="w-20 text-xs text-muted-foreground">Level</TableHead>
-                <TableHead class="text-xs text-muted-foreground">Message</TableHead>
+                <TableHead class="w-20 text-xs text-muted-foreground"
+                  >{i18n.t('dashboard.log_time')}</TableHead
+                >
+                <TableHead class="w-20 text-xs text-muted-foreground"
+                  >{i18n.t('dashboard.log_level')}</TableHead
+                >
+                <TableHead class="text-xs text-muted-foreground"
+                  >{i18n.t('dashboard.log_message')}</TableHead
+                >
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1118,7 +1166,7 @@
               {:else if $logStore.length === 0}
                 <TableRow class="border-0!">
                   <TableCell colspan={3} class="py-6 text-center text-xs text-muted-foreground">
-                    No activity recorded yet.
+                    {i18n.t('dashboard.no_activity')}
                   </TableCell>
                 </TableRow>
               {:else}
@@ -1161,7 +1209,7 @@
                             variant="secondary"
                             class="text-[11px] bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
                           >
-                            VirusTotal scan activity
+                            {i18n.t('dashboard.log_vt_activity')}
                           </Badge>
                           <span class="text-xs font-medium text-muted-foreground"
                             >({g.indices.length} items)</span
@@ -1170,10 +1218,10 @@
                             class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1"
                           >
                             {#if vtCollapsed.has(stableKey)}
-                              <span>Expand</span>
+                              <span>{i18n.t('dashboard.expand')}</span>
                               <ChevronRight class="size-4" />
                             {:else}
-                              <span>Collapse</span>
+                              <span>{i18n.t('dashboard.collapse')}</span>
                               <ChevronDown class="size-4" />
                             {/if}
                           </span>
@@ -1229,7 +1277,7 @@
                             variant="secondary"
                             class="text-[11px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
                           >
-                            Tweak & setting adjustments
+                            {i18n.t('dashboard.log_tweak_activity')}
                           </Badge>
                           <span class="text-xs font-medium text-muted-foreground"
                             >({g.indices.length} items)</span
@@ -1238,10 +1286,10 @@
                             class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1"
                           >
                             {#if tweakCollapsed.has(stableKey)}
-                              <span>Expand</span>
+                              <span>{i18n.t('dashboard.expand')}</span>
                               <ChevronRight class="size-4" />
                             {:else}
-                              <span>Collapse</span>
+                              <span>{i18n.t('dashboard.collapse')}</span>
                               <ChevronDown class="size-4" />
                             {/if}
                           </span>

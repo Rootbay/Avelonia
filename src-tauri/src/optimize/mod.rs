@@ -8,11 +8,11 @@ pub mod tasks;
 pub mod tweaks;
 pub mod update_profiles;
 
-pub use startup::*;
 pub use network::*;
-pub use tasks::*;
-pub use system::*;
 pub use services::*;
+pub use startup::*;
+pub use system::*;
+pub use tasks::*;
 
 #[tauri::command]
 pub async fn apply_tweaks(
@@ -65,7 +65,9 @@ pub async fn apply_tweak_state(id: String, enabled: bool) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub async fn apply_tweaks_state_batch(changes: Vec<tweaks::TweakStateChange>) -> Result<(), String> {
+pub async fn apply_tweaks_state_batch(
+    changes: Vec<tweaks::TweakStateChange>,
+) -> Result<(), String> {
     tweaks::apply_tweaks_state_batch(changes)
 }
 
@@ -82,12 +84,14 @@ pub async fn is_windows_activated() -> Result<bool, String> {
         match shell_helpers::run_powershell_json(script) {
             Ok(values) => {
                 for value in values {
-                    let is_windows = value.get("Name")
+                    let is_windows = value
+                        .get("Name")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_lowercase().contains("windows"))
                         .unwrap_or(false);
                     if is_windows {
-                        let status = value.get("LicenseStatus")
+                        let status = value
+                            .get("LicenseStatus")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
                         if status == 1 {

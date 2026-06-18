@@ -27,7 +27,7 @@ impl Serialize for AppError {
         S: Serializer,
     {
         let msg = self.to_string();
-        
+
         let code = match self {
             AppError::Internal(_) => "INTERNAL",
             AppError::Io(_) => "IO_ERROR",

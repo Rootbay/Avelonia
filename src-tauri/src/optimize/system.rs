@@ -1,30 +1,59 @@
+use super::shell_helpers::{run_cmd_elevated, run_powershell_elevated};
 use crate::AppError;
 use std::env;
 use std::path::PathBuf;
 use sysinfo::System;
-use super::shell_helpers::{run_cmd_elevated, run_powershell_elevated};
 
 #[tauri::command]
 pub async fn get_startup_folders() -> Result<Vec<String>, AppError> {
     let mut out = Vec::new();
-    if let Some(appdata) = env::var_os("APPDATA") {
-        let user_startup =
-            PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Startup");
-        if user_startup.exists() && user_startup.is_dir() {
-            out.push(user_startup.display().to_string());
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = env::var_os("APPDATA") {
+            let user_startup =
+                PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Startup");
+            if user_startup.exists() && user_startup.is_dir() {
+                out.push(user_startup.display().to_string());
+            }
+        }
+        if let Some(programdata) = env::var_os("PROGRAMDATA") {
+            let all_startup = PathBuf::from(programdata.clone())
+                .join(r"Microsoft\Windows\Start Menu\Programs\StartUp");
+            if all_startup.exists() && all_startup.is_dir() {
+                out.push(all_startup.display().to_string());
+            } else {
+                let alt = PathBuf::from(programdata)
+                    .join(r"Microsoft\Windows\Start Menu\Programs\Startup");
+                if alt.exists() && alt.is_dir() {
+                    out.push(alt.display().to_string());
+                }
+            }
         }
     }
-    if let Some(programdata) = env::var_os("PROGRAMDATA") {
-        let all_startup = PathBuf::from(programdata.clone())
-            .join(r"Microsoft\Windows\Start Menu\Programs\StartUp");
-        if all_startup.exists() && all_startup.is_dir() {
-            out.push(all_startup.display().to_string());
-        } else {
-            let alt =
-                PathBuf::from(programdata).join(r"Microsoft\Windows\Start Menu\Programs\Startup");
-            if alt.exists() && alt.is_dir() {
-                out.push(alt.display().to_string());
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+            let user_agents = home.join("Library/LaunchAgents");
+            if user_agents.exists() && user_agents.is_dir() {
+                out.push(user_agents.display().to_string());
             }
+        }
+        let sys_agents = PathBuf::from("/Library/LaunchAgents");
+        if sys_agents.exists() && sys_agents.is_dir() {
+            out.push(sys_agents.display().to_string());
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+            let user_autostart = home.join(".config/autostart");
+            if user_autostart.exists() && user_autostart.is_dir() {
+                out.push(user_autostart.display().to_string());
+            }
+        }
+        let sys_autostart = PathBuf::from("/etc/xdg/autostart");
+        if sys_autostart.exists() && sys_autostart.is_dir() {
+            out.push(sys_autostart.display().to_string());
         }
     }
     Ok(out)
@@ -181,18 +210,52 @@ pub async fn remove_wmi_subscriptions_by_match(
 }
 
 #[tauri::command]
-#[cfg(target_os = "windows")]
 pub async fn restart_system() -> Result<(), AppError> {
-    let ok = run_cmd_elevated(&["/C", "shutdown", "/r", "/t", "0"]);
-    if ok {
-        Ok(())
-    } else {
-        Err(AppError::System("failed to trigger restart".into()))
+    #[cfg(target_os = "windows")]
+    {
+        let ok = run_cmd_elevated(&["/C", "shutdown", "/r", "/t", "0"]);
+        if ok {
+            Ok(())
+        } else {
+            Err(AppError::System("failed to trigger restart".into()))
+        }
     }
-}
-
-#[tauri::command]
-#[cfg(not(target_os = "windows"))]
-pub async fn restart_system() -> Result<(), AppError> {
-    Err(AppError::System("Only available on Windows".into()))
+    #[cfg(target_os = "macos")]
+    {
+        if std::process::Command::new("osascript")
+            .args(["-e", "tell app \"System Events\" to restart"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            std::process::Command::new("reboot")
+                .status()
+                .map(|_| ())
+                .map_err(|e| AppError::System(format!("failed to restart: {}", e)))
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if std::process::Command::new("systemctl")
+            .arg("reboot")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            std::process::Command::new("reboot")
+                .status()
+                .map(|_| ())
+                .map_err(|e| AppError::System(format!("failed to restart: {}", e)))
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err(AppError::System(
+            "Restart not supported on this platform".into(),
+        ))
+    }
 }

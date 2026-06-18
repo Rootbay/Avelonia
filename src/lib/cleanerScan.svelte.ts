@@ -9,7 +9,7 @@ export type CleanerScanState = {
   startedAt?: number;
   finishedAt?: number;
   message?: string;
-  
+
   tempFiles: FileEntry[];
   largeFiles: FileEntry[];
   duplicateFiles: FileEntry[];
@@ -45,7 +45,7 @@ export function beginCleanerScan() {
   cleanerScan.phase = 'running';
   cleanerScan.startedAt = Date.now();
   cleanerScan.message = '';
-  
+
   cleanerScan.tempFiles = [];
   cleanerScan.largeFiles = [];
   cleanerScan.duplicateFiles = [];
@@ -70,7 +70,7 @@ export function resetCleanerScan() {
   cleanerScan.startedAt = undefined;
   cleanerScan.finishedAt = undefined;
   cleanerScan.message = undefined;
-  
+
   cleanerScan.tempFiles = [];
   cleanerScan.largeFiles = [];
   cleanerScan.duplicateFiles = [];

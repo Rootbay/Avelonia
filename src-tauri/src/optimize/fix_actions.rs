@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use super::shell_helpers::{escape_single_quotes, run_powershell_commands};
 use std::env;
 

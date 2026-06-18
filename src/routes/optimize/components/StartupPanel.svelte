@@ -27,6 +27,7 @@
   import { pushLog } from '$lib/logStore';
   import { Trash2, RefreshCw, FolderOpen, Eye, Search as SearchIcon } from '@lucide/svelte';
   import { SvelteSet } from 'svelte/reactivity';
+  import { i18n } from '$lib/i18n.svelte';
 
   type StartupItem = { path: string; name: string };
 
@@ -163,13 +164,13 @@
       const removed: number = await invoke('remove_startup_shortcuts', {
         files: pendingStartup,
       });
-      const text = `Removed ${removed} startup shortcut${removed === 1 ? '' : 's'}.`;
+      const text = i18n.t('optimize.startup_toast_removed', { count: removed });
       dispatchMessage('message', text);
       if (removed > 0) {
         toast.success(text);
         pushLog('SUCCESS', text, 'Optimize');
       } else {
-        const info = 'No startup shortcuts removed';
+        const info = i18n.t('optimize.startup_toast_none_removed');
         toast.info(info);
         pushLog('INFO', info, 'Optimize');
       }
@@ -178,7 +179,7 @@
     } catch (e) {
       const err = `Failed to remove startup items: ${e}`;
       dispatchMessage('message', err);
-      toast.error('Failed to remove startup items');
+      toast.error(i18n.t('optimize.startup_toast_remove_failed'));
       pushLog('ERROR', `Failed to remove startup items: ${String(e)}`, 'Optimize');
     } finally {
       pendingStartup = [];
@@ -189,7 +190,7 @@
     try {
       const folders: string[] = await invoke('get_startup_folders');
       if (!folders || folders.length === 0) {
-        toast.info('No startup folders found.');
+        toast.info(i18n.t('optimize.startup_toast_folders_none'));
         return;
       }
       for (const folder of folders) {
@@ -207,7 +208,7 @@
       }
     } catch (e) {
       pushLog('ERROR', `Failed to list startup folders: ${String(e)}`, 'Optimize');
-      toast.error('Failed to list startup folders');
+      toast.error(i18n.t('optimize.startup_toast_folders_failed'));
     }
   }
 
@@ -281,17 +282,17 @@
   <Card class="gap-4 py-4">
     <CardHeader>
       <CardTitle class="flex items-center gap-2">
-        <Trash2 class="size-5" /> Startup Apps
+        <Trash2 class="size-5" /> {i18n.t('optimize.startup_title')}
       </CardTitle>
-      <CardDescription>Disable unwanted startup items (Startup folders).</CardDescription>
+      <CardDescription>{i18n.t('optimize.startup_desc')}</CardDescription>
     </CardHeader>
     <CardContent class="space-y-2">
       <div class="flex items-center gap-1 rounded-md bg-muted/20 p-1 w-fit">
         <Button
           variant="ghost"
           size="icon"
-          title="Refresh"
-          aria-label="Refresh"
+          title={i18n.t('optimize.startup_btn_refresh')}
+          aria-label={i18n.t('optimize.startup_btn_refresh')}
           onclick={reloadStartupItems}
         >
           <RefreshCw class="size-4" />
@@ -299,8 +300,8 @@
         <Button
           variant="ghost"
           size="icon"
-          title="Open Startup Folders"
-          aria-label="Open Startup Folders"
+          title={i18n.t('optimize.startup_btn_open_folders')}
+          aria-label={i18n.t('optimize.startup_btn_open_folders')}
           onclick={openStartupFolders}
         >
           <FolderOpen class="size-4" />
@@ -308,8 +309,8 @@
         <Button
           variant="ghost"
           size="icon"
-          title="Disable Selected"
-          aria-label="Disable Selected"
+          title={i18n.t('optimize.startup_btn_disable')}
+          aria-label={i18n.t('optimize.startup_btn_disable')}
           onclick={requestRemoveSelectedStartup}
           disabled={selectedStartup.size === 0}
         >
@@ -321,7 +322,7 @@
           <SearchIcon
             class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
           />
-          <Input class="pl-9" placeholder="Filter by name or path..." bind:value={startupQuery} />
+          <Input class="pl-9" placeholder={i18n.t('optimize.startup_filter_placeholder')} bind:value={startupQuery} />
         </div>
         <div class="flex gap-1">
           <Button
@@ -330,7 +331,7 @@
             onclick={toggleAllStartup}
             disabled={filteredStartupItems.length === 0}
           >
-            {allStartupSelected ? 'Deselect All' : 'Select All'}
+            {allStartupSelected ? i18n.t('optimize.startup_btn_deselect_all') : i18n.t('optimize.startup_btn_select_all')}
           </Button>
         </div>
       </div>
@@ -386,8 +387,8 @@
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Open"
-                      aria-label="Open"
+                      title={i18n.t('downloader.bulk_open')}
+                      aria-label={i18n.t('downloader.bulk_open')}
                       onclick={() => openPath(normalizeWinPath(item.path))}
                     >
                       <Eye class="size-4" />
@@ -395,8 +396,8 @@
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Show in Explorer"
-                      aria-label="Show in Explorer"
+                      title={i18n.t('downloader.bulk_show')}
+                      aria-label={i18n.t('downloader.bulk_show')}
                       onclick={() => revealItemInDir(normalizeWinPath(item.path))}
                     >
                       <FolderOpen class="size-4" />
@@ -413,7 +414,7 @@
           </ul>
         </div>
       {:else if startupLoaded}
-        <p class="text-sm text-muted-foreground">No startup items found.</p>
+        <p class="text-sm text-muted-foreground">{i18n.t('optimize.startup_no_items')}</p>
       {:else}
         <div
           role="status"
@@ -442,14 +443,13 @@
   <AlertDialog open={showStartupConfirm} onOpenChange={(value) => (showStartupConfirm = !!value)}>
     <AlertDialogContent>
       <AlertDialogHeader>
-        <AlertDialogTitle>Remove Startup Shortcuts</AlertDialogTitle>
+        <AlertDialogTitle>{i18n.t('optimize.startup_confirm_title')}</AlertDialogTitle>
         <AlertDialogDescription>
-          This disables selected startup apps by removing their shortcuts. The app will attempt
-          forced removal if needed (may prompt for admin).
+          {i18n.t('optimize.startup_confirm_desc')}
         </AlertDialogDescription>
       </AlertDialogHeader>
       <div class="space-y-2 text-sm">
-        <div>Selected: {pendingStartup.length}</div>
+        <div>{i18n.t('optimize.startup_confirm_selected', { count: pendingStartup.length })}</div>
         {#if pendingStartup.length}
           <ul class="max-h-40 overflow-auto rounded bg-muted/10 p-2 text-xs">
             {#each pendingStartup.slice(0, 10) as entry (entry)}
@@ -457,15 +457,15 @@
             {/each}
             {#if pendingStartup.length > 10}
               <li class="text-muted-foreground">
-                . and {pendingStartup.length - 10} more
+                {i18n.t('optimize.reg_diag_tasks_more', { count: pendingStartup.length - 10 })}
               </li>
             {/if}
           </ul>
         {/if}
       </div>
       <AlertDialogFooter>
-        <AlertDialogCancel onclick={() => (showStartupConfirm = false)}>Cancel</AlertDialogCancel>
-        <AlertDialogAction onclick={confirmRemoveStartup}>Continue</AlertDialogAction>
+        <AlertDialogCancel onclick={() => (showStartupConfirm = false)}>{i18n.t('optimize.startup_confirm_btn_cancel')}</AlertDialogCancel>
+        <AlertDialogAction onclick={confirmRemoveStartup}>{i18n.t('optimize.startup_confirm_btn_continue')}</AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
