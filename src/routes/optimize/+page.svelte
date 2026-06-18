@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount, tick } from 'svelte';
   import { Button } from '$lib/components/ui/button';
   import {
@@ -46,10 +46,22 @@
     Settings,
     ListChecks,
     Flag,
+    Play,
+    CircleX,
+    Power,
+    PowerOff,
   } from '@lucide/svelte';
   import { SvelteSet } from 'svelte/reactivity';
 
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+  import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuLabel,
+  } from '$lib/components/ui/dropdown-menu';
   import TweaksPanel from './components/TweaksPanel.svelte';
   import StartupPanel from './components/StartupPanel.svelte';
 
@@ -887,16 +899,18 @@
     return !!t.is_sus || (parts.folder || '').startsWith('\\Microsoft\\Windows');
   }
 
-  function requestRunSelected() {
+  function requestRunActionDirectly(action: TaskAction) {
     const names = Array.from(selectedTasks);
-    if (!taskAction || names.length === 0) {
-      message = 'Select an action and at least one task.';
+    if (names.length === 0) {
+      message = 'Select at least one task.';
       return;
     }
-    pendingAction = taskAction;
+    taskAction = action;
+    pendingAction = action;
     pendingNames = names;
     showTaskConfirm = true;
   }
+
 
   function confirmRunAction() {
     showTaskConfirm = false;
@@ -1683,51 +1697,72 @@
               </Select>
               <Button
                 size="sm"
-                variant="secondary"
+                variant="outline"
                 onclick={reloadTasks}
                 title="Refresh tasks"
                 aria-label="Refresh tasks"
                 disabled={loadingTasks || taskActionLoading}
-                ><RefreshCw class="mr-2 size-4" /> Refresh</Button
+                class="px-2.5"
               >
-              <Select type="single" bind:value={taskAction}>
-                <SelectTrigger class="w-40">
-                  <p>
-                    {taskAction === 'disable'
-                      ? 'Disable'
-                      : taskAction === 'enable'
-                        ? 'Enable'
-                        : taskAction === 'delete'
-                          ? 'Delete'
-                          : taskAction === 'run'
-                            ? 'Run now'
-                            : taskAction === 'end'
-                              ? 'End'
-                              : 'Action'}
-                  </p>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="disable">Disable</SelectItem>
-                  <SelectItem value="enable">Enable</SelectItem>
-                  <SelectItem value="delete">Delete</SelectItem>
-                  <SelectItem value="run">Run now</SelectItem>
-                  <SelectItem value="end">End</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                onclick={requestRunSelected}
-                disabled={!taskAction || selectedTasks.size === 0 || taskActionLoading}
-                title="Run action"
-                aria-label="Run action">{taskActionLoading ? 'Running...' : 'Run'}</Button
-              >
-              <Button
-                size="sm"
-                variant="ghost"
-                onclick={toggleAllTasks}
-                disabled={sortedTasks.length === 0}
-                >{allTasksSelected ? 'Deselect All' : 'Select All'}</Button
-              >
+                <RefreshCw class="size-4 {loadingTasks ? 'animate-spin' : ''}" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger>
+                  {#snippet child({ props })}
+                    <Button variant="outline" size="sm" class="flex items-center gap-2" {...props}>
+                      <ListChecks class="size-4" />
+                      <span>Actions</span>
+                      {#if selectedTasks.size > 0}
+                        <Badge variant="secondary" class="ml-1 px-1.5 py-0.5 text-[10px]">
+                          {selectedTasks.size}
+                        </Badge>
+                      {/if}
+                    </Button>
+                  {/snippet}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-48">
+                  <DropdownMenuLabel class="">Task Actions</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={selectedTasks.size === 0 || taskActionLoading}
+                    onclick={() => requestRunActionDirectly('run')}
+                  >
+                    <Play class="mr-2 size-4 text-muted-foreground" /> Run now
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={selectedTasks.size === 0 || taskActionLoading}
+                    onclick={() => requestRunActionDirectly('end')}
+                  >
+                    <CircleX class="mr-2 size-4 text-muted-foreground" /> End
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={selectedTasks.size === 0 || taskActionLoading}
+                    onclick={() => requestRunActionDirectly('enable')}
+                  >
+                    <Power class="mr-2 size-4 text-muted-foreground" /> Enable
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={selectedTasks.size === 0 || taskActionLoading}
+                    onclick={() => requestRunActionDirectly('disable')}
+                  >
+                    <PowerOff class="mr-2 size-4 text-muted-foreground" /> Disable
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={selectedTasks.size === 0 || taskActionLoading}
+                    class="text-destructive focus:text-destructive"
+                    onclick={() => requestRunActionDirectly('delete')}
+                  >
+                    <Trash2 class="mr-2 size-4 text-destructive" /> Delete
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={sortedTasks.length === 0}
+                    onclick={toggleAllTasks}
+                  >
+                    {allTasksSelected ? 'Deselect all' : 'Select all'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
           <div bind:this={tasksSentinel} class="h-0" aria-hidden="true"></div>
@@ -1868,70 +1903,81 @@
 
     <TabsContent value="network" class="space-y-4">
       <div class="grid gap-4 lg:grid-cols-2">
-        <Card class="space-y-3">
-          <CardHeader class="items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <NetworkIcon class="size-5" />
-              <CardTitle>Diagnostics</CardTitle>
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between gap-4">
+            <div class="space-y-1">
+              <CardTitle class="flex items-center gap-2">
+                <NetworkIcon class="size-5 text-primary" /> Diagnostics
+              </CardTitle>
+              <CardDescription>Snapshot of adapters, IP ranges and DNS paths.</CardDescription>
             </div>
-            <CardDescription>Snapshot of adapters, IP ranges and DNS paths.</CardDescription>
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              class="w-30"
               disabled={networkInfoLoading}
               onclick={refreshNetworkStatus}
+              class="flex items-center gap-1.5"
             >
-              Refresh
+              <RefreshCw class="size-4 {networkInfoLoading ? 'animate-spin' : ''}" />
+              <span>Refresh</span>
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent class="space-y-4">
             {#if networkInfoLoading}
-              <div class="space-y-2">
-                <Skeleton class="h-4 w-32" aria-hidden="true" />
-                <Skeleton class="h-4 w-full" aria-hidden="true" />
-                <Skeleton class="h-4 w-5/6" aria-hidden="true" />
+              <div class="grid gap-3 sm:grid-cols-2">
+                <Skeleton class="h-[68px] w-full rounded-lg" aria-hidden="true" />
+                <Skeleton class="h-[68px] w-full rounded-lg" aria-hidden="true" />
+                <Skeleton class="h-[68px] w-full rounded-lg" aria-hidden="true" />
+                <Skeleton class="h-[68px] w-full rounded-lg" aria-hidden="true" />
               </div>
             {:else if !networkSummary}
-              <p class="text-xs text-muted-foreground">Unable to read network information.</p>
+              <p class="text-xs text-muted-foreground text-center py-6">Unable to read network information.</p>
             {:else}
-              <div class="grid gap-2 sm:grid-cols-2 text-sm">
-                <div>
-                  <p class="text-[10px] uppercase text-muted-foreground">Adapter</p>
-                  <p class="text-base font-semibold">{networkSummary.primaryAdapter ?? '—'}</p>
+              <div class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Primary Adapter</p>
+                    <p class="mt-1 text-sm font-medium truncate" title={networkSummary.primaryAdapter}>{networkSummary.primaryAdapter ?? '—'}</p>
+                  </div>
+                  <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">IPv4 Address</p>
+                    <p class="mt-1 text-sm font-mono font-medium">{networkSummary.ipv4 ?? '—'}</p>
+                  </div>
                 </div>
-                <div>
-                  <p class="text-[10px] uppercase text-muted-foreground">IPv4</p>
-                  <p class="font-medium">{networkSummary.ipv4 ?? '—'}</p>
-                  <p class="text-[10px] uppercase text-muted-foreground mt-2">IPv6</p>
-                  <p class="font-medium">{networkSummary.ipv6 ?? '—'}</p>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">DNS Servers</p>
+                    {#if networkSummary.dnsServers.length}
+                      <div class="mt-1 space-y-1 font-mono text-xs">
+                        {#each networkSummary.dnsServers as dns (dns)}
+                          <div class="text-foreground">{dns}</div>
+                        {/each}
+                      </div>
+                    {:else}
+                      <p class="mt-1 text-xs text-muted-foreground">—</p>
+                    {/if}
+                  </div>
+                  <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Gateway / Router</p>
+                    {#if networkSummary.gateways.length}
+                      <div class="mt-1 space-y-1 font-mono text-xs">
+                        {#each networkSummary.gateways as gateway (gateway)}
+                          <div class="text-foreground">{gateway}</div>
+                        {/each}
+                      </div>
+                    {:else}
+                      <p class="mt-1 text-xs text-muted-foreground">—</p>
+                    {/if}
+                  </div>
                 </div>
-              </div>
-              <div class="mt-3 space-y-2 text-xs text-muted-foreground">
-                <div>
-                  <span class="font-semibold text-[11px] text-foreground">DNS</span>
-                  {#if networkSummary.dnsServers.length}
-                    <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
-                      {#each networkSummary.dnsServers as dns (dns)}
-                        <div>{dns}</div>
-                      {/each}
-                    </div>
-                  {:else}
-                    <span class="ml-1">—</span>
-                  {/if}
-                </div>
-                <div>
-                  <span class="font-semibold text-[11px] text-foreground">Gateway</span>
-                  {#if networkSummary.gateways.length}
-                    <div class="mt-1 space-y-0.5 font-mono text-[12px] text-foreground">
-                      {#each networkSummary.gateways as gateway (gateway)}
-                        <div>{gateway}</div>
-                      {/each}
-                    </div>
-                  {:else}
-                    <span class="ml-1">—</span>
-                  {/if}
-                </div>
+
+                {#if networkSummary.ipv6}
+                  <div class="rounded-lg border bg-muted/10 p-3 shadow-xs">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">IPv6 Address</p>
+                    <p class="mt-1 text-xs font-mono break-all truncate" title={networkSummary.ipv6}>{networkSummary.ipv6}</p>
+                  </div>
+                {/if}
               </div>
             {/if}
           </CardContent>

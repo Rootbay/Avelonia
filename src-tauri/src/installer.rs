@@ -278,10 +278,45 @@ pub async fn verify_install(
     timeout_ms: Option<u64>,
 ) -> Result<VerifyResult, String> {
     use tokio::time::{Duration, sleep};
+    let hint = display_name_hint.unwrap_or_default().to_lowercase();
+
+    if !hint.is_empty() {
+        // 1. Registry fast path
+        let current_entries = read_uninstall_entries();
+        if let Some(e) = current_entries
+            .iter()
+            .find(|e| is_match(&e.display_name, &hint))
+        {
+            return Ok(VerifyResult {
+                verified: true,
+                matched: Some(e.clone()),
+            });
+        }
+
+        // 2. Common folders fast path
+        if check_common_install_paths(&hint) {
+            let mut e = UninstallEntry::default();
+            e.display_name = hint.clone();
+            return Ok(VerifyResult {
+                verified: true,
+                matched: Some(e),
+            });
+        }
+
+        // 3. PATH env fast path
+        if check_path_env(&hint) {
+            let mut e = UninstallEntry::default();
+            e.display_name = hint.clone();
+            return Ok(VerifyResult {
+                verified: true,
+                matched: Some(e),
+            });
+        }
+    }
+
     let before = read_uninstall_entries();
     let before_keys: std::collections::HashSet<String> =
         before.iter().map(|e| e.key_path.clone()).collect();
-    let hint = display_name_hint.unwrap_or_default().to_lowercase();
     let timeout = timeout_ms.unwrap_or(30_000);
     let mut elapsed = 0u64;
     let step = 1_000u64;
@@ -299,6 +334,18 @@ pub async fn verify_install(
                 });
             }
         }
+
+        if !hint.is_empty() {
+            if check_common_install_paths(&hint) || check_path_env(&hint) {
+                let mut e = UninstallEntry::default();
+                e.display_name = hint.clone();
+                return Ok(VerifyResult {
+                    verified: true,
+                    matched: Some(e),
+                });
+            }
+        }
+
         sleep(Duration::from_millis(step)).await;
         elapsed += step;
     }
@@ -336,6 +383,108 @@ fn is_match(display_name: &str, hint: &str) -> bool {
     dn.contains(&h)
 }
 
+#[cfg(target_os = "windows")]
+fn directory_contains_exe(path: &std::path::Path) -> bool {
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if p.extension().and_then(|s| s.to_str()) == Some("exe") {
+                    return true;
+                }
+            } else if p.is_dir() {
+                if let Ok(sub_entries) = std::fs::read_dir(p) {
+                    for sub_entry in sub_entries.flatten() {
+                        let sub_p = sub_entry.path();
+                        if sub_p.is_file() && sub_p.extension().and_then(|s| s.to_str()) == Some("exe") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn check_common_install_paths(hint: &str) -> bool {
+    let clean_hint = hint.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").trim().to_lowercase();
+    if clean_hint.is_empty() {
+        return false;
+    }
+
+    let mut dirs_to_check = Vec::new();
+
+    if let Ok(p) = std::env::var("PROGRAMFILES") {
+        dirs_to_check.push(std::path::PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("ProgramFiles(x86)") {
+        dirs_to_check.push(std::path::PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("LOCALAPPDATA") {
+        let pb = std::path::PathBuf::from(p);
+        dirs_to_check.push(pb.join("Programs"));
+        dirs_to_check.push(pb.clone());
+    }
+    if let Ok(p) = std::env::var("APPDATA") {
+        dirs_to_check.push(std::path::PathBuf::from(p));
+    }
+
+    for base_dir in dirs_to_check {
+        if !base_dir.exists() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(base_dir) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let dir_name = entry.file_name().to_string_lossy().to_lowercase();
+                        if dir_name == clean_hint || dir_name.contains(&clean_hint) || clean_hint.contains(&dir_name) {
+                            if directory_contains_exe(&entry.path()) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn check_path_env(hint: &str) -> bool {
+    let clean_hint = hint.replace(|c: char| !c.is_alphanumeric(), "").to_lowercase();
+    if clean_hint.is_empty() {
+        return false;
+    }
+    if let Ok(path_val) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_val) {
+            if !dir.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let name = p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+                        if name == clean_hint {
+                            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                let ext_lower = ext.to_lowercase();
+                                if ext_lower == "exe" || ext_lower == "cmd" || ext_lower == "bat" {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 #[tauri::command]
 #[cfg(target_os = "windows")]
 pub fn is_installed(display_name_hint: String) -> Result<bool, String> {
@@ -343,10 +492,24 @@ pub fn is_installed(display_name_hint: String) -> Result<bool, String> {
     if hint.trim().is_empty() {
         return Ok(false);
     }
+    
+    // 1. Registry check
     let entries = read_uninstall_entries();
-    Ok(entries
-        .into_iter()
-        .any(|e| is_match(&e.display_name, &hint)))
+    if entries.into_iter().any(|e| is_match(&e.display_name, &hint)) {
+        return Ok(true);
+    }
+
+    // 2. Common folders check
+    if check_common_install_paths(&hint) {
+        return Ok(true);
+    }
+
+    // 3. PATH env check
+    if check_path_env(&hint) {
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 #[tauri::command]

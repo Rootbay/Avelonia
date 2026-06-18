@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { downloads } from '$lib/downloads';
@@ -274,6 +274,20 @@
     );
   }
 
+  function isTweakLog(log: LogEntry): boolean {
+    if ((log.category || '') !== 'Optimize') return false;
+    const m = log.message || '';
+    return (
+      m.includes('transitioned setting') ||
+      m.includes('transition setting') ||
+      m.includes('tweaks batch') ||
+      m.includes('settings batch') ||
+      m.includes('update profile') ||
+      m.includes('Windows Explorer') ||
+      m.includes('fix action')
+    );
+  }
+
   function timeToSec(ts: string): number {
     const p = (ts || '').split(':').map((x) => parseInt(x, 10));
     if (p.length !== 3 || p.some((n) => Number.isNaN(n))) return 0;
@@ -371,11 +385,14 @@
   });
 
   const vtHeaderSet = $derived(new SvelteSet(vtGroups.map((g) => g.header)));
-  let vtCollapsed = $state(new Set<number>());
-  let vtKnownHeaders = $state(new Set<number>());
+  let vtCollapsed = $state(new Set<string>());
+  let vtKnownHeaders = $state(new Set<string>());
 
   $effect(() => {
-    const starts = new SvelteSet(vtGroups.map((g) => g.header));
+    const starts = new SvelteSet(vtGroups.map((g) => {
+      const log = windowedLogs[g.header];
+      return log ? log.timestamp + '|' + log.message : '';
+    }).filter(Boolean));
     let changedCollapsed = false;
     let changedKnown = false;
     for (const s of starts) {
@@ -404,10 +421,102 @@
     if (changedKnown) vtKnownHeaders = new SvelteSet(vtKnownHeaders);
   });
 
-  function toggleVtGroup(headerIndex: number) {
-    if (vtCollapsed.has(headerIndex)) vtCollapsed.delete(headerIndex);
-    else vtCollapsed.add(headerIndex);
+  function toggleVtGroup(key: string) {
+    if (vtCollapsed.has(key)) vtCollapsed.delete(key);
+    else vtCollapsed.add(key);
     vtCollapsed = new SvelteSet(vtCollapsed);
+  }
+
+  type TweakGroup = { header: number; indices: number[] };
+  const tweakGroups = $derived.by(() => {
+    if (!logsReady) return [];
+    const list = windowedLogs as LogEntry[];
+    const used = new SvelteSet<number>();
+    const out: TweakGroup[] = [];
+    const THRESH = 15; // 15 seconds threshold for tweak adjustments
+
+    let i = 0;
+    while (i < list.length) {
+      if (used.has(i) || !isTweakLog(list[i])) {
+        i++;
+        continue;
+      }
+
+      const head = i;
+      const headSec = timeToSec(list[i].timestamp || '');
+      const idx: number[] = [i];
+      let j = i + 1;
+      while (
+        j < list.length &&
+        !used.has(j) &&
+        isTweakLog(list[j])
+      ) {
+        const sec = timeToSec(list[j].timestamp || '');
+        if (headSec > 0 && sec > 0 && Math.abs(headSec - sec) <= THRESH) {
+          idx.push(j);
+          j++;
+        } else break;
+      }
+
+      if (idx.length >= 2) {
+        out.push({ header: head, indices: idx });
+        for (const k of idx) used.add(k);
+      }
+      i = j;
+    }
+    return out;
+  });
+
+  const tweakGroupIndexMap = $derived.by(() => {
+    if (!logsReady) return new SvelteMap<number, TweakGroup>();
+    const m = new SvelteMap<number, TweakGroup>();
+    for (const g of tweakGroups) {
+      for (const k of g.indices) m.set(k, g);
+    }
+    return m;
+  });
+
+  const tweakHeaderSet = $derived(new SvelteSet(tweakGroups.map((g) => g.header)));
+  let tweakCollapsed = $state(new Set<string>());
+  let tweakKnownHeaders = $state(new Set<string>());
+
+  $effect(() => {
+    const starts = new SvelteSet(tweakGroups.map((g) => {
+      const log = windowedLogs[g.header];
+      return log ? log.timestamp + '|' + log.message : '';
+    }).filter(Boolean));
+    let changedCollapsed = false;
+    let changedKnown = false;
+    for (const s of starts) {
+      if (!tweakKnownHeaders.has(s)) {
+        tweakKnownHeaders.add(s);
+        changedKnown = true;
+        if (!tweakCollapsed.has(s)) {
+          tweakCollapsed.add(s);
+          changedCollapsed = true;
+        }
+      }
+    }
+    for (const s of Array.from(tweakCollapsed)) {
+      if (!starts.has(s)) {
+        tweakCollapsed.delete(s);
+        changedCollapsed = true;
+      }
+    }
+    for (const s of Array.from(tweakKnownHeaders)) {
+      if (!starts.has(s)) {
+        tweakKnownHeaders.delete(s);
+        changedKnown = true;
+      }
+    }
+    if (changedCollapsed) tweakCollapsed = new SvelteSet(tweakCollapsed);
+    if (changedKnown) tweakKnownHeaders = new SvelteSet(tweakKnownHeaders);
+  });
+
+  function toggleTweakGroup(key: string) {
+    if (tweakCollapsed.has(key)) tweakCollapsed.delete(key);
+    else tweakCollapsed.add(key);
+    tweakCollapsed = new SvelteSet(tweakCollapsed);
   }
 
   function markLogSkeletonRange(startIndex: number, endIndex: number) {
@@ -679,36 +788,44 @@
                     </TableRow>
                   {:else if vtHeaderSet.has(i)}
                     {@const g = vtGroupIndexMap.get(i) as VtGroup}
+                    {@const stableKey = log.timestamp + '|' + log.message}
                     <TableRow
-                      class="border-0! bg-muted/20 hover:bg-muted/30 cursor-pointer"
-                      onclick={() => toggleVtGroup(i)}
+                      class="border-0! bg-blue-500/5 hover:bg-blue-500/10 cursor-pointer transition-colors"
+                      onclick={() => toggleVtGroup(stableKey)}
                       role="button"
-                      aria-expanded={!vtCollapsed.has(i)}
+                      aria-expanded={!vtCollapsed.has(stableKey)}
                     >
-                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4">
+                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-blue-500">
                         {log.timestamp}
                       </TableCell>
                       <TableCell class="pr-4" colspan={2}>
                         <div class="flex items-center gap-2">
-                          <Badge variant="secondary" class="text-[11px]">VirusTotal activity</Badge>
-                          <span class="text-xs text-muted-foreground">{g.indices.length} items</span
-                          >
-                          <span class="ml-auto inline-flex items-center">
-                            {#if vtCollapsed.has(i)}
-                              <ChevronRight class="size-4 text-muted-foreground" />
+                          <Badge variant="secondary" class="text-[11px] bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
+                            VirusTotal scan activity
+                          </Badge>
+                          <span class="text-xs font-medium text-muted-foreground">({g.indices.length} items)</span>
+                          <span class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1">
+                            {#if vtCollapsed.has(stableKey)}
+                              <span>Expand</span>
+                              <ChevronRight class="size-4" />
                             {:else}
-                              <ChevronDown class="size-4 text-muted-foreground" />
+                              <span>Collapse</span>
+                              <ChevronDown class="size-4" />
                             {/if}
                           </span>
                         </div>
                       </TableCell>
                     </TableRow>
-                    {#if !vtCollapsed.has(i)}
-                      {#each g.indices as gi (gi)}
-                        <TableRow class="border-0! hover:bg-muted/30">
-                          <TableCell class="font-mono text-[11px] text-muted-foreground pr-4"
-                            >{windowedLogs[gi].timestamp}</TableCell
-                          >
+                    {#if !vtCollapsed.has(stableKey)}
+                      {#each g.indices as gi, idx (gi)}
+                        {@const isLast = idx === g.indices.length - 1}
+                        <TableRow class="border-0! bg-muted/5 hover:bg-muted/10 transition-colors">
+                          <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-blue-500/30">
+                            <span class="inline-flex items-center gap-1.5">
+                              <span class="text-muted-foreground/30 font-semibold">{isLast ? '└' : '├'}</span>
+                              {windowedLogs[gi].timestamp}
+                            </span>
+                          </TableCell>
                           <TableCell class="pr-4">
                             <Badge
                               variant="outline"
@@ -716,13 +833,68 @@
                               >{windowedLogs[gi].level}</Badge
                             >
                           </TableCell>
-                          <TableCell class="text-sm leading-snug">
+                          <TableCell class="text-sm leading-snug text-muted-foreground/90">
                             {windowedLogs[gi].message}
                           </TableCell>
                         </TableRow>
                       {/each}
                     {/if}
                   {:else if vtGroupIndexMap.has(i)}
+                    <!-- Inside a group (collapsed or expanded): skip individual row; items render under header -->
+                  {:else if tweakHeaderSet.has(i)}
+                    {@const g = tweakGroupIndexMap.get(i) as TweakGroup}
+                    {@const stableKey = log.timestamp + '|' + log.message}
+                    <TableRow
+                      class="border-0! bg-emerald-500/5 hover:bg-emerald-500/10 cursor-pointer transition-colors"
+                      onclick={() => toggleTweakGroup(stableKey)}
+                      role="button"
+                      aria-expanded={!tweakCollapsed.has(stableKey)}
+                    >
+                      <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 border-l-2 border-emerald-500">
+                        {log.timestamp}
+                      </TableCell>
+                      <TableCell class="pr-4" colspan={2}>
+                        <div class="flex items-center gap-2">
+                          <Badge variant="secondary" class="text-[11px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">
+                            Tweak & setting adjustments
+                          </Badge>
+                          <span class="text-xs font-medium text-muted-foreground">({g.indices.length} items)</span>
+                          <span class="ml-auto inline-flex items-center text-xs text-muted-foreground/60 gap-1">
+                            {#if tweakCollapsed.has(stableKey)}
+                              <span>Expand</span>
+                              <ChevronRight class="size-4" />
+                            {:else}
+                              <span>Collapse</span>
+                              <ChevronDown class="size-4" />
+                            {/if}
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {#if !tweakCollapsed.has(stableKey)}
+                      {#each g.indices as gi, idx (gi)}
+                        {@const isLast = idx === g.indices.length - 1}
+                        <TableRow class="border-0! bg-muted/5 hover:bg-muted/10 transition-colors">
+                          <TableCell class="font-mono text-[11px] text-muted-foreground pr-4 pl-6 border-l-2 border-emerald-500/30">
+                            <span class="inline-flex items-center gap-1.5">
+                              <span class="text-muted-foreground/30 font-semibold">{isLast ? '└' : '├'}</span>
+                              {windowedLogs[gi].timestamp}
+                            </span>
+                          </TableCell>
+                          <TableCell class="pr-4">
+                            <Badge
+                              variant="outline"
+                              class={'text-[11px] ' + levelBadgeClass(windowedLogs[gi].level)}
+                              >{windowedLogs[gi].level}</Badge
+                            >
+                          </TableCell>
+                          <TableCell class="text-sm leading-snug text-muted-foreground/90">
+                            {windowedLogs[gi].message}
+                          </TableCell>
+                        </TableRow>
+                      {/each}
+                    {/if}
+                  {:else if tweakGroupIndexMap.has(i)}
                     <!-- Inside a group (collapsed or expanded): skip individual row; items render under header -->
                   {:else}
                     <TableRow class="border-0! hover:bg-muted/30">

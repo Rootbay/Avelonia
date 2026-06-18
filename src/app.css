@@ -143,6 +143,10 @@
   }
 }
 
+html {
+  font-size: 14.5px;
+}
+
 html,
 body {
   overflow-x: hidden;

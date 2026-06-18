@@ -222,24 +222,29 @@ export const customizeTweaks: TweakItem[] = [
     description: 'Reveal file-type extensions for all files in Explorer.',
   },
   {
-    id: 'taskbar_search_button',
-    label: 'Search Button in Taskbar',
-    description: 'Keep the search bar or icon visible on the taskbar.',
+    id: 'disable_search',
+    label: 'Disable Search Box/Icon',
+    description: 'Remove the search box or search icon from the taskbar.',
   },
   {
-    id: 'taskbar_task_view',
-    label: 'Task View Button in Taskbar',
-    description: 'Surface the Task View button to switch desktops quickly.',
+    id: 'disable_task_view',
+    label: 'Disable Task View Button',
+    description: 'Remove the Task View icon from the taskbar.',
+  },
+  {
+    id: 'disable_widgets',
+    label: 'Disable Widgets Button',
+    description: 'Remove the Widgets icon from the taskbar.',
+  },
+  {
+    id: 'disable_chat',
+    label: 'Disable Chat (Teams) Button',
+    description: 'Remove the Chat/Teams icon from the taskbar.',
   },
   {
     id: 'center_taskbar_items',
     label: 'Center Taskbar Items',
     description: 'Center icons on the taskbar like Windows 11 defaults.',
-  },
-  {
-    id: 'widgets_button',
-    label: 'Widgets Button in Taskbar',
-    description: 'Show the Widgets shortcut for quick glanceable info.',
   },
   {
     id: 'detailed_bso_d',
@@ -358,5 +363,10 @@ export const fixActions: FixAction[] = [
     id: 'remove_adobe_cc',
     label: 'Remove Adobe Creative Cloud',
     description: 'Uninstall leftover Creative Cloud helpers and telemetry services.',
+  },
+  {
+    id: 'remove_activation_watermark',
+    label: 'Remove Activate Windows Watermark',
+    description: 'Remove the licensing/activation watermark from the desktop corner.',
   },
 ];

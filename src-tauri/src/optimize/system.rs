@@ -52,7 +52,7 @@ pub async fn block_process_ifeo(images: Vec<String>, enable: bool) -> Result<usi
             name
         ));
         if enable {
-            script.push_str("New-Item -Path $k -Force | Out-Null\n");
+            script.push_str("if (-not (Test-Path $k)) { New-Item -Path $k | Out-Null }\n");
             script.push_str(
                 "Set-ItemProperty -Path $k -Name Debugger -Value 'cmd.exe /c exit 0' -Force\n",
             );

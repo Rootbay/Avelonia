@@ -19,7 +19,7 @@ fn run_autologin_impl() -> Result<String, String> {
         )
     };
     let mut commands = Vec::new();
-    commands.push(r#"New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Force | Out-Null"#.to_string());
+    commands.push(r#"if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon')) { New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' | Out-Null }"#.to_string());
     commands.push(r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'AutoAdminLogon' -Value '1' -Type String -Force"#.to_string());
     commands.push(format!(
         r"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'DefaultUserName' -Value '{}' -Type String -Force",
@@ -86,6 +86,18 @@ fn run_remove_adobe_cc_impl() -> Result<String, String> {
 }
 
 #[cfg(target_os = "windows")]
+fn run_remove_activation_watermark_impl() -> Result<String, String> {
+    let commands = vec![
+        r#"if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation')) { New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' | Out-Null }"#.to_string(),
+        r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' -Name 'Manual' -Value 1 -Type DWord -Force"#.to_string(),
+        r#"Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform\Activation' -Name 'NotificationDisabled' -Value 1 -Type DWord -Force"#.to_string(),
+        r#"Stop-Process -Name explorer -Force"#.to_string(),
+    ];
+    run_powershell_commands(&commands, "remove_watermark")?;
+    Ok("Windows activation watermark removal script executed".into())
+}
+
+#[cfg(target_os = "windows")]
 fn run_fix_action_impl(action_id: &str) -> Result<String, String> {
     match action_id {
         "autologin" => run_autologin_impl(),
@@ -94,6 +106,7 @@ fn run_fix_action_impl(action_id: &str) -> Result<String, String> {
         "system_corruption_scan" => run_system_corruption_scan_impl(),
         "winget_reinstall" => run_winget_reinstall_impl(),
         "remove_adobe_cc" => run_remove_adobe_cc_impl(),
+        "remove_activation_watermark" => run_remove_activation_watermark_impl(),
         other => Err(format!("Unknown fix action '{}'", other)),
     }
 }

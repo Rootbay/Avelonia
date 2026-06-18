@@ -29,6 +29,7 @@
   import DownloaderOptionsSheet from '$lib/components/downloader/DownloaderOptionsSheet.svelte';
   import DownloadsTable from '$lib/components/downloader/DownloadsTable.svelte';
   import type { Download } from '$lib/downloadManager';
+  import { toast } from '$lib/components/ui/sonner';
 
   let searchTerm = $state('');
   let debouncedSearchTerm = $state('');
@@ -189,7 +190,7 @@
         active++;
         if (d.status !== 'verifying') cancelable++;
       }
-      if (d.status === 'completed') completed++;
+      if (d.status === 'completed' || d.status === 'installed') completed++;
       if (d.status === 'failed') failed++;
     }
     return { total: list.length, active, completed, failed, startable, cancelable };
@@ -219,9 +220,9 @@
       cancelable = 0,
       completed = 0;
     for (const d of selected) {
-      if ((d.status === 'available' || d.status === 'completed') && d.downloadLink) startable++;
+      if ((d.status === 'available' || d.status === 'completed' || d.status === 'installed') && d.downloadLink) startable++;
       if (['downloading', 'pending', 'queued'].includes(d.status)) cancelable++;
-      if (d.status === 'completed') completed++;
+      if (d.status === 'completed' || d.status === 'installed') completed++;
     }
     return {
       count: selectedIds.size,
@@ -265,7 +266,7 @@
       }
       case 'startSelected':
         selected
-          .filter((d) => (d.status === 'available' || d.status === 'completed') && d.downloadLink)
+          .filter((d) => (d.status === 'available' || d.status === 'completed' || d.status === 'installed') && d.downloadLink)
           .forEach((d) => startDownload(d.id));
         break;
       case 'cancelSelected':
@@ -281,7 +282,7 @@
       }
       case 'openSelectedCompleted':
         selected
-          .filter((d) => d.status === 'completed')
+          .filter((d) => d.status === 'completed' || d.status === 'installed')
           .forEach(async (d) => {
             const p = await getDownloadPath(d);
             if (p) openPath(p);
@@ -289,12 +290,48 @@
         break;
       case 'showSelectedCompleted':
         selected
-          .filter((d) => d.status === 'completed')
+          .filter((d) => d.status === 'completed' || d.status === 'installed')
           .forEach(async (d) => {
             const p = await getDownloadPath(d);
             if (p) revealItemInDir(p);
           });
         break;
+      case 'retryFailedFiltered':
+        filteredDownloads
+          .filter((d) => d.status === 'failed')
+          .forEach((d) => startDownload(d.id));
+        break;
+      case 'retryAllFailed':
+        all
+          .filter((d) => d.status === 'failed')
+          .forEach((d) => startDownload(d.id));
+        break;
+      case 'copySelectedLinks': {
+        const links = selected.map((d) => d.downloadLink).filter(Boolean).join('\n');
+        if (links) {
+          navigator.clipboard.writeText(links)
+            .then(() => toast.success('Copied download links to clipboard'))
+            .catch(() => toast.error('Failed to copy to clipboard'));
+        }
+        break;
+      }
+      case 'exportFilteredCSV': {
+        const headers = 'Name,Size,Type,Category,ETA,Status,Link\n';
+        const rows = filteredDownloads.map(d => 
+          `"${d.name}","${d.size}","${d.fileType}","${d.category}","${d.eta}","${d.status}","${d.downloadLink}"`
+        ).join('\n');
+        const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'avelonia-downloads.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success('Exported filtered downloads to CSV');
+        break;
+      }
     }
   }
 </script>

@@ -244,7 +244,7 @@ pub(crate) fn run_schtasks(args: &[&str]) -> bool {
         format!("@({})", items.join(", "))
     };
     let ps = format!(
-        "Start-Process -FilePath schtasks -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        "try {{ $p = Start-Process -FilePath schtasks -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1 }}",
         arglist
     );
     std::process::Command::new("powershell")
@@ -277,7 +277,7 @@ pub(crate) fn run_cmd_elevated(args: &[&str]) -> bool {
         format!("@({})", items.join(", "))
     };
     let ps = format!(
-        "Start-Process -FilePath cmd.exe -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        "try {{ $p = Start-Process -FilePath cmd.exe -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1 }}",
         arglist
     );
     std::process::Command::new("powershell")
@@ -306,7 +306,7 @@ pub(crate) fn run_reg_elevated(args: &[&str]) -> bool {
         format!("@({})", items.join(", "))
     };
     let ps = format!(
-        "Start-Process -FilePath reg -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        "try {{ $p = Start-Process -FilePath reg -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1 }}",
         arglist
     );
     std::process::Command::new("powershell")
@@ -365,7 +365,7 @@ pub fn run_powershell_elevated(args: &[&str]) -> bool {
         format!("@({})", items.join(", "))
     };
     let ps = format!(
-        "Start-Process -FilePath powershell -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        "try {{ $p = Start-Process -FilePath powershell -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1 }}",
         arglist
     );
     std::process::Command::new("powershell")
@@ -393,7 +393,7 @@ pub(crate) fn run_elevated(file: &str, args: &[&str]) -> bool {
         format!("@({})", items.join(", "))
     };
     let ps = format!(
-        "Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -Wait; exit $LASTEXITCODE",
+        "try {{ $p = Start-Process -FilePath '{}' -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1 }}",
         file.replace('\'', "''"),
         arglist
     );

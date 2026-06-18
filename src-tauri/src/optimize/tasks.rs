@@ -46,14 +46,15 @@ fn get_danger_keywords() -> Vec<String> {
     ]
 }
 
-pub fn check_if_task_is_sus(_name: &str, task_to_run: &str, author: &str) -> (bool, i32) {
+pub fn check_if_task_is_sus(name: &str, task_to_run: &str, author: &str) -> (bool, i32) {
     let cmd = task_to_run.to_lowercase().replace('"', "").trim().to_string();
     let auth = author.to_lowercase().trim().to_string();
+    let name_lower = name.to_lowercase().trim().to_string();
 
     let mut score = 0;
 
     let trusted_authors = ["microsoft", "google", "mozilla", "adobe", "nvidia", "intel", "amd"];
-    if trusted_authors.iter().any(|&a| auth.contains(a)) {
+    if trusted_authors.iter().any(|&a| auth.contains(a)) || name_lower.starts_with(r"\microsoft\") {
         score -= 1000;
     }
 
@@ -296,7 +297,7 @@ fn parse_tasks_csv(stdout_bytes: Vec<u8>) -> Vec<ScheduledTask> {
     for result in rdr.records() {
         if let Ok(rec) = result {
             let name = get_field(&rec, &header_map, &["taskname", "task name"]);
-            if name.trim().is_empty() {
+            if name.trim().is_empty() || name.trim().eq_ignore_ascii_case("taskname") {
                 continue;
             }
             let next_run_time = get_field(&rec, &header_map, &["nextruntime", "next run time"]);
@@ -353,6 +354,17 @@ mod tests {
     #[test]
     fn test_check_if_task_is_sus_trusted() {
         let (is_sus, score) = check_if_task_is_sus("OneDrive", "C:\\Windows\\System32\\OneDrive.exe", "Microsoft Corporation");
+        assert!(!is_sus);
+        assert!(score < 0);
+    }
+
+    #[test]
+    fn test_check_if_task_is_sus_microsoft_folder() {
+        let (is_sus, score) = check_if_task_is_sus(
+            r"\Microsoft\Windows\AppxDeploymentClient\Pre-staged app cleanup",
+            r"%windir%\system32\rundll32.exe %windir%\system32\AppxDeploymentClient.dll,AppxPreStageCleanupRunTask",
+            "N/A",
+        );
         assert!(!is_sus);
         assert!(score < 0);
     }

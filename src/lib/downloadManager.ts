@@ -1,4 +1,4 @@
-﻿import { get } from 'svelte/store';
+import { get } from 'svelte/store';
 import { downloads, removeDownloadsByIds } from './downloads';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -119,6 +119,15 @@ async function processInstallQueue() {
         autoInstallTried.add(id);
         continue;
       }
+
+      // Transition to verifying / Installing state in the UI
+      updateDownloadById(id, (draft) => {
+        draft.status = 'verifying';
+        draft.eta = 'Installing...';
+      });
+
+      let installSuccess = false;
+
       if (downloader.installMode === 'normal') {
         await appLog(
           'INFO',
@@ -127,6 +136,7 @@ async function processInstallQueue() {
         try {
           await invoke('launch_installer', { id, path, elevate: !!downloader.elevate });
           await appLog('SUCCESS', `Installer launched: ${snap.name}`);
+          installSuccess = true;
         } catch (installerLaunchError: unknown) {
           await appLog(
             'ERROR',
@@ -149,6 +159,7 @@ async function processInstallQueue() {
           });
           await appLog('SUCCESS', `Silent install completed: ${snap.name}`);
           autoInstallTried.add(id);
+          installSuccess = true;
         } catch (silentInstallError: unknown) {
           await appLog(
             'WARN',
@@ -159,6 +170,7 @@ async function processInstallQueue() {
             try {
               await appLog('INFO', `Opening installer normally for ${snap.name}`);
               await openPath(path);
+              installSuccess = true;
             } catch (fallbackError: unknown) {
               await appLog(
                 'ERROR',
@@ -169,19 +181,22 @@ async function processInstallQueue() {
         }
       }
 
+      let verified = false;
       try {
-        if (downloader.verifyInstall) {
+        if (installSuccess && downloader.verifyInstall) {
           const result = (await invoke('verify_install', {
             displayNameHint: snap.name,
             timeoutMs: 30000,
           })) as VerifyInstallResult;
           if (result?.verified) {
+            verified = true;
             const dn = result.matched?.display_name ?? snap.name;
             const dv = result.matched?.display_version ?? '';
             await appLog('SUCCESS', `Installed (verified): ${dn}${dv ? ' ' + dv : ''}`);
             updateDownloadById(id, (draft) => {
               draft.status = 'installed';
               draft.targetPath = undefined;
+              draft.eta = 'Done';
             });
           } else {
             await appLog(
@@ -192,6 +207,13 @@ async function processInstallQueue() {
         }
       } catch (error: unknown) {
         await appLog('ERROR', `Verification process failed for ${snap.name}: ${String(error)}`);
+      }
+
+      if (!verified) {
+        updateDownloadById(id, (draft) => {
+          draft.status = installSuccess ? 'completed' : 'failed';
+          draft.eta = installSuccess ? 'Done' : 'Failed';
+        });
       }
     }
   } finally {
